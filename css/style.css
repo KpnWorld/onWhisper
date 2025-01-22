@@ -131,20 +131,22 @@ header nav ul li a:hover {
 }
 
 .cta-button {
-    background: #1abc9c;
-    color: #fff;
+    background: #fff;
+    color: #1abc9c;
     padding: 0.8rem 2rem;
     font-size: 1rem;
     border-radius: 25px;
+    border: none; /* Ensure it's styled as a button */
     text-decoration: none;
     font-weight: bold;
     display: inline-block;
     text-align: center;
     margin-top: auto; /* Ensures the button stays at the bottom of the card */
     transition: background 0.3s ease, color 0.3s ease;
+    cursor: pointer; /* Ensures the pointer cursor appears */
 }
 
 .cta-button:hover {
-    background: #16a085;
+    background: #1abc9c;
     color: #fff;
 }
