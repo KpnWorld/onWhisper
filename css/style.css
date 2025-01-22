@@ -157,3 +157,6 @@ ul li {
         margin-bottom: 20px;
     }
 }
+link[rel="icon"] {
+    border-radius: 50%;
+}
