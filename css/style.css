@@ -91,42 +91,6 @@ header nav ul li a:hover {
     color: #2c3e50;
 }
 
-.features ul {
-    list-style: none;
-    padding: 0;
-}
-
-.features ul li {
-    font-size: 1.2rem;
-    margin: 0.5rem 0;
-}
-
-/* Footer */
-footer {
-    background: #2c3e50;
-    color: #fff;
-    text-align: center;
-    padding: 1rem 0;
-    margin-top: 2rem;
-}
-
-footer p {
-    font-size: 0.9rem;
-    margin: 0;
-}
-/* Features Section */
-.features {
-    padding: 2rem 1rem;
-    text-align: center;
-    background-color: #ecf0f1;
-}
-
-.features h2 {
-    font-size: 2rem;
-    margin-bottom: 1.5rem;
-    color: #2c3e50;
-}
-
 .feature-grid {
     display: flex;
     flex-wrap: wrap;
@@ -142,6 +106,10 @@ footer p {
     width: 300px;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     transition: transform 0.3s ease, box-shadow 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 350px; /* Adjusted height to make room for the button */
 }
 
 .feature-card h3 {
@@ -154,9 +122,29 @@ footer p {
     font-size: 1rem;
     color: #555;
     line-height: 1.4;
+    margin-bottom: 1.5rem; /* Added margin for spacing between text and button */
 }
 
 .feature-card:hover {
     transform: translateY(-5px);
     box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+}
+
+.cta-button {
+    background: #1abc9c;
+    color: #fff;
+    padding: 0.8rem 2rem;
+    font-size: 1rem;
+    border-radius: 25px;
+    text-decoration: none;
+    font-weight: bold;
+    display: inline-block;
+    text-align: center;
+    margin-top: auto; /* Ensures the button stays at the bottom of the card */
+    transition: background 0.3s ease, color 0.3s ease;
+}
+
+.cta-button:hover {
+    background: #16a085;
+    color: #fff;
 }
