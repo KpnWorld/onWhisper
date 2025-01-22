@@ -107,9 +107,9 @@ header nav ul li a:hover {
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     transition: transform 0.3s ease, box-shadow 0.3s ease;
     display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    height: 350px; /* Adjusted height to make room for the button */
+    flex-direction: column; /* Ensures vertical layout */
+    justify-content: space-between; /* Ensures content is spaced out properly */
+    height: 100%; /* Prevents overflow by keeping the card's height consistent */
 }
 
 .feature-card h3 {
@@ -141,7 +141,7 @@ header nav ul li a:hover {
     font-weight: bold;
     display: inline-block;
     text-align: center;
-    margin-top: auto; /* Ensures the button stays at the bottom of the card */
+    margin-top: 1rem; /* Add some margin to prevent it from touching the content */
     transition: background 0.3s ease, color 0.3s ease;
     cursor: pointer; /* Ensures the pointer cursor appears */
 }
