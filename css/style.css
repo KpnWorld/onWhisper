@@ -173,7 +173,10 @@ footer {
 
 .footer-logo img {
     max-width: 100px; /* Adjust logo size */
+    border-radius: 50%; /* Makes the logo rounded */
+    overflow: hidden; /* Ensures the content fits within the circle */
 }
+
 
 .footer-nav ul {
     list-style: none;
