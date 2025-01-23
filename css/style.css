@@ -163,26 +163,40 @@ footer {
 }
 
 .footer-content {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
     max-width: 1200px;
     margin: 0 auto;
-    flex-wrap: wrap; /* Ensures the content wraps on smaller screens */
+    display: flex;
+    flex-direction: column; /* Stacks everything vertically */
+    align-items: center;
+    gap: 2rem; /* Adds space between the sections */
 }
 
-.footer-logo img {
-    max-width: 100px; /* Adjust logo size */
-    border-radius: 50%; /* Makes the logo rounded */
-    overflow: hidden; /* Ensures the content fits within the circle */
+/* Tile Section */
+.footer-tile {
+    background-color: #1abc9c; /* Tile color */
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    text-align: center;
+    width: 100%;
+    max-width: 300px;
 }
 
+.footer-tile h3 {
+    color: #fff;
+    font-size: 1.8rem;
+    font-weight: bold;
+}
 
+/* Footer Navigation Links */
 .footer-nav ul {
     list-style: none;
     padding: 0;
     display: flex;
-    gap: 1.5rem;
+    flex-direction: column; /* Stack links vertically */
+    gap: 1rem; /* Space between links */
+    text-align: left;
+    width: 100%;
+    max-width: 300px;
 }
 
 .footer-nav ul li {
@@ -200,6 +214,7 @@ footer {
     color: #1abc9c;
 }
 
+/* Footer Social Media Icons */
 .footer-socials a {
     margin: 0 10px;
 }
@@ -218,3 +233,4 @@ footer p {
     font-size: 0.9rem;
     margin: 1rem 0 0;
 }
+
