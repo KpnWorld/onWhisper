@@ -174,20 +174,19 @@ footer {
 /* Tile Section */
 .footer-tile {
     background-color: #1abc9c; /* Tile color */
-    padding: 0.8rem 1.5rem; /* Reduced padding for a smaller tile */
+    padding: 0.5rem 1rem; /* Further reduced padding */
     border-radius: 8px;
     text-align: center;
     width: 100%;
-    max-width: 200px; /* Reduced width */
+    max-width: 150px; /* Further reduced width */
     margin: 0 auto; /* Centers the tile */
 }
 
 .footer-tile h3 {
     color: #fff;
-    font-size: 1.5rem; /* Smaller font size */
+    font-size: 1.2rem; /* Smaller font size */
     font-weight: bold;
 }
-
 
 /* Footer Navigation Links */
 .footer-nav ul {
@@ -195,10 +194,10 @@ footer {
     padding: 0;
     display: flex;
     flex-direction: column; /* Stack links vertically */
-    gap: 0.8rem; /* Reduced space between links */
+    gap: 0.5rem; /* Reduced space between links */
     text-align: left;
     width: 100%;
-    max-width: 200px; /* Match width with tile */
+    max-width: 150px; /* Match width with tile */
 }
 
 .footer-nav ul li {
@@ -209,13 +208,14 @@ footer {
     color: #fff;
     text-decoration: none;
     font-weight: bold;
-    font-size: 1rem; /* Smaller font size */
+    font-size: 0.9rem; /* Smaller font size */
     transition: color 0.3s ease;
 }
 
 .footer-nav ul li a:hover {
     color: #1abc9c;
 }
+
 
 
 /* Footer Social Media Icons */
