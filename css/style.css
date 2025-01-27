@@ -238,3 +238,116 @@ footer p {
     margin: 1rem 0 0;
 }
 
+/* Base Styles */
+body {
+    font-family: 'Arial', sans-serif;
+}
+
+/* Header Styles */
+header {
+    background-color: #2D2D2D;
+    color: #fff;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+header a {
+    color: #A3A3F1;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+header a:hover {
+    color: #7171E1;
+}
+
+/* Main Section */
+main {
+    background-color: #1F1F1F;
+}
+
+/* Login Page */
+.login-container {
+    background-color: #2E2E2E;
+    border-radius: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    padding: 2rem;
+    max-width: 400px;
+    width: 100%;
+}
+
+.login-container h1 {
+    color: #5A5AE5;
+    font-size: 1.8rem;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+.login-container form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.login-container input {
+    padding: 0.8rem;
+    background-color: #444;
+    color: #fff;
+    border: 1px solid #333;
+    border-radius: 0.5rem;
+    font-size: 1rem;
+}
+
+.login-container button {
+    padding: 1rem;
+    background-color: #5A5AE5;
+    color: #fff;
+    font-weight: bold;
+    border: none;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.login-container button:hover {
+    background-color: #4A4AE5;
+}
+
+/* Dashboard Page */
+.dashboard-container {
+    background-color: #2E2E2E;
+    border-radius: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    padding: 2rem;
+    max-width: 600px;
+    width: 100%;
+    text-align: center;
+}
+
+.dashboard-container h1 {
+    color: #5A5AE5;
+    font-size: 2rem;
+    margin-bottom: 1rem;
+}
+
+.dashboard-container #user-info {
+    color: #A3A3F1;
+    font-size: 1.1rem;
+}
+
+/* Footer Styles */
+footer {
+    background-color: #2D2D2D;
+    color: #A3A3A3;
+    font-size: 0.8rem;
+    padding: 1rem;
+    text-align: center;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .login-container {
+        padding: 1.5rem;
+        max-width: 100%;
+    }
+}
+
