@@ -74,5 +74,45 @@
         </div>
         <p>&copy; 2025 onWhisper. All rights reserved.</p>
     </footer>
+    
+    <script>
+        // Step 1: Get the 'code' from the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        
+        if (code) {
+            // Step 2: Use the code to fetch the user's info from Discord
+            fetchUserData(code);
+        } else {
+            document.getElementById('user-info').innerHTML = '<p>Error: No code found in URL.</p>';
+        }
+
+        // Step 3: Send the code to the backend or directly exchange it
+        async function fetchUserData(code) {
+            try {
+                const response = await fetch('https://yourbackendapi.com/oauth2/callback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ code })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    // Display user info
+                    document.getElementById('user-info').innerHTML = `
+                        <p>Welcome ${data.username}!</p>
+                        <p>Your Discord ID is ${data.id}</p>
+                    `;
+                } else {
+                    document.getElementById('user-info').innerHTML = '<p>Error: Failed to fetch user data.</p>';
+                }
+            } catch (error) {
+                document.getElementById('user-info').innerHTML = '<p>Error: Unable to connect to the server.</p>';
+            }
+        }
+    </script>
+</body>
 </body>
 </html>
