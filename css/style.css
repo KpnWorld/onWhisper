@@ -44,26 +44,22 @@ header nav ul li a:hover {
     color: #1abc9c;
 }
 
-/* Hero Section */
-.hero {
+/* Hero Section */.hero {
     text-align: center;
     background: linear-gradient(to right, #1abc9c, #16a085);
     background-color: #1abc9c; /* Fallback color for older browsers */
     color: #fff;
     padding: 3rem 1rem;
 }
-
 .hero h1 {
     font-size: 2.5rem;
     margin-bottom: 1rem;
 }
-
 .hero p {
     font-size: 1.2rem;
     margin-bottom: 1.5rem;
 }
-
-.hero .cta-button {
+.hero.cta-button {
     background: #fff;
     color: #1abc9c;
     padding: 0.8rem 2rem;
@@ -73,32 +69,27 @@ header nav ul li a:hover {
     font-weight: bold;
     transition: background 0.3s ease, color 0.3s ease;
 }
-
-.hero .cta-button:hover {
+.hero.cta-button:hover {
     background: #16a085;
     color: #fff;
 }
 
-/* Features Section */
-.features {
+/* Features Section */.features {
     padding: 2rem 1rem;
     text-align: center;
     background-color: #ecf0f1;
 }
-
 .features h2 {
     font-size: 2rem;
     margin-bottom: 1.5rem;
     color: #2c3e50;
 }
-
 .feature-grid {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
     gap: 10%; /* Adjusted to use percentage-based spacing */
 }
-
 .feature-card {
     background: #fff;
     border: 1px solid #ddd;
@@ -112,24 +103,21 @@ header nav ul li a:hover {
     justify-content: space-between;
     height: 100%;
 }
-
 .feature-card h3 {
     font-size: 1.5rem;
-color: #1abc9c;
-margin-bottom: 0.8rem;
-
+    color: #1abc9c;
+    margin-bottom: 0.8rem;
+}
 .feature-card p {
     font-size: 1rem;
     color: #555;
     line-height: 1.4;
     margin-bottom: 1rem;
 }
-
 .feature-card:hover {
     transform: translateY(-5px);
     box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
 }
-
 .cta-button {
     background: #1abc9c;
     color: #fff;
@@ -142,14 +130,12 @@ margin-bottom: 0.8rem;
     transition: background 0.3s ease, color 0.3s ease;
     cursor: pointer;
 }
-
 .cta-button:hover {
     background: #16a085;
     color: #fff;
 }
 
-/* Login Page */
-.login-container {
+/* Login Page */.login-container {
     background-color: #2E2E2E;
     border-radius: 1rem;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
@@ -159,20 +145,17 @@ margin-bottom: 0.8rem;
     margin: 2rem auto;
     color: #fff;
 }
-
 .login-container h1 {
     color: #5A5AE5;
     font-size: 1.8rem;
     margin-bottom: 1rem;
     text-align: center;
 }
-
 .login-container form {
     display: flex;
     flex-direction: column;
     gap: 1rem;
 }
-
 .login-container input {
     padding: 0.8rem;
     background-color: #444;
@@ -181,7 +164,6 @@ margin-bottom: 0.8rem;
     border-radius: 0.5rem;
     font-size: 1rem;
 }
-
 .login-container button {
     padding: 1rem;
     background-color: #5A5AE5;
@@ -192,7 +174,6 @@ margin-bottom: 0.8rem;
     cursor: pointer;
     transition: background-color 0.3s ease;
 }
-
 .login-container button:hover {
     background-color: #4A4AE5;
 }
@@ -222,266 +203,30 @@ footer p {
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .feature-grid {
+  .feature-grid {
         flex-direction: column;
         align-items: center;
     }
 
-    .login-container {
+  .login-container {
         padding: 1.5rem;
     }
 
-    .hero {
+  .hero {
         padding: 2rem 1rem;
     }
 
-    .hero h1 {
+  .hero h1 {
         font-size: 2rem;
     }
 
-    .hero p {
+  .hero p {
         font-size: 1rem;
     }
 
-    .cta-button {
+  .cta-button {
         font-size: 0.9rem;
         padding: 0.7rem 1.5rem;
-    }
-}
-    color: #1abc9c;
-    margin-bottom: 0.8rem;
-}
-
-.feature-card p {
-    font-size: 1rem;
-    color: #555;
-    line-height: 1.4;
-    margin-bottom: 1.5rem; /* Added margin for spacing between text and button */
-}
-
-.feature-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
-}
-
-.cta-button {
-    background: #fff;
-    color: #1abc9c;
-    padding: 0.8rem 2rem;
-    font-size: 1rem;
-    border-radius: 25px;
-    border: none; /* Ensure it's styled as a button */
-    text-decoration: none;
-    font-weight: bold;
-    display: inline-block;
-    text-align: center;
-    margin-top: 1rem; /* Add some margin to prevent it from touching the content */
-    transition: background 0.3s ease, color 0.3s ease;
-    cursor: pointer; /* Ensures the pointer cursor appears */
-}
-
-.cta-button:hover {
-    background: #1abc9c;
-    color: #fff;
-}
-/* Footer - Global Styling */
-footer {
-    background: #2c3e50; /* Same as header */
-    color: #fff;
-    text-align: center;
-    padding: 2rem 1rem; /* Increased padding for more space */
-    margin-top: 2rem;
-    position: relative;
-    bottom: 0;
-    width: 100%;
-}
-
-.footer-content {
-    max-width: 1200px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column; /* Stacks everything vertically */
-    align-items: center;
-    gap: 2rem; /* Adds space between the sections */
-}
-
-/* Tile Section */
-.footer-tile {
-    background-color: #1abc9c; /* Tile color */
-    padding: 0.5rem 1rem; /* Further reduced padding */
-    border-radius: 8px;
-    text-align: center;
-    width: 100%;
-    max-width: 150px; /* Further reduced width */
-    margin: 0 auto; /* Centers the tile */
-}
-
-.footer-tile h3 {
-    color: #fff;
-    font-size: 1.2rem; /* Smaller font size */
-    font-weight: bold;
-}
-
-/* Footer Navigation Links */
-.footer-nav ul {
-    list-style: none;
-    padding: 0;
-    display: flex;
-    flex-direction: column; /* Stack links vertically */
-    gap: 0.5rem; /* Reduced space between links */
-    text-align: left;
-    width: 100%;
-    max-width: 150px; /* Match width with tile */
-}
-
-.footer-nav ul li {
-    margin: 0;
-}
-
-.footer-nav ul li a {
-    color: #fff;
-    text-decoration: none;
-    font-weight: bold;
-    font-size: 0.9rem; /* Smaller font size */
-    transition: color 0.3s ease;
-}
-
-.footer-nav ul li a:hover {
-    color: #1abc9c;
-}
-
-
-
-/* Footer Social Media Icons */
-.footer-socials a {
-    margin: 0 10px;
-}
-
-.footer-socials img {
-    width: 30px;
-    height: 30px;
-    transition: transform 0.3s ease;
-}
-
-.footer-socials a:hover img {
-    transform: scale(1.1);
-}
-
-footer p {
-    font-size: 0.9rem;
-    margin: 1rem 0 0;
-}
-
-/* Base Styles */
-body {
-    font-family: 'Arial', sans-serif;
-}
-
-/* Header Styles */
-header {
-    background-color: #2D2D2D;
-    color: #fff;
-    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
-}
-
-header a {
-    color: #A3A3F1;
-    text-decoration: none;
-    font-weight: bold;
-}
-
-header a:hover {
-    color: #7171E1;
-}
-
-/* Main Section */
-main {
-    background-color: #1F1F1F;
-}
-
-/* Login Page */
-.login-container {
-    background-color: #2E2E2E;
-    border-radius: 1rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    padding: 2rem;
-    max-width: 400px;
-    width: 100%;
-}
-
-.login-container h1 {
-    color: #5A5AE5;
-    font-size: 1.8rem;
-    margin-bottom: 1rem;
-    text-align: center;
-}
-
-.login-container form {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-
-.login-container input {
-    padding: 0.8rem;
-    background-color: #444;
-    color: #fff;
-    border: 1px solid #333;
-    border-radius: 0.5rem;
-    font-size: 1rem;
-}
-
-.login-container button {
-    padding: 1rem;
-    background-color: #5A5AE5;
-    color: #fff;
-    font-weight: bold;
-    border: none;
-    border-radius: 0.5rem;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-}
-
-.login-container button:hover {
-    background-color: #4A4AE5;
-}
-
-/* Dashboard Page */
-.dashboard-container {
-    background-color: #2E2E2E;
-    border-radius: 1rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    padding: 2rem;
-    max-width: 600px;
-    width: 100%;
-    text-align: center;
-}
-
-.dashboard-container h1 {
-    color: #5A5AE5;
-    font-size: 2rem;
-    margin-bottom: 1rem;
-}
-
-.dashboard-container #user-info {
-    color: #A3A3F1;
-    font-size: 1.1rem;
-}
-
-/* Footer Styles */
-footer {
-    background-color: #2D2D2D;
-    color: #A3A3A3;
-    font-size: 0.8rem;
-    padding: 1rem;
-    text-align: center;
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-    .login-container {
-        padding: 1.5rem;
-        max-width: 100%;
     }
 }
 
