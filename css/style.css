@@ -1,4 +1,4 @@
-/* General Reset */
+/* Reset some default styles */
 * {
     margin: 0;
     padding: 0;
@@ -7,394 +7,142 @@
 
 body {
     font-family: 'Arial', sans-serif;
-    background-color: #f4f4f9;
-    color: #333;
     line-height: 1.6;
-}
-
-a {
-    text-decoration: none;
-    color: inherit;
-}
-
-ul {
-    list-style: none;
-}
-/* Header Section */
-header {
-    background-color: #ffffff;
-    padding: 20px 0;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-}
-
-header .logo img {
-    width: 150px; /* Adjust logo size */
-}
-
-nav ul {
-    display: flex;
-    justify-content: center;
-    gap: 30px;
-    font-size: 18px;
-}
-
-nav ul li a {
-    text-transform: uppercase;
-    font-weight: bold;
-    padding: 10px;
     color: #333;
-    transition: color 0.3s ease;
+    background-color: #f9f9f9;
 }
 
-nav ul li a:hover {
-    color: #4CAF50; /* Green highlight for active links */
+/* Header and Navigation */
+header {
+    background: #2c2f33; /* Dark background for header */
+    color: #ffffff;
+    padding: 15px 0;
 }
+
+nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 1200px;
+    margin: auto;
+    padding: 0 20px;
+}
+
+.logo img {
+    height: 50px; /* Adjust logo size */
+}
+
+.nav-links {
+    list-style: none;
+    display: flex;
+}
+
+.nav-links li {
+    margin: 0 15px;
+}
+
+.nav-links a {
+    color: #ffffff;
+    text-decoration: none;
+    transition: color 0.3s;
+}
+
+.nav-links a:hover {
+    color: #ff4757; /* Highlight color on hover */
+}
+
 /* Hero Section */
 .hero {
-    background: linear-gradient(135deg, #4CAF50, #388E3C);
-    color: white;
+    background: url('hero-background.jpg') no-repeat center center/cover;
+    color: #ffffff;
     text-align: center;
     padding: 100px 20px;
 }
 
-.hero h1 {
-    font-size: 3rem;
+.hero-text h1 {
+    font-size: 2.5em;
     margin-bottom: 20px;
-    font-weight: bold;
-}
-
-.hero p {
-    font-size: 1.2rem;
-    margin-bottom: 30px;
-    font-weight: 300;
 }
 
 .cta-button {
-    background-color: #FF9800;
-    color: white;
-    padding: 15px 30px;
+    background: #ff4757;
+    color: #ffffff;
+    padding: 10px 20px;
+    text-decoration: none;
     border-radius: 5px;
-    font-weight: bold;
-    font-size: 1rem;
-    transition: background-color 0.3s ease;
+    transition: background 0.3s;
 }
 
 .cta-button:hover {
-    background-color: #f57c00; /* Darker shade of orange */
-}
-/* Features Section */
-.features {
-    text-align: center;
-    padding: 60px 20px;
+    background: #e84118; /* Darker shade on hover */
 }
 
-.features h2 {
-    font-size: 2.5rem;
-    margin-bottom: 40px;
-    font-weight: bold;
-}
-
-.feature-item {
-    background-color: white;
-    padding: 25px;
-    margin: 20px;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    display: inline-block;
-    width: calc(33% - 40px); /* 3 items per row, adjust width */
+/* Features and Pricing Sections */
+.features, .pricing {
+    padding: 50px 20px;
     text-align: center;
 }
 
-.feature-item h3 {
-    font-size: 1.8rem;
-    margin-bottom: 20px;
-    font-weight: bold;
-}
-
-.feature-item p {
-    font-size: 1rem;
-    margin-bottom: 15px;
-    color: #555;
-}
-
-.feature-item .cta-button {
-    background-color: #4CAF50;
-    color: white;
-    font-size: 1rem;
-    padding: 10px 20px;
-    border-radius: 5px;
-}
-
-.feature-item .cta-button:hover {
-    background-color: #388E3C; /* Darker shade of green */
-}
-
-/* Responsive design for features (Mobile-Friendly) */
-@media (max-width: 768px) {
-    .feature-item {
-        width: calc(50% - 40px); /* 2 items per row */
-    }
-}
-
-@media (max-width: 480px) {
-    .feature-item {
-        width: 100%; /* Single column on small screens */
-    }
-}
-/* Pricing Section */
-.pricing {
-    background-color: #fafafa;
-    padding: 60px 20px;
-    text-align: center;
-}
-
-.pricing h2 {
-    font-size: 2.5rem;
-    margin-bottom: 40px;
-    font-weight: bold;
-}
-
-.pricing-option {
-    background-color: white;
-    padding: 30px;
-    margin: 20px;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    display: inline-block;
-    width: calc(33% - 40px); /* 3 items per row */
-    text-align: center;
-}
-
-.pricing-option h3 {
-    font-size: 1.8rem;
-    margin-bottom: 20px;
-    font-weight: bold;
-}
-
-.pricing-option p {
-    font-size: 1.1rem;
-    color: #555;
-    margin-bottom: 20px;
-}
-
-.pricing-option .cta-button {
-    background-color: #4CAF50;
-    color: white;
-    font-size: 1rem;
-    padding: 10px 20px;
-    border-radius: 5px;
-}
-
-.pricing-option .cta-button:hover {
-    background-color: #388E3C;
-}
-
-/* Responsive design for pricing (Mobile-Friendly) */
-@media (max-width: 768px) {
-    .pricing-option {
-        width: calc(50% - 40px); /* 2 items per row */
-    }
-}
-
-@media (max-width: 480px) {
-    .pricing-option {
-        width: 100%; /* Single column on small screens */
-    }
-}
-/* About Section */
-.about {
-    padding: 60px 20px;
-    background-color: #ffffff;
-    text-align: center;
-}
-
-.about h2 {
-    font-size: 2.5rem;
-    margin-bottom: 40px;
-    font-weight: bold;
-}
-
-.about p {
-    font-size: 1.1rem;
-    color: #555;
+.features h2, .pricing h2 {
     margin-bottom: 30px;
 }
 
-.about .team-member {
-    display: inline-block;
-    width: calc(33% - 40px);
+.feature-item, .pricing-option {
+    margin: 20px 0;
     padding: 20px;
-    margin: 20px;
-    background-color: #fafafa;
-    border-radius: 10px;
-    text-align: center;
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s;
 }
 
-.about .team-member h3 {
-    font-size: 1.5rem;
-    margin-bottom: 10px;
-    font-weight: bold;
+.feature-item:hover, .pricing-option:hover {
+    transform: translateY(-5px); /* Lift effect on hover */
 }
 
-.about .team-member p {
-    color: #777;
-}
-
-/* Mobile responsiveness for About section */
-@media (max-width: 768px) {
-    .about .team-member {
-        width: calc(50% - 40px); /* 2 members per row */
-    }
-}
-
-@media (max-width: 480px) {
-    .about .team-member {
-        width: 100%; /* Single column on mobile */
-    }
-}
-/* Login Page */
-.login {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    background-color: #f4f4f9;
-}
-
-.login-container {
-    background-color: white;
-    padding: 40px;
-    border-radius: 10px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-    width: 100%;
-    max-width: 400px;
-    text-align: center;
-}
-
-.login-container h2 {
-    font-size: 2rem;
-    margin-bottom: 30px;
-    text-align: center;
-    font-weight: bold;
-}
-
-/* Back to Homepage Button */
-.back-home-button {
-    background-color: #4CAF50; /* Green for prominence */
-    color: white;
-    font-size: 1.2rem;
-    padding: 15px 30px;
-    border-radius: 5px;
-    width: 100%;
-    text-transform: uppercase;
-    font-weight: bold;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    transition: background-color 0.3s ease;
-    margin-top: 20px;
-}
-
-.back-home-button:hover {
-    background-color: #388E3C; /* Darker green on hover */
-}
-
-.login-container p {
-    text-align: center;
-    margin-top: 20px;
-}
-
-.login-container p a {
-    color: #4CAF50; /* Green for link */
-    font-weight: bold;
-}
-/* Support Section */
-.support {
-    padding: 60px 20px;
-    background-color: #ffffff;
-    text-align: center;
-}
-
-.support h2 {
-    font-size: 2.5rem;
-    margin-bottom: 40px;
-    font-weight: bold;
-}
-
-.support .faq-item {
-    background-color: #fafafa;
-    padding: 25px;
-    margin: 20px;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.support .faq-item h3 {
-    font-size: 1.8rem;
-    margin-bottom: 10px;
-    font-weight: bold;
-}
-
-.support .faq-item p {
-    font-size: 1rem;
-    color: #555;
-}
-
-.support .cta-button {
-    background-color: #4CAF50;
-    color: white;
-    padding: 15px 30px;
-    border-radius: 5px;
-    font-weight: bold;
-    font-size: 1rem;
-    margin-top: 30px;
-}
-
-.support .cta-button:hover {
-    background-color: #388E3C;
-}
-/* Footer Section */
+/* Footer */
 footer {
-    background-color: #333;
-    color: white;
-    padding: 40px 20px;
+    background: #2c2f33;
+    color: #ffffff;
     text-align: center;
+    padding: 20px 0;
 }
 
-footer .footer-logo img {
-    width: 150px; /* Adjust logo size */
-    margin-bottom: 20px;
+.footer-content {
+    max-width: 1200px;
+    margin: auto;
 }
 
-footer .footer-links ul {
-    padding: 0;
+.footer-links {
+    margin: 10px 0;
+}
+
+.footer-links ul {
+    list-style: none;
     display: flex;
     justify-content: center;
-    gap: 30px;
 }
 
-footer .footer-links ul li a {
-    color: white;
-    font-size: 1rem;
-    font-weight: bold;
-    transition: color 0.3s ease;
+.footer-links li {
+    margin: 0 10px;
 }
 
-footer .footer-links ul li a:hover {
-    color: #FF9800; /* Highlight with orange */
+.footer-social a {
+    margin: 0 10px;
 }
 
-footer .footer-social a {
-    margin: 0 15px;
-    color: white;
-    transition: color 0.3s ease;
-}
+/* Responsive Design */
+@media (max-width: 768px) {
+    .nav-links {
+        flex-direction: column;
+        align-items: center;
+    }
 
-footer .footer-social a:hover {
-    color: #FF9800; /* Highlight with orange */
-}
+    .hero-text h1 {
+        font-size: 1.8em;
+    }
 
-footer p {
-    font-size: 0.9rem;
-    margin-top: 20px;
+    .feature-item, .pricing-option {
+        margin: 10px;
+    }
 }
