@@ -1,0 +1,28 @@
+# Created by venv; see https://docs.python.org/3/library/venv.html
+# Ignore virtual environment
+venv/
+onwhisper_venv/
+.venv/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore environment variables (important for security!)
+.env
+*.secret
+
+# Ignore IDE/editor files
+.vscode/
+.idea/
+
+# Ignore log files
+*.log
+logs/
+
+# Ignore database files
+*.db
+*.sqlite
+*.sqlite3
+db.json
