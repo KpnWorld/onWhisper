@@ -68,6 +68,10 @@ def setup_logging_directory():
         print(f"Failed to setup logging directory: {e}")
         return 'bot.log'  # Fallback to current directory
 
+# Create required directories
+os.makedirs('logs', exist_ok=True)
+os.makedirs('cogs', exist_ok=True)  # Add this line
+
 # Configure handlers
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(ColoredFormatter('%(levelname)s | %(message)s'))
@@ -75,6 +79,12 @@ console_handler.setFormatter(ColoredFormatter('%(levelname)s | %(message)s'))
 log_file = setup_logging_directory()
 file_handler = logging.FileHandler(log_file, encoding='utf-8')
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+# Clear any existing handlers from all loggers
+logging.getLogger().handlers.clear()
+logging.getLogger('discord').handlers.clear()
+logging.getLogger('discord.http').handlers.clear()
+logging.getLogger('discord.gateway').handlers.clear()
 
 # Configure root logger
 root_logger = logging.getLogger()
@@ -85,15 +95,16 @@ root_logger.addHandler(file_handler)
 # Configure our bot logger
 logger = logging.getLogger('onWhisper')
 logger.setLevel(logging.INFO)
-# Don't add handlers to avoid duplicates
-logger.propagate = True
+logger.propagate = False  # Changed to False
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
 
-# Disable propagation for discord loggers to prevent duplicate messages
+# Configure discord logger
 discord_logger = logging.getLogger('discord')
+discord_logger.setLevel(logging.INFO)
 discord_logger.propagate = False
 discord_logger.addHandler(console_handler)
 discord_logger.addHandler(file_handler)
-discord_logger.setLevel(logging.INFO)  # Update discord logger level to show more informative messages
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -131,6 +142,10 @@ async def on_ready():
     """Called when the bot is ready and connected to Discord."""
     try:
         await load_cogs()
+        # Sync commands with Discord
+        await bot.tree.sync()
+        logger.info("Slash commands synced successfully")
+        
         change_activity.start()  # Start the activity cycling task
         logger.info(f'{bot.user} has connected to Discord!')
         logger.info(f'Bot is in {len(bot.guilds)} guilds')
