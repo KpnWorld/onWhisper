@@ -21,7 +21,8 @@ __pycache__/
 *.log
 logs/
 
-# Ignore database files
+# Ignore database files and directory
+db/
 *.db
 *.sqlite
 *.sqlite3

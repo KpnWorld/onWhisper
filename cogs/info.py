@@ -126,7 +126,7 @@ class Info(commands.Cog):
 
             # Info Commands
             info_commands = [
-                ("🔍 /help", "Show this help message"),
+                ("🔍 /help", "Show this help menu"),
                 ("🏓 /ping", "Check bot's latency"),
                 ("⏳ /uptime", "Check bot's uptime"),
                 ("🤖 /botinfo", "Get information about the bot"),
@@ -134,12 +134,44 @@ class Info(commands.Cog):
                 ("👤 /userinfo [user]", "Get user information (defaults to you)")
             ]
 
-            # Add fields for each category
+            # Leveling Commands
+            leveling_commands = [
+                ("📊 /level [user]", "Check your or another user's level"),
+                ("🏆 /leaderboard", "View the top 10 users"),
+                ("⚙️ /levelconfig", "View all leveling system settings (Admin)"),
+                ("⚙️ /setlevelrole", "Set level-up role rewards (Admin)"),
+                ("⏱️ /setcooldown", "Set XP gain cooldown time (Admin)"),
+                ("💫 /setxprange", "Set min/max XP per message (Admin)")
+            ]
+
+            # AutoRole Commands
+            autorole_commands = [
+                ("⚙️ /setautorole", "Set automatic role for new members/bots (Admin)"),
+                ("❌ /removeautorole", "Disable automatic role assignment (Admin)"),
+                ("👥 /massrole", "Assign a role to all server members (Admin)")
+            ]
+
+            # Add fields in a logical order
             embed.add_field(
-                name="ℹ️ Information Commands",
+                name="🛠️ General Commands",
                 value="\n".join(f"`{cmd}` • {desc}" for cmd, desc in info_commands),
                 inline=False
             )
+
+            embed.add_field(
+                name="📈 Leveling System",
+                value="\n".join(f"`{cmd}` • {desc}" for cmd, desc in leveling_commands),
+                inline=False
+            )
+
+            embed.add_field(
+                name="🎭 Role Management",
+                value="\n".join(f"`{cmd}` • {desc}" for cmd, desc in autorole_commands),
+                inline=False
+            )
+
+            # Add footer with admin note
+            embed.set_footer(text="Note: Commands marked with (Admin) require administrator permissions")
 
             await interaction.response.send_message(embed=embed)
             logger.info(f"Help command used by {interaction.user}")
