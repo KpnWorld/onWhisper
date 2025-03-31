@@ -252,6 +252,7 @@ class Leveling(commands.Cog):
     async def level(self, interaction: discord.Interaction, member: discord.Member = None):
         """Display level and XP information for a user"""
         try:
+            await interaction.response.defer()
             member = member or interaction.user
             user_data = None
             rank = None
@@ -323,16 +324,18 @@ class Leveling(commands.Cog):
                     color=discord.Color.blue()
                 )
 
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
             logger.info(f"Level command used by {interaction.user}")
         except Exception as e:
             logger.error(f"Error in level command: {e}")
-            await interaction.response.send_message("An error occurred.")
+            await interaction.followup.send("❌ An error occurred while fetching level information.", ephemeral=True)
 
     @app_commands.command(name="leaderboard", description="View the XP leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
         """Display the server's XP leaderboard"""
         try:
+            await interaction.response.defer()
+            
             with self.db.cursor() as cur:
                 cur.execute("""
                     SELECT user_id, xp, level, messages 
@@ -364,7 +367,7 @@ class Leveling(commands.Cog):
                 user_stats = cur.fetchone()
 
             if not top_users:
-                await interaction.response.send_message("No leaderboard data yet!")
+                await interaction.followup.send("No leaderboard data yet!")
                 return
 
             embed = discord.Embed(
@@ -396,11 +399,11 @@ class Leveling(commands.Cog):
             else:
                 embed.set_footer(text="You haven't earned any XP yet!")
 
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
             logger.info(f"Leaderboard command used by {interaction.user}")
         except Exception as e:
             logger.error(f"Error in leaderboard command: {e}")
-            await interaction.response.send_message("An error occurred.")
+            await interaction.followup.send("❌ An error occurred while fetching the leaderboard.", ephemeral=True)
 
     @app_commands.command(name="setlevelrole", description="Set a role to be assigned at a specific level (Admin only).")
     @commands.has_permissions(administrator=True)
@@ -519,12 +522,15 @@ class Leveling(commands.Cog):
             guild_id = interaction.guild_id
             old_min, old_max = self.get_xp_range(guild_id)
 
-            self.db.set_guild_setting(
-                guild_id, 
-                "leveling_settings", 
-                "min_xp, max_xp", 
-                (min_xp, max_xp)
-            )
+            # Update database with new XP range
+            with self.db.cursor() as cur:
+                cur.execute("""
+                    UPDATE leveling_settings 
+                    SET min_xp = ?, max_xp = ?
+                    WHERE guild_id = ?
+                """, (min_xp, max_xp, guild_id))
+
+            # Update cache
             self.xp_ranges[guild_id] = (min_xp, max_xp)
 
             embed = discord.Embed(
@@ -542,6 +548,11 @@ class Leveling(commands.Cog):
                 value=f"```\nMin XP: {min_xp}\nMax XP: {max_xp}\n```",
                 inline=True
             )
+            embed.add_field(
+                name="Effect",
+                value="This change affects how much XP users gain from each message.",
+                inline=False
+            )
             embed.set_footer(text="Administrative Command • XP System Settings")
 
             await interaction.response.send_message(embed=embed)
@@ -558,12 +569,6 @@ class Leveling(commands.Cog):
     async def levelconfig(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer()
-            
-            # Get all guild settings
-            settings = self.db.get_all_guild_settings(interaction.guild_id)
-            if not settings:
-                await interaction.followup.send("No settings found for this server.")
-                return
 
             embed = discord.Embed(
                 title="⚙️ Leveling System Configuration",
@@ -571,20 +576,34 @@ class Leveling(commands.Cog):
                 color=discord.Color.blue()
             )
 
+            # Get current cooldown and XP range from cache
+            cooldown = self.get_cooldown(interaction.guild_id)
+            min_xp, max_xp = self.get_xp_range(interaction.guild_id)
+
             # XP Settings
             embed.add_field(
                 name="⏱️ XP Gain Settings",
-                value=f"```\nCooldown: {settings[3]} seconds\nXP per message: {settings[4]}-{settings[5]}\n```",
+                value=f"```\nCooldown: {cooldown} seconds\nXP per message: {min_xp}-{max_xp}\n```",
                 inline=False
             )
 
-            # Level Up Message
-            channel_mention = f"<#{settings[6]}>" if settings[6] else "Same channel"
-            embed.add_field(
-                name="📢 Level Up Settings",
-                value=f"Message: {settings[5]}\nChannel: {channel_mention}",
-                inline=False
-            )
+            # Get level-up message and channel
+            with self.db.cursor() as cur:
+                cur.execute("""
+                    SELECT level_up_message, level_up_channel_id
+                    FROM leveling_settings
+                    WHERE guild_id = ?
+                """, (interaction.guild.id,))
+                level_up_settings = cur.fetchone()
+                
+            if level_up_settings:
+                message, channel_id = level_up_settings
+                channel = f"<#{channel_id}>" if channel_id else "Same channel"
+                embed.add_field(
+                    name="📢 Level Up Settings",
+                    value=f"```\nMessage: {message}\nChannel: {channel}\n```",
+                    inline=False
+                )
 
             # Get level roles
             with self.db.cursor() as cur:
@@ -638,10 +657,12 @@ class Leveling(commands.Cog):
                 user_count, avg_level, max_level = cur.fetchone()
 
             if user_count:
+                # Format average level properly outside of f-string
+                avg_level_str = f"{avg_level:.1f}" if avg_level else "0.0"
                 stats = (
-                    f"Users tracked: {int(user_count):,}\n"
-                    f"Average level: {avg_level:.1f}\n"
-                    f"Highest level: {int(max_level)}"
+                    f"Users tracked: {int(user_count) if user_count else 0}\n"
+                    f"Average level: {avg_level_str}\n"
+                    f"Highest level: {int(max_level) if max_level else 0}"
                 )
                 embed.add_field(
                     name="📊 Server Statistics",

@@ -34,12 +34,17 @@ class Owner(commands.Cog):
                 color=discord.Color.blue()
             )
 
-            # Guild Activity
+            # Guild Activity - Handle null values
+            avg_members = int(guild_stats.get('avg_members', 0) or 0)
+            total_messages = int(guild_stats.get('total_messages', 0) or 0)
+            total_commands = int(guild_stats.get('total_commands', 0) or 0)
+            avg_active = int(guild_stats.get('avg_active_users', 0) or 0)
+
             stats_text = (
-                f"Average Members: {int(guild_stats['avg_members']):,}\n"
-                f"Total Messages: {int(guild_stats['total_messages']):,}\n"
-                f"Commands Used: {int(guild_stats['total_commands']):,}\n"
-                f"Active Users: {int(guild_stats['avg_active_users']):,}"
+                f"Average Members: {avg_members:,}\n"
+                f"Total Messages: {total_messages:,}\n"
+                f"Commands Used: {total_commands:,}\n"
+                f"Active Users: {avg_active:,}"
             )
             embed.add_field(
                 name="📈 Activity Metrics",
@@ -68,7 +73,7 @@ class Owner(commands.Cog):
                     inline=False
                 )
 
-            # Error Rate
+            # Error Rate - Handle null values
             with self.db.cursor() as cur:
                 cur.execute("""
                     SELECT 
@@ -78,13 +83,21 @@ class Owner(commands.Cog):
                     WHERE guild_id = ?
                     AND used_at >= datetime('now', ?)
                 """, (interaction.guild_id, f'-{days} days'))
-                total, errors = cur.fetchone()
+                result = cur.fetchone()
+                total = result[0] if result and result[0] else 0
+                errors = result[1] if result and result[1] else 0
 
-            if total:
+            if total > 0:
                 error_rate = (errors / total) * 100
                 embed.add_field(
                     name="⚠️ Error Rate",
                     value=f"```\n{error_rate:.1f}% ({errors}/{total} commands)\n```",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="⚠️ Error Rate",
+                    value="```\nNo commands recorded\n```",
                     inline=False
                 )
 

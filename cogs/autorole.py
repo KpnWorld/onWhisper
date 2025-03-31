@@ -48,18 +48,20 @@ class AutoRole(commands.Cog):
             role_type = "bot" if member.bot else "member"
             with self.db.cursor() as cur:
                 cur.execute("""
-                    SELECT r.role_id 
-                    FROM autorole r
-                    JOIN guild_settings g ON r.guild_id = g.guild_id
-                    WHERE r.guild_id = ? AND r.type = ?
+                    SELECT role_id 
+                    FROM autorole
+                    WHERE guild_id = ? AND type = ? AND enabled = 1
                 """, (member.guild.id, role_type))
                 result = cur.fetchone()
             
             if result:
-                role = member.guild.get_role(result[0])
-                if role:
+                role_id = result[0]
+                role = member.guild.get_role(role_id)
+                if role and role.position < member.guild.me.top_role.position:
                     await member.add_roles(role)
-                    logger.info(f"Assigned {role_type} autorole to {member} in {member.guild}")
+                    logger.info(f"Assigned {role_type} autorole ({role.name}) to {member} in {member.guild}")
+                else:
+                    logger.warning(f"Cannot assign autorole in {member.guild.id}: Role not found or higher than bot's role")
         except Exception as e:
             logger.error(f"Error assigning autorole: {e}")
 
@@ -69,13 +71,33 @@ class AutoRole(commands.Cog):
         type="Choose whether this role is for members or bots",
         role="The role to automatically assign"
     )
-    @app_commands.choices(type=ROLE_TYPES[:2])  # Exclude 'all' option for setting roles
+    @app_commands.choices(type=[
+        app_commands.Choice(name="Member", value="member"),
+        app_commands.Choice(name="Bot", value="bot")
+    ])
     async def setautorole(self, interaction: discord.Interaction, type: app_commands.Choice[str], role: discord.Role):
         """Set the autorole for members or bots"""
         try:
+            # Check role hierarchy
+            if role.position >= interaction.guild.me.top_role.position:
+                await interaction.response.send_message(
+                    "❌ I cannot assign roles that are higher than my highest role!",
+                    ephemeral=True
+                )
+                return
+
             with self.db.cursor() as cur:
-                cur.execute("INSERT OR REPLACE INTO autorole (guild_id, role_id, type) VALUES (?, ?, ?)",
-                         (interaction.guild_id, role.id, type))
+                # First ensure guild settings exist
+                cur.execute("""
+                    INSERT OR IGNORE INTO guild_settings (guild_id)
+                    VALUES (?)
+                """, (interaction.guild_id,))
+                
+                # Then set the autorole
+                cur.execute("""
+                    INSERT OR REPLACE INTO autorole (guild_id, role_id, type, enabled)
+                    VALUES (?, ?, ?, 1)
+                """, (interaction.guild_id, role.id, type.value))
 
             embed = discord.Embed(
                 title="⚙️ AutoRole Configuration",
@@ -84,7 +106,7 @@ class AutoRole(commands.Cog):
             )
             embed.add_field(
                 name="Settings",
-                value=f"Type: `{type}`\nRole: {role.mention}",
+                value=f"Type: `{type.value}`\nRole: {role.mention}",
                 inline=False
             )
             embed.add_field(
@@ -95,7 +117,7 @@ class AutoRole(commands.Cog):
             embed.set_footer(text="Administrative Command • AutoRole System")
             
             await interaction.response.send_message(embed=embed)
-            logger.info(f"Autorole set in {interaction.guild}: {role.name} for {type}s")
+            logger.info(f"Autorole set in {interaction.guild}: {role.name} for {type.value}s")
         except Exception as e:
             logger.error(f"Error setting autorole: {e}")
             error_embed = discord.Embed(
@@ -104,7 +126,7 @@ class AutoRole(commands.Cog):
                 color=discord.Color.red()
             )
             error_embed.set_footer(text="Administrative Command • Error")
-            await interaction.response.send_message(embed=error_embed)
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
     @app_commands.command(name="removeautorole", description="Remove the automatic role assignment")
     @app_commands.default_permissions(manage_roles=True)
@@ -114,13 +136,16 @@ class AutoRole(commands.Cog):
         """Remove autorole settings"""
         try:
             with self.db.cursor() as cur:
-                if type == "all":
-                    cur.execute("DELETE FROM autorole WHERE guild_id=?", (interaction.guild_id,))
-                    status = "All autorole settings have been removed"
+                if type.value == "all":
+                    cur.execute("""
+                        DELETE FROM autorole 
+                        WHERE guild_id = ?
+                    """, (interaction.guild_id,))
                 else:
-                    cur.execute("DELETE FROM autorole WHERE guild_id=? AND type=?", 
-                              (interaction.guild_id, type))
-                    status = f"Autorole for {type}s has been removed"
+                    cur.execute("""
+                        DELETE FROM autorole 
+                        WHERE guild_id = ? AND type = ?
+                    """, (interaction.guild_id, type.value))
 
             embed = discord.Embed(
                 title="⚙️ AutoRole Configuration",
@@ -129,18 +154,13 @@ class AutoRole(commands.Cog):
             )
             embed.add_field(
                 name="Action",
-                value=f"Removed configuration for: `{type}`",
-                inline=False
-            )
-            embed.add_field(
-                name="Status",
-                value=f"✅ {status}",
+                value=f"Removed configuration for: `{type.value}`",
                 inline=False
             )
             embed.set_footer(text="Administrative Command • AutoRole System")
             
             await interaction.response.send_message(embed=embed)
-            logger.info(f"Autorole removed in {interaction.guild} for {type}")
+            logger.info(f"Autorole removed in {interaction.guild}: {type.value}")
         except Exception as e:
             logger.error(f"Error removing autorole: {e}")
             error_embed = discord.Embed(
@@ -166,12 +186,18 @@ class AutoRole(commands.Cog):
                 return
 
             await interaction.response.defer(thinking=True)
-            progress_embed = discord.Embed(
-                title="Role Assignment Progress",
-                description="Starting role assignment...",
+            
+            embed = discord.Embed(
+                title="⚙️ Mass Role Assignment",
+                description="Starting role assignment process...",
                 color=discord.Color.blue()
             )
-            progress_msg = await interaction.followup.send(embed=progress_embed)
+            embed.add_field(
+                name="Role",
+                value=f"{role.mention}",
+                inline=False
+            )
+            progress_msg = await interaction.followup.send(embed=embed)
             
             success_count = 0
             fail_count = 0
@@ -191,37 +217,51 @@ class AutoRole(commands.Cog):
                     await member.add_roles(role)
                     success_count += 1
                     if success_count % 5 == 0:
-                        progress_embed.description = f"Processing: {success_count + fail_count}/{total_members} members..."
-                        await progress_msg.edit(embed=progress_embed)
+                        embed.description = f"Processing: {success_count + fail_count}/{total_members} members..."
+                        await progress_msg.edit(embed=embed)
                 except Exception as e:
                     fail_count += 1
                     error_users.append(f"❌ {member.name} ({str(e)})")
 
-            result_embed = discord.Embed(
-                title="Role Assignment Complete",
-                color=discord.Color.green() if success_count > 0 else discord.Color.red()
+            final_embed = discord.Embed(
+                title="⚙️ Mass Role Assignment",
+                description="Role assignment process completed.",
+                color=discord.Color.blue()
             )
             
-            result_embed.add_field(
-                name="📊 Statistics",
-                value=f"✅ Success: {success_count} members\n❌ Failed: {fail_count} members",
+            final_embed.add_field(
+                name="📊 Results",
+                value=f"```\nSuccess: {success_count} members\nFailed: {fail_count} members\nTotal: {total_members} members\n```",
                 inline=False
             )
             
             if error_users and fail_count < 10:
-                result_embed.add_field(
-                    name="⚠️ Failed Members",
+                final_embed.add_field(
+                    name="⚠️ Failed Assignments",
                     value="\n".join(error_users[:10]),
                     inline=False
                 )
 
-            result_embed.set_footer(text=f"Role: {role.name}")
-            await progress_msg.edit(embed=result_embed)
+            final_embed.add_field(
+                name="Role",
+                value=f"{role.mention}",
+                inline=False
+            )
+            
+            final_embed.set_footer(text="Administrative Command • Role Management")
+
+            await progress_msg.edit(embed=final_embed)
             logger.info(f"Mass role assignment completed in {interaction.guild}: {role.name}")
         except Exception as e:
             logger.error(f"Error in mass role assignment: {e}")
-            await interaction.followup.send("❌ An error occurred while assigning roles.")
+            error_embed = discord.Embed(
+                title="⚙️ Configuration Error",
+                description="❌ Failed to complete mass role assignment.",
+                color=discord.Color.red()
+            )
+            error_embed.set_footer(text="Administrative Command • Error")
+            await interaction.followup.send(embed=error_embed, ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(AutoRole(bot))
-    
+

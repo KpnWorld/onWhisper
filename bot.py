@@ -10,6 +10,7 @@ import colorama
 from colorama import Fore, Style
 import time
 from datetime import datetime, timedelta
+import sqlite3
 
 # Initialize colorama for Windows
 colorama.init()
@@ -119,18 +120,86 @@ discord_logger.addHandler(file_handler)
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
+def adapt_datetime(val: datetime) -> str:
+    """Adapt datetime objects to ISO format strings for SQLite"""
+    return val.isoformat()
+
+def convert_datetime(val: bytes) -> datetime:
+    """Convert ISO format strings from SQLite to datetime objects"""
+    try:
+        return datetime.fromisoformat(val.decode())
+    except (ValueError, AttributeError):
+        return None
+
+# Register the adapter and converter at module level
+sqlite3.register_adapter(datetime, adapt_datetime)
+sqlite3.register_converter("timestamp", convert_datetime)
+
 class DatabaseManager:
     def __init__(self, db_name):
         self.db_name = db_name
+        self.db_path = os.path.join('db', f'{db_name}.db')
+        os.makedirs('db', exist_ok=True)
 
-    def update_guild_metrics(self, guild_id, member_count, active_users):
-        pass
+    def update_guild_metrics(self, guild_id: int, member_count: int, active_users: int):
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO guild_metrics 
+                    (guild_id, member_count, active_users)
+                    VALUES (?, ?, ?)
+                """, (guild_id, member_count, active_users))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to update metrics: {e}")
 
-    def ensure_guild_exists(self, guild_id):
-        pass
+    def batch_update_metrics(self, metrics_data):
+        try:
+            with sqlite3.connect(
+                self.db_path,
+                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+            ) as conn:
+                cur = conn.cursor()
+                cur.executemany("""
+                    INSERT INTO guild_metrics 
+                    (guild_id, member_count, active_users, timestamp)
+                    VALUES (?, ?, ?, ?)
+                """, [(m['guild_id'], m['member_count'], m['active_users'], m['timestamp']) for m in metrics_data])
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to batch update metrics: {e}")
 
-    def log_command(self, guild_id, user_id, command_name, success, error=None):
-        pass
+    def ensure_guild_exists(self, guild_id: int):
+        try:
+            with sqlite3.connect(
+                self.db_path,
+                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+            ) as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT OR IGNORE INTO guild_settings (guild_id)
+                    VALUES (?)
+                """, (guild_id,))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to ensure guild exists: {e}")
+
+    def log_command(self, guild_id: int, user_id: int, command_name: str, success: bool = True, error: str = None):
+        try:
+            with sqlite3.connect(
+                self.db_path,
+                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+            ) as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO command_stats 
+                    (guild_id, user_id, command_name, success, error_message)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (guild_id, user_id, command_name, success, error))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to log command: {e}")
 
 class Bot(commands.Bot):
     def __init__(self):
@@ -139,36 +208,86 @@ class Bot(commands.Bot):
         self.start_time = time.time()
         self.db = DatabaseManager('bot')
         self._metrics_task = None
+        self._last_metrics = {}  # Will store datetime objects
+        self._metric_buffer = []
+        self._buffer_lock = asyncio.Lock()
+        self._last_flush = datetime.now()
 
     async def setup_hook(self):
         """Set up the bot's database and metrics collection"""
         await self.load_cogs()
         self._metrics_task = self.loop.create_task(self._collect_metrics())
+        self._flush_task = self.loop.create_task(self._flush_metrics())
         logger.info("Bot setup completed")
 
     async def _collect_metrics(self):
         """Collect guild metrics every 5 minutes"""
         try:
             while not self.is_closed():
-                for guild in self.guilds:
-                    # Count active users (members who sent message in last hour)
-                    one_hour_ago = datetime.now() - timedelta(hours=1)
-                    active_users = len([
-                        m for m in guild.members 
-                        if isinstance(m.status, discord.Status.online) and not m.bot
-                    ])
-
-                    self.db.update_guild_metrics(
-                        guild_id=guild.id,
-                        member_count=guild.member_count,
-                        active_users=active_users
-                    )
+                current_time = datetime.now()
                 
-                await asyncio.sleep(300)  # 5 minutes
+                for guild in self.guilds:
+                    last_collection = self._last_metrics.get(guild.id, datetime.min)  # Use datetime.min as default
+                    if (current_time - last_collection).total_seconds() >= 300:  # 5 minutes
+                        active_users = len([
+                            m for m in guild.members 
+                            if str(m.status) == "online" and not m.bot
+                        ])
+                        
+                        async with self._buffer_lock:
+                            self._metric_buffer.append({
+                                'guild_id': guild.id,
+                                'member_count': guild.member_count,
+                                'active_users': active_users,
+                                'timestamp': current_time
+                            })
+                        self._last_metrics[guild.id] = current_time
+                
+                await asyncio.sleep(60)  # Check every minute
         except asyncio.CancelledError:
-            pass
+            if self._metric_buffer:
+                await self._flush_metrics_buffer()
         except Exception as e:
             logger.error(f"Error collecting metrics: {e}")
+
+    async def _flush_metrics(self):
+        """Periodically flush collected metrics to database"""
+        try:
+            while not self.is_closed():
+                current_time = datetime.now()
+                if (current_time - self._last_flush).total_seconds() >= 300 or len(self._metric_buffer) >= 100:
+                    await self._flush_metrics_buffer()
+                await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            if self._metric_buffer:
+                await self._flush_metrics_buffer()
+        except Exception as e:
+            logger.error(f"Error in metrics flush: {e}")
+
+    async def _flush_metrics_buffer(self):
+        """Flush metrics buffer to database"""
+        async with self._buffer_lock:
+            if not self._metric_buffer:
+                return
+            
+            try:
+                # Process in chunks of 50 to avoid overwhelming the database
+                chunk_size = 50
+                for i in range(0, len(self._metric_buffer), chunk_size):
+                    chunk = self._metric_buffer[i:i + chunk_size]
+                    await asyncio.to_thread(self.db.batch_update_metrics, chunk)
+                
+                self._metric_buffer.clear()
+                self._last_flush = datetime.now()
+            except Exception as e:
+                logger.error(f"Error flushing metrics: {e}")
+
+    def cog_unload(self):
+        """Cleanup when cog is unloaded"""
+        if self._metrics_task:
+            self._metrics_task.cancel()
+        if self._flush_task:
+            self._flush_task.cancel()
 
     async def load_cogs(self):
         """Load all cogs from the cogs directory."""

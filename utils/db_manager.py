@@ -5,8 +5,24 @@ from datetime import datetime
 from contextlib import contextmanager
 import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
+import asyncio
 
 logger = logging.getLogger(__name__)
+
+def adapt_datetime(val: datetime) -> str:
+    """Adapt datetime objects to ISO format strings for SQLite"""
+    return val.isoformat()
+
+def convert_datetime(val: bytes) -> datetime:
+    """Convert ISO format strings from SQLite to datetime objects"""
+    try:
+        return datetime.fromisoformat(val.decode())
+    except (ValueError, AttributeError):
+        return None
+
+# Register the adapter and converter
+sqlite3.register_adapter(datetime, adapt_datetime)
+sqlite3.register_converter("timestamp", convert_datetime)
 
 class DatabaseManager:
     def __init__(self, db_name):
@@ -15,6 +31,9 @@ class DatabaseManager:
         self.db_dir = os.path.join(self.base_dir, "db")
         self.backup_dir = os.path.join(self.db_dir, "backups")
         self.db_path = os.path.join(self.db_dir, f"{db_name}.db")
+        self._connection_pool = []
+        self._pool_lock = asyncio.Lock()
+        self._max_connections = 5
         
         # Create necessary directories
         os.makedirs(self.db_dir, exist_ok=True)
@@ -26,13 +45,14 @@ class DatabaseManager:
     def _initialize_db(self):
         """Initialize database with proper settings and schemas"""
         with self.connection() as conn:
-            # Performance settings
-            conn.execute("PRAGMA foreign_keys = ON")
+            # Performance tuning
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
+            conn.execute("PRAGMA cache_size = -2000000")  # Use 2GB memory for cache
             conn.execute("PRAGMA temp_store = MEMORY")
             conn.execute("PRAGMA mmap_size = 30000000000")
-            
+            conn.execute("PRAGMA busy_timeout = 60000")  # 60 second timeout
+
             # Core Tables
             guild_settings_schema = '''CREATE TABLE IF NOT EXISTS guild_settings (
                 guild_id INTEGER PRIMARY KEY,
@@ -99,6 +119,8 @@ class DatabaseManager:
                 role_id INTEGER NOT NULL,
                 type TEXT NOT NULL,
                 enabled BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (guild_id, type),
                 FOREIGN KEY (guild_id) REFERENCES guild_settings(guild_id) ON DELETE CASCADE
             )'''
@@ -116,9 +138,9 @@ class DatabaseManager:
             )'''
 
             metrics_schema = '''CREATE TABLE IF NOT EXISTS guild_metrics (
-                metric_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                metric_id INTEGER PRIMARY KEY,
                 guild_id INTEGER NOT NULL,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                timestamp TEXT DEFAULT (datetime('now')),
                 member_count INTEGER DEFAULT 0,
                 message_count INTEGER DEFAULT 0,
                 command_count INTEGER DEFAULT 0,
@@ -153,7 +175,22 @@ class DatabaseManager:
                     WHERE user_id = NEW.user_id AND guild_id = NEW.guild_id;
                 END;'''
 
+            autorole_timestamp_trigger = '''CREATE TRIGGER IF NOT EXISTS update_autorole_timestamp 
+                AFTER UPDATE ON autorole
+                BEGIN
+                    UPDATE autorole 
+                    SET updated_at = CURRENT_TIMESTAMP 
+                    WHERE guild_id = NEW.guild_id AND type = NEW.type;
+                END;'''
+
             try:
+                # Drop existing autorole table if it exists (for schema update)
+                conn.execute("DROP TABLE IF EXISTS autorole")
+                
+                # Drop and recreate metrics table to update schema
+                conn.execute("DROP TABLE IF EXISTS guild_metrics")
+                conn.execute(metrics_schema)
+
                 # Create tables
                 conn.execute(guild_settings_schema)
                 conn.execute(user_settings_schema)
@@ -162,28 +199,31 @@ class DatabaseManager:
                 conn.execute(level_roles_schema)
                 conn.execute(autorole_schema)
                 conn.execute(command_stats_schema)
-                conn.execute(metrics_schema)
 
                 # Create triggers
                 conn.execute(guild_timestamp_trigger)
                 conn.execute(user_timestamp_trigger)
                 conn.execute(weekly_xp_reset_trigger)
+                conn.execute(autorole_timestamp_trigger)
 
                 # Create indexes for performance
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_xp_guild ON xp_data(guild_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_xp_level ON xp_data(level)")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_xp_combined ON xp_data(guild_id, level, xp)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_xp_combined ON xp_data(guild_id, level DESC, xp DESC)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_autorole_guild ON autorole(guild_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_level_roles_guild ON level_roles(guild_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_user_settings_guild ON user_settings(guild_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_command_stats_guild ON command_stats(guild_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_command_stats_user ON command_stats(user_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_command_stats_analysis ON command_stats(guild_id, used_at, success)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_guild ON guild_metrics(guild_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_timestamp ON guild_metrics(timestamp)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_guild_time ON guild_metrics(guild_id, timestamp)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_recent ON guild_metrics(timestamp DESC)")
                 
-                logger.info("Database schema and indexes created successfully")
+                logger.info("Database optimization complete")
             except Exception as e:
-                logger.error(f"Error creating database schema: {e}")
+                logger.error(f"Error optimizing database: {e}")
                 raise
 
     def _create_backup(self):
@@ -201,25 +241,50 @@ class DatabaseManager:
             except Exception as e:
                 logger.error(f"Backup creation failed: {e}")
 
+    def _get_connection(self):
+        """Get a connection from the pool or create a new one"""
+        if self._connection_pool:
+            return self._connection_pool.pop()
+            
+        conn = sqlite3.connect(
+            self.db_path,
+            isolation_level=None,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+        )
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA cache_size = -2000000")
+        conn.execute("PRAGMA temp_store = MEMORY")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        return conn
+
+    def _return_connection(self, conn):
+        """Return a connection to the pool"""
+        if len(self._connection_pool) < self._max_connections:
+            self._connection_pool.append(conn)
+        else:
+            conn.close()
+
     @contextmanager
     def connection(self):
         conn = None
         try:
-            conn = sqlite3.connect(self.db_path, isolation_level=None)
+            conn = self._get_connection()
             yield conn
         except Exception as e:
             if conn: conn.rollback()
             logger.error(f"Database connection error: {e}")
             raise
         finally:
-            if conn: conn.close()
+            if conn:
+                self._return_connection(conn)
 
     @contextmanager
     def cursor(self):
         conn = None
         cur = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cur = conn.cursor()
             yield cur
             conn.commit()
@@ -232,7 +297,7 @@ class DatabaseManager:
             if cur:
                 cur.close()
             if conn:
-                conn.close()
+                self._return_connection(conn)
 
     @contextmanager
     def transaction(self):
@@ -420,21 +485,58 @@ class DatabaseManager:
                 VALUES (?, ?, ?, ?, ?)
             """, (guild_id, member_count, message_count, command_count, active_users))
 
+    def batch_update_metrics(self, metrics_data):
+        """Optimized batch update for metrics"""
+        if not metrics_data:
+            return
+            
+        try:
+            with self.connection() as conn:
+                cur = conn.cursor()
+                cur.executemany("""
+                    INSERT INTO guild_metrics 
+                    (guild_id, member_count, active_users, timestamp)
+                    VALUES (?, ?, ?, ?)
+                """, [(m['guild_id'], m['member_count'], m['active_users'], m['timestamp']) for m in metrics_data])
+        except Exception as e:
+            logger.error(f"Failed to batch update metrics: {e}")
+
     def get_guild_stats(self, guild_id: int, days: int = 7) -> Dict[str, Any]:
         """Get guild statistics for the specified time period"""
-        with self.cursor() as cur:
-            cur.execute("""
-                SELECT 
-                    AVG(member_count) as avg_members,
-                    SUM(message_count) as total_messages,
-                    SUM(command_count) as total_commands,
-                    AVG(active_users) as avg_active_users
-                FROM guild_metrics
-                WHERE guild_id = ? 
-                AND timestamp >= datetime('now', ?)
-            """, (guild_id, f'-{days} days'))
-            return dict(zip(['avg_members', 'total_messages', 'total_commands', 'avg_active_users'],
-                          cur.fetchone()))
+        try:
+            with self.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        COALESCE(AVG(member_count), 0) as avg_members,
+                        COALESCE(SUM(message_count), 0) as total_messages,
+                        COALESCE(SUM(command_count), 0) as total_commands,
+                        COALESCE(AVG(active_users), 0) as avg_active_users
+                    FROM guild_metrics
+                    WHERE guild_id = ? 
+                    AND timestamp >= datetime('now', ?)
+                """, (guild_id, f'-{days} days'))
+                result = cur.fetchone()
+                if result:
+                    return {
+                        'avg_members': result[0] or 0,
+                        'total_messages': result[1] or 0,
+                        'total_commands': result[2] or 0,
+                        'avg_active_users': result[3] or 0
+                    }
+                return {
+                    'avg_members': 0,
+                    'total_messages': 0,
+                    'total_commands': 0,
+                    'avg_active_users': 0
+                }
+        except Exception as e:
+            logger.error(f"Error getting guild stats: {e}")
+            return {
+                'avg_members': 0,
+                'total_messages': 0,
+                'total_commands': 0,
+                'avg_active_users': 0
+            }
 
     def get_user_stats(self, user_id: int, guild_id: int) -> Dict[str, Any]:
         """Get comprehensive user statistics"""
