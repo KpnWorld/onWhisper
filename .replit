@@ -1,5 +1,6 @@
 run = "python bot.py"
 language = "python3"
+modules = ["python-3.11"]
 
 [nix]
 channel = "stable-22_11"
