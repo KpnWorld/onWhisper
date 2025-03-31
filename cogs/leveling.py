@@ -439,6 +439,64 @@ class Leveling(commands.Cog):
             error_embed.set_footer(text="Administrative Command • Error")
             await interaction.response.send_message(embed=error_embed)
 
+    @app_commands.command(name="deletelevelrole", description="Remove a level role assignment (Admin only)")
+    @app_commands.default_permissions(administrator=True)
+    async def deletelevelrole(self, interaction: discord.Interaction, level: int):
+        """Remove a role assignment for a specific level"""
+        try:
+            with self.db.cursor() as cur:
+                # Check if a role exists for this level
+                cur.execute("""
+                    SELECT role_id FROM level_roles
+                    WHERE guild_id = ? AND level = ?
+                """, (interaction.guild_id, level))
+                result = cur.fetchone()
+
+                if not result:
+                    await interaction.response.send_message(f"❌ No role is assigned to level {level}.", ephemeral=True)
+                    return
+
+                # Delete the level role assignment
+                cur.execute("""
+                    DELETE FROM level_roles
+                    WHERE guild_id = ? AND level = ?
+                """, (interaction.guild_id, level))
+
+                await interaction.response.send_message(f"✅ Successfully removed the role assignment for level {level}.", ephemeral=True)
+                logger.info(f"Level role removed for level {level} in guild {interaction.guild_id}")
+        except Exception as e:
+            logger.error(f"Error removing level role: {e}")
+            await interaction.response.send_message("❌ An error occurred while removing the level role.", ephemeral=True)
+
+    @app_commands.command(name="deletelevelrole", description="Remove a role reward for a specific level (Admin only)")
+    @app_commands.default_permissions(administrator=True)
+    async def deletelevelrole(self, interaction: discord.Interaction, level: int):
+        """Delete a level role reward"""
+        try:
+            with self.db.cursor() as cur:
+                # Check if role exists for this level
+                cur.execute("""
+                    SELECT role_id FROM level_roles
+                    WHERE guild_id = ? AND level = ?
+                """, (interaction.guild_id, level))
+                result = cur.fetchone()
+
+                if not result:
+                    await interaction.response.send_message(f"❌ No role reward set for level {level}.", ephemeral=True)
+                    return
+
+                # Delete the role assignment
+                cur.execute("""
+                    DELETE FROM level_roles
+                    WHERE guild_id = ? AND level = ?
+                """, (interaction.guild_id, level))
+
+            await interaction.response.send_message(f"✅ Successfully removed the role reward for level {level}.", ephemeral=True)
+            logger.info(f"Level role for level {level} deleted in guild {interaction.guild_id}")
+        except Exception as e:
+            logger.error(f"Error deleting level role: {e}")
+            await interaction.response.send_message("❌ An error occurred while deleting the level role.", ephemeral=True)
+
     @app_commands.command(name="setcooldown", description="Set the XP gain cooldown time")
     @app_commands.default_permissions(administrator=True)
     async def setcooldown(self, interaction: discord.Interaction, time: Literal["15s", "30s", "1m", "2m", "5m"]):
