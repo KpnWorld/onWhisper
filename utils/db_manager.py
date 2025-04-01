@@ -59,7 +59,7 @@ class DatabaseManager:
             # Enable foreign keys
             cur.execute("PRAGMA foreign_keys = ON")
             
-            # Create tables
+            # Create tables with proper defaults and constraints
             cur.executescript("""
                 CREATE TABLE IF NOT EXISTS guilds (
                     id INTEGER PRIMARY KEY,
@@ -79,7 +79,7 @@ class DatabaseManager:
                     mute_role_id INTEGER,
                     autorole_enabled BOOLEAN DEFAULT 0,
                     autorole_id INTEGER,
-                    level_channel_id INTEGER,
+                    level_channel_id INTEGER DEFAULT NULL,
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
@@ -177,7 +177,7 @@ class DatabaseManager:
             """)
 
     def ensure_guild_exists(self, guild_id: int, guild_name: str = None) -> None:
-        """Ensure guild exists in database"""
+        """Ensure guild exists in database with all required settings"""
         with self.get_connection() as conn:
             cur = conn.cursor()
             
@@ -194,6 +194,12 @@ class DatabaseManager:
                     "INSERT INTO guild_settings (guild_id) VALUES (?)",
                     (guild_id,)
                 )
+                # Create default leveling settings
+                cur.execute("""
+                    INSERT INTO leveling_settings 
+                    (guild_id, xp_cooldown, min_xp, max_xp)
+                    VALUES (?, 60, 15, 25)
+                """, (guild_id,))
                 conn.commit()
 
     def get_all_guild_settings(self, guild_id: int) -> tuple:
@@ -212,8 +218,7 @@ class DatabaseManager:
                     COALESCE(ls.min_xp, 15) as min_xp,
                     COALESCE(ls.max_xp, 25) as max_xp,
                     COALESCE(ls.level_up_message, 'Congratulations {user}, you reached level {level}!') as level_up_message,
-                    ls.level_up_channel_id,
-                    gs.level_channel_id
+                    COALESCE(ls.level_up_channel_id, gs.level_channel_id) as level_channel_id
                 FROM guilds g
                 LEFT JOIN leveling_settings ls ON g.id = ls.guild_id
                 LEFT JOIN guild_settings gs ON g.id = gs.guild_id
@@ -221,16 +226,31 @@ class DatabaseManager:
             """, (guild_id,))
             result = cur.fetchone()
             
-            # Initialize leveling settings if they don't exist
-            if result and not result[6]:  # If no xp_cooldown (meaning no leveling settings)
+            # Initialize settings if missing
+            if result and not any([result[6], result[7], result[8]]):
                 cur.execute("""
-                    INSERT OR IGNORE INTO leveling_settings 
+                    INSERT OR REPLACE INTO leveling_settings 
                     (guild_id, xp_cooldown, min_xp, max_xp)
                     VALUES (?, 60, 15, 25)
                 """, (guild_id,))
                 conn.commit()
             
             return result
+
+    def reset_guild_settings(self, guild_id: int) -> bool:
+        """Reset guild settings to defaults"""
+        try:
+            with self.get_connection() as conn:
+                cur = conn.cursor()
+                # Delete existing settings
+                cur.execute("DELETE FROM guild_settings WHERE guild_id = ?", (guild_id,))
+                cur.execute("DELETE FROM leveling_settings WHERE guild_id = ?", (guild_id,))
+                # Reinitialize with defaults
+                self.ensure_guild_exists(guild_id)
+                return True
+        except Exception as e:
+            logger.error(f"Failed to reset guild settings: {e}")
+            return False
 
     def get_guild_settings(self, guild_id: int) -> Dict[str, Any]:
         """Get guild settings"""
