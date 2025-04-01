@@ -204,10 +204,10 @@ class DatabaseManager:
                     g.prefix,
                     g.locale,
                     g.timezone,
-                    ls.xp_cooldown,
-                    ls.min_xp,
-                    ls.max_xp,
-                    ls.level_up_message,
+                    COALESCE(ls.xp_cooldown, 60) as xp_cooldown,
+                    COALESCE(ls.min_xp, 15) as min_xp,
+                    COALESCE(ls.max_xp, 25) as max_xp,
+                    COALESCE(ls.level_up_message, 'Congratulations {user}, you reached level {level}!') as level_up_message,
                     ls.level_up_channel_id,
                     gs.level_channel_id
                 FROM guilds g
@@ -215,7 +215,18 @@ class DatabaseManager:
                 LEFT JOIN guild_settings gs ON g.id = gs.guild_id
                 WHERE g.id = ?
             """, (guild_id,))
-            return cur.fetchone()
+            result = cur.fetchone()
+            
+            # Initialize leveling settings if they don't exist
+            if result and not result[6]:  # If no xp_cooldown (meaning no leveling settings)
+                cur.execute("""
+                    INSERT OR IGNORE INTO leveling_settings 
+                    (guild_id, xp_cooldown, min_xp, max_xp)
+                    VALUES (?, 60, 15, 25)
+                """, (guild_id,))
+                conn.commit()
+            
+            return result
 
     def get_guild_settings(self, guild_id: int) -> Dict[str, Any]:
         """Get guild settings"""
