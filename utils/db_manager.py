@@ -59,13 +59,6 @@ class DatabaseManager:
             # Enable foreign keys
             cur.execute("PRAGMA foreign_keys = ON")
             
-            # Add updated_at column if it doesn't exist
-            cur.execute("""
-                ALTER TABLE guilds 
-                ADD COLUMN updated_at TIMESTAMP 
-                DEFAULT CURRENT_TIMESTAMP
-            """)
-            
             # Create tables
             cur.executescript("""
                 CREATE TABLE IF NOT EXISTS guilds (
@@ -161,6 +154,17 @@ class DatabaseManager:
                     FOREIGN KEY (user_id, guild_id) REFERENCES user_settings(user_id, guild_id) ON DELETE CASCADE
                 );
             """)
+
+            # Add updated_at column if table exists but column doesn't
+            try:
+                cur.execute("SELECT updated_at FROM guilds LIMIT 1")
+            except sqlite3.OperationalError:
+                # Column doesn't exist, add it
+                cur.execute("""
+                    ALTER TABLE guilds 
+                    ADD COLUMN updated_at TIMESTAMP 
+                    DEFAULT CURRENT_TIMESTAMP
+                """)
 
             # Create indexes
             cur.executescript("""
