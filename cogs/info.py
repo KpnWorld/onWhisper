@@ -397,11 +397,27 @@ class Info(commands.Cog):
             role_commands = (
                 "`/setautorole` • Configure automatic roles for new members/bots (Admin)\n"
                 "`/removeautorole` • Disable autorole system (Admin)\n"
-                "`/massrole` • Add a role to all members (Admin)"
+                "`/massrole` • Add a role to all members (Admin)\n"
+                "`/reactrole` • Create reaction role message (Admin)\n"
+                "`/removereactrole` • Remove a reaction role (Admin)\n"
+                "`/listreactroles` • List all reaction roles (Admin)"
             )
             embed.add_field(
                 name="👥 Role Management",
                 value=role_commands,
+                inline=False
+            )
+
+            # Verification System Commands
+            verify_commands = (
+                "`/setupverification` • Set up server verification (Admin)\n"
+                "`/disableverification` • Disable verification system (Admin)\n"
+                "`/verify` • Start verification process\n"
+                "`/verifycode` • Submit verification code"
+            )
+            embed.add_field(
+                name="✅ Verification System",
+                value=verify_commands,
                 inline=False
             )
 

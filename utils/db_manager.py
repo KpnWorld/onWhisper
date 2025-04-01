@@ -61,9 +61,10 @@ class DatabaseManager:
             
             # Create tables with proper defaults and constraints
             cur.executescript("""
+                -- Core guild settings
                 CREATE TABLE IF NOT EXISTS guilds (
                     id INTEGER PRIMARY KEY,
-                    name TEXT,
+                    name TEXT NOT NULL,
                     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     prefix TEXT DEFAULT '!',
                     locale TEXT DEFAULT 'en-US',
@@ -71,6 +72,7 @@ class DatabaseManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
+                -- Extended guild settings
                 CREATE TABLE IF NOT EXISTS guild_settings (
                     guild_id INTEGER PRIMARY KEY,
                     welcome_channel_id INTEGER,
@@ -80,9 +82,12 @@ class DatabaseManager:
                     autorole_enabled BOOLEAN DEFAULT 0,
                     autorole_id INTEGER,
                     level_channel_id INTEGER DEFAULT NULL,
+                    embed_color TEXT DEFAULT '0000FF',
+                    premium_status INTEGER DEFAULT 0,
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
+                -- User statistics
                 CREATE TABLE IF NOT EXISTS user_stats (
                     user_id INTEGER,
                     guild_id INTEGER,
@@ -90,10 +95,14 @@ class DatabaseManager:
                     level INTEGER DEFAULT 0,
                     messages INTEGER DEFAULT 0,
                     last_xp TIMESTAMP,
+                    voice_time INTEGER DEFAULT 0,
+                    invites INTEGER DEFAULT 0,
+                    warnings INTEGER DEFAULT 0,
                     PRIMARY KEY (user_id, guild_id),
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
+                -- Command logging
                 CREATE TABLE IF NOT EXISTS command_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER,
@@ -102,29 +111,38 @@ class DatabaseManager:
                     success BOOLEAN,
                     error TEXT,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    args TEXT,
+                    context TEXT,
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
+                -- Guild metrics
                 CREATE TABLE IF NOT EXISTS guild_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER,
                     member_count INTEGER,
                     active_users INTEGER,
                     message_count INTEGER DEFAULT 0,
+                    voice_users INTEGER DEFAULT 0,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
+                -- Leveling system settings
                 CREATE TABLE IF NOT EXISTS leveling_settings (
                     guild_id INTEGER PRIMARY KEY,
                     xp_cooldown INTEGER DEFAULT 60,
                     min_xp INTEGER DEFAULT 15,
                     max_xp INTEGER DEFAULT 25,
+                    voice_xp_enabled BOOLEAN DEFAULT 0,
+                    voice_xp_per_minute INTEGER DEFAULT 10,
                     level_up_message TEXT DEFAULT 'Congratulations {user}, you reached level {level}!',
                     level_up_channel_id INTEGER,
+                    stack_roles BOOLEAN DEFAULT 1,
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
+                -- Level role rewards
                 CREATE TABLE IF NOT EXISTS level_roles (
                     guild_id INTEGER,
                     level INTEGER,
@@ -133,47 +151,52 @@ class DatabaseManager:
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
+                -- User preferences
                 CREATE TABLE IF NOT EXISTS user_settings (
                     user_id INTEGER,
                     guild_id INTEGER,
                     notifications_enabled BOOLEAN DEFAULT 1,
                     private_levels BOOLEAN DEFAULT 0,
+                    level_dms BOOLEAN DEFAULT 0,
                     PRIMARY KEY (user_id, guild_id),
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
-                CREATE TABLE IF NOT EXISTS xp_data (
-                    user_id INTEGER,
+                -- New: Reaction role system
+                CREATE TABLE IF NOT EXISTS reaction_roles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER,
-                    xp INTEGER DEFAULT 0,
-                    level INTEGER DEFAULT 1,
-                    messages INTEGER DEFAULT 0,
-                    last_message TIMESTAMP,
-                    PRIMARY KEY (user_id, guild_id),
-                    FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE,
-                    FOREIGN KEY (user_id, guild_id) REFERENCES user_settings(user_id, guild_id) ON DELETE CASCADE
+                    channel_id INTEGER,
+                    message_id INTEGER,
+                    emoji TEXT,
+                    role_id INTEGER,
+                    description TEXT,
+                    exclusive_group INTEGER DEFAULT 0,
+                    FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                );
+
+                -- New: Verification system
+                CREATE TABLE IF NOT EXISTS verification_settings (
+                    guild_id INTEGER PRIMARY KEY,
+                    enabled BOOLEAN DEFAULT 0,
+                    channel_id INTEGER,
+                    role_id INTEGER,
+                    message TEXT DEFAULT 'React with ✅ to verify',
+                    type TEXT DEFAULT 'reaction',
+                    timeout INTEGER DEFAULT 300,
+                    captcha_enabled BOOLEAN DEFAULT 0,
+                    verification_logs BOOLEAN DEFAULT 1,
+                    FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
             """)
 
-            # Add updated_at column if table exists but column doesn't
-            try:
-                cur.execute("SELECT updated_at FROM guilds LIMIT 1")
-            except sqlite3.OperationalError:
-                # Column doesn't exist, add it
-                cur.execute("""
-                    ALTER TABLE guilds 
-                    ADD COLUMN updated_at TIMESTAMP 
-                    DEFAULT CURRENT_TIMESTAMP
-                """)
-
-            # Create indexes
+            # Create additional indexes
             cur.executescript("""
                 CREATE INDEX IF NOT EXISTS idx_user_stats_guild ON user_stats(guild_id);
                 CREATE INDEX IF NOT EXISTS idx_command_logs_guild ON command_logs(guild_id);
                 CREATE INDEX IF NOT EXISTS idx_metrics_guild_time ON guild_metrics(guild_id, timestamp);
-                CREATE INDEX IF NOT EXISTS idx_xp_data_guild ON xp_data(guild_id);
-                CREATE INDEX IF NOT EXISTS idx_xp_data_level ON xp_data(level);
-                CREATE INDEX IF NOT EXISTS idx_level_roles_guild ON level_roles(guild_id);
+                CREATE INDEX IF NOT EXISTS idx_reaction_roles_guild ON reaction_roles(guild_id);
+                CREATE INDEX IF NOT EXISTS idx_reaction_roles_message ON reaction_roles(message_id);
             """)
 
     def ensure_guild_exists(self, guild_id: int, guild_name: str = None) -> None:
