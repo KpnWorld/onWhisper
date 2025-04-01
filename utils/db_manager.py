@@ -59,6 +59,13 @@ class DatabaseManager:
             # Enable foreign keys
             cur.execute("PRAGMA foreign_keys = ON")
             
+            # Add updated_at column if it doesn't exist
+            cur.execute("""
+                ALTER TABLE guilds 
+                ADD COLUMN updated_at TIMESTAMP 
+                DEFAULT CURRENT_TIMESTAMP
+            """)
+            
             # Create tables
             cur.executescript("""
                 CREATE TABLE IF NOT EXISTS guilds (
@@ -67,7 +74,8 @@ class DatabaseManager:
                     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     prefix TEXT DEFAULT '!',
                     locale TEXT DEFAULT 'en-US',
-                    timezone TEXT DEFAULT 'UTC'
+                    timezone TEXT DEFAULT 'UTC',
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -184,6 +192,31 @@ class DatabaseManager:
                 )
                 conn.commit()
 
+    def get_all_guild_settings(self, guild_id: int) -> tuple:
+        """Get comprehensive guild settings including all related data"""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT 
+                    g.id,
+                    g.joined_at,
+                    g.updated_at,
+                    g.prefix,
+                    g.locale,
+                    g.timezone,
+                    ls.xp_cooldown,
+                    ls.min_xp,
+                    ls.max_xp,
+                    ls.level_up_message,
+                    ls.level_up_channel_id,
+                    gs.level_channel_id
+                FROM guilds g
+                LEFT JOIN leveling_settings ls ON g.id = ls.guild_id
+                LEFT JOIN guild_settings gs ON g.id = gs.guild_id
+                WHERE g.id = ?
+            """, (guild_id,))
+            return cur.fetchone()
+
     def get_guild_settings(self, guild_id: int) -> Dict[str, Any]:
         """Get guild settings"""
         with self.get_connection() as conn:
@@ -231,7 +264,7 @@ class DatabaseManager:
                 VALUES (?, ?, ?, ?, ?)
             """, [
                 (
-                    m['guild_id'],
+                    m['guild_id'], 
                     m['member_count'],
                     m['active_users'],
                     m.get('message_count', 0),
@@ -259,7 +292,6 @@ class DatabaseManager:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             backup_dir = os.path.join('db', 'backups')
             os.makedirs(backup_dir, exist_ok=True)
-            
             backup_path = os.path.join(backup_dir, f'{self.db_name}_{timestamp}.db')
             
             with self.get_connection() as src, \
@@ -268,9 +300,9 @@ class DatabaseManager:
             
             # Keep only last 5 backups
             backups = sorted(Path(backup_dir).glob(f'{self.db_name}_*.db'))
-            for backup in backups[:-5]:
-                backup.unlink()
-                
+            while len(backups) > 5:
+                backups.pop(0).unlink()
+            
             return backup_path
         except Exception as e:
             logger.error(f"Backup failed: {e}")

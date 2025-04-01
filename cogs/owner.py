@@ -170,7 +170,7 @@ class Owner(commands.Cog):
             settings = self.db.get_all_guild_settings(target_guild_id)
             
             if not settings:
-                await interaction.followup.send("Guild not found in database.", ephemeral=True)
+                await interaction.followup.send(f"Guild {target_guild_id} not found in database.", ephemeral=True)
                 return
 
             embed = discord.Embed(
