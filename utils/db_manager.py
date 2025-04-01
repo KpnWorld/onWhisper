@@ -209,55 +209,53 @@ class DatabaseManager:
             cur.execute("""
                 SELECT 
                     g.id,
-                    g.joined_at,
-                    g.updated_at,
                     g.prefix,
                     g.locale,
                     g.timezone,
                     COALESCE(ls.xp_cooldown, 60) as xp_cooldown,
                     COALESCE(ls.min_xp, 15) as min_xp,
                     COALESCE(ls.max_xp, 25) as max_xp,
+                    COALESCE(gs.level_channel_id, NULL) as level_channel_id,
+                    g.joined_at,
+                    g.updated_at,
                     COALESCE(ls.level_up_message, 'Congratulations {user}, you reached level {level}!') as level_up_message,
-                    COALESCE(ls.level_up_channel_id, NULL) as level_up_channel_id,
-                    COALESCE(gs.level_channel_id, NULL) as level_channel_id
+                    COALESCE(ls.level_up_channel_id, NULL) as level_up_channel_id
                 FROM guilds g
-                LEFT JOIN leveling_settings ls ON g.id = ls.guild_id
+                LEFT JOIN leveling_settings ls ON g.id = ls.guild_id 
                 LEFT JOIN guild_settings gs ON g.id = gs.guild_id
                 WHERE g.id = ?
             """, (guild_id,))
             result = cur.fetchone()
             
-            if result:
-                # Initialize default settings if missing
-                if not any([result[6], result[7], result[8]]):
-                    cur.execute("""
-                        INSERT OR IGNORE INTO leveling_settings 
-                        (guild_id, xp_cooldown, min_xp, max_xp)
-                        VALUES (?, 60, 15, 25)
-                    """, (guild_id,))
-                    conn.commit()
-                    
-                    # Fetch updated settings
-                    cur.execute("""
-                        SELECT 
-                            g.id,
-                            g.joined_at,
-                            g.updated_at,
-                            g.prefix,
-                            g.locale,
-                            g.timezone,
-                            ls.xp_cooldown,
-                            ls.min_xp,
-                            ls.max_xp,
-                            ls.level_up_message,
-                            ls.level_up_channel_id,
-                            gs.level_channel_id
-                        FROM guilds g
-                        LEFT JOIN leveling_settings ls ON g.id = ls.guild_id
-                        LEFT JOIN guild_settings gs ON g.id = gs.guild_id
-                        WHERE g.id = ?
-                    """, (guild_id,))
-                    result = cur.fetchone()
+            if result and not any([result[4], result[5], result[6]]):  # Check if leveling settings exist
+                cur.execute("""
+                    INSERT OR REPLACE INTO leveling_settings 
+                    (guild_id, xp_cooldown, min_xp, max_xp)
+                    VALUES (?, 60, 15, 25)
+                """, (guild_id,))
+                conn.commit()
+                
+                # Re-fetch after initialization
+                cur.execute("""
+                    SELECT 
+                        g.id,
+                        g.prefix,
+                        g.locale,
+                        g.timezone,
+                        ls.xp_cooldown,
+                        ls.min_xp,
+                        ls.max_xp,
+                        gs.level_channel_id,
+                        g.joined_at,
+                        g.updated_at,
+                        ls.level_up_message,
+                        ls.level_up_channel_id
+                    FROM guilds g
+                    LEFT JOIN leveling_settings ls ON g.id = ls.guild_id
+                    LEFT JOIN guild_settings gs ON g.id = gs.guild_id
+                    WHERE g.id = ?
+                """, (guild_id,))
+                result = cur.fetchone()
             
             return result
 

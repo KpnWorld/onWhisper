@@ -178,7 +178,7 @@ class Owner(commands.Cog):
                 color=discord.Color.blue()
             )
 
-            # Core Settings
+            # Core Settings (indexes 0-3)
             core_info = (
                 f"ID: {settings[0]}\n"
                 f"Prefix: {settings[1]}\n"
@@ -191,7 +191,7 @@ class Owner(commands.Cog):
                 inline=False
             )
 
-            # Leveling Settings
+            # Leveling Settings (indexes 4-7)
             level_info = (
                 f"XP Cooldown: {settings[4]}s\n"
                 f"XP Range: {settings[5]}-{settings[6]}\n"
@@ -200,6 +200,19 @@ class Owner(commands.Cog):
             embed.add_field(
                 name="📈 Leveling System",
                 value=f"```\n{level_info}\n```",
+                inline=False
+            )
+
+            # Database Info (indexes 8-9)
+            created = datetime.fromisoformat(settings[8].replace('Z', '+00:00'))
+            updated = datetime.fromisoformat(settings[9].replace('Z', '+00:00'))
+            db_info = (
+                f"Created: {created.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"Last Updated: {updated.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            embed.add_field(
+                name="📁 Database Info",
+                value=f"```\n{db_info}\n```",
                 inline=False
             )
 
@@ -227,19 +240,6 @@ class Owner(commands.Cog):
                     value=f"```\n{stats}\n```",
                     inline=False
                 )
-
-            # Database Info
-            created = datetime.fromisoformat(settings[8].replace('Z', '+00:00'))
-            updated = datetime.fromisoformat(settings[9].replace('Z', '+00:00'))
-            db_info = (
-                f"Created: {created.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"Last Updated: {updated.strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            embed.add_field(
-                name="📁 Database Info",
-                value=f"```\n{db_info}\n```",
-                inline=False
-            )
 
             await interaction.followup.send(embed=embed)
             logger.info(f"Guild info viewed by {interaction.user}")
