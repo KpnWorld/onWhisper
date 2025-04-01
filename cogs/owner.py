@@ -181,9 +181,9 @@ class Owner(commands.Cog):
             # Core Settings
             core_info = (
                 f"ID: {settings[0]}\n"
-                f"Prefix: {settings[3]}\n"
-                f"Locale: {settings[4]}\n"
-                f"Timezone: {settings[5]}"
+                f"Prefix: {settings[1]}\n"
+                f"Locale: {settings[2]}\n"
+                f"Timezone: {settings[3]}"
             )
             embed.add_field(
                 name="⚙️ Core Settings",
@@ -193,9 +193,9 @@ class Owner(commands.Cog):
 
             # Leveling Settings
             level_info = (
-                f"XP Cooldown: {settings[7]}s\n"
-                f"XP Range: {settings[8]}-{settings[9]}\n"
-                f"Level Channel: {f'<#{settings[11]}>' if settings[11] else 'Default'}"
+                f"XP Cooldown: {settings[4]}s\n"
+                f"XP Range: {settings[5]}-{settings[6]}\n"
+                f"Level Channel: {f'<#{settings[7]}>' if settings[7] else 'Default'}"
             )
             embed.add_field(
                 name="📈 Leveling System",
@@ -229,8 +229,8 @@ class Owner(commands.Cog):
                 )
 
             # Database Info
-            created = datetime.fromisoformat(settings[1].replace('Z', '+00:00'))
-            updated = datetime.fromisoformat(settings[2].replace('Z', '+00:00'))
+            created = datetime.fromisoformat(settings[8].replace('Z', '+00:00'))
+            updated = datetime.fromisoformat(settings[9].replace('Z', '+00:00'))
             db_info = (
                 f"Created: {created.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 f"Last Updated: {updated.strftime('%Y-%m-%d %H:%M:%S')}"
