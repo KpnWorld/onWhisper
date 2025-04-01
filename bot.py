@@ -35,24 +35,21 @@ class ColoredFormatter(logging.Formatter):
         'DEBUG': Fore.GREEN
     }
 
-    # Messages to completely filter out
-    FILTERED_MESSAGES = [
-        'logging in using static token',
-        'has connected to Gateway',
-        'Shard ID',
-        'Session ID'
-    ]
-
     def format(self, record):
         if record.msg is None:
             return ''
             
         msg_str = str(record.msg)
         
-        # Filter out noise
-        if any(filter_msg in msg_str for filter_msg in self.FILTERED_MESSAGES):
-            return ''
-        
+        # Special handling for discord.client and discord.gateway logs
+        if record.name in ('discord.client', 'discord.gateway', 'discord.http'):
+            # Convert these logs to our format
+            clean_msg = msg_str
+            for filter_msg in ('logging in using static token', 'has connected to Gateway'):
+                if filter_msg in msg_str:
+                    return ''  # Filter out these messages completely
+            return f"{self.COLORS['INFO']}INFO{Style.RESET_ALL} | {clean_msg}"
+                
         # Clean up bot status message
         if "Bot is in" in msg_str:
             guild_count = msg_str.split()[3]
@@ -61,7 +58,7 @@ class ColoredFormatter(logging.Formatter):
         if record.levelname in self.COLORS:
             record.levelname = f"{self.COLORS[record.levelname]}{record.levelname}{Style.RESET_ALL}"
             
-        return super().format(record)
+        return f"{record.levelname} | {msg_str}"
 
 # Create logs directory if it doesn't exist
 def setup_logging_directory():
@@ -86,11 +83,11 @@ os.makedirs('db', exist_ok=True)  # Add database directory
 
 # Configure handlers
 console_handler = logging.StreamHandler()
-console_handler.setFormatter(ColoredFormatter('%(levelname)s | %(message)s'))
+console_handler.setFormatter(ColoredFormatter())
 
 log_file = setup_logging_directory()
 file_handler = logging.FileHandler(log_file, encoding='utf-8')
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
 # Clear any existing handlers from all loggers
 logging.getLogger().handlers.clear()
@@ -104,19 +101,22 @@ root_logger.setLevel(logging.INFO)
 root_logger.addHandler(console_handler)
 root_logger.addHandler(file_handler)
 
+# Configure discord loggers with our formatting
+for logger_name in ('discord', 'discord.client', 'discord.gateway', 'discord.http'):
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.handlers = []  # Clear any existing handlers
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
 # Configure our bot logger
 logger = logging.getLogger('onWhisper')
 logger.setLevel(logging.INFO)
-logger.propagate = False  # Changed to False
+logger.propagate = False
+logger.handlers = []  # Clear any existing handlers
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
-
-# Configure discord logger
-discord_logger = logging.getLogger('discord')
-discord_logger.setLevel(logging.INFO)
-discord_logger.propagate = False
-discord_logger.addHandler(console_handler)
-discord_logger.addHandler(file_handler)
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
