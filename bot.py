@@ -232,7 +232,13 @@ class Bot(commands.Bot):
         try:
             # Initialize settings for all guilds
             for guild in self.guilds:
-                self.db.ensure_guild_exists(guild.id)
+                try:
+                    self.db.ensure_guild_exists(guild.id)
+                except sqlite3.IntegrityError:
+                    # Skip if guild settings already exist
+                    continue
+                except Exception as e:
+                    logger.error(f"Error initializing guild {guild.id}: {e}")
 
             # Count and sync slash commands
             command_count = 0

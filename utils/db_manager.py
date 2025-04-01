@@ -8,6 +8,23 @@ from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+class DatabaseCursor:
+    def __init__(self, db_manager):
+        self.db_manager = db_manager
+        self.conn = None
+        self.cursor = None
+
+    def __enter__(self):
+        self.conn = self.db_manager.get_connection()
+        self.cursor = self.conn.cursor()
+        return self.cursor
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self.conn.commit()
+        self.cursor.close()
+        self.conn.close()
+
 class DatabaseManager:
     def __init__(self, db_name: str):
         """Initialize database connection"""
@@ -31,8 +48,8 @@ class DatabaseManager:
         return conn
 
     def cursor(self):
-        """Get a database cursor with automatic connection handling"""
-        return self.get_connection().cursor()
+        """Get a database cursor with context manager support"""
+        return DatabaseCursor(self)
 
     def setup_database(self) -> None:
         """Initialize database schema"""
