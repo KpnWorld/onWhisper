@@ -27,6 +27,7 @@ def get_size(bytes_size: int) -> str:
 class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.db = bot.db  # Use bot's database instance
         self.start_time = time.time()
         logger.info("Info cog initialized")
 
@@ -379,10 +380,11 @@ class Info(commands.Cog):
             # Leveling System Commands
             leveling_commands = (
                 "`/level [user]` • Check your or another user's level\n"
-                "`/leaderboard` • View the server's top 10 users\n"
+                "`/leaderboard` • View the server's XP leaderboard\n"
                 "`/levelconfig` • View leveling system settings (Admin)\n"
                 "`/setlevelrole` • Configure level-up role rewards (Admin)\n"
-                "`/setcooldown` • Set XP gain cooldown time (Admin)\n"
+                "`/deletelevelrole` • Remove a level role reward (Admin)\n"
+                "`/setcooldown` • Set XP gain cooldown (Admin)\n"
                 "`/setxprange` • Configure min/max XP per message (Admin)"
             )
             embed.add_field(
@@ -393,9 +395,9 @@ class Info(commands.Cog):
 
             # Role Management Commands
             role_commands = (
-                "`/setautorole` • Set automatic roles for new members (Admin)\n"
+                "`/setautorole` • Configure automatic roles for new members/bots (Admin)\n"
                 "`/removeautorole` • Disable autorole system (Admin)\n"
-                "`/massrole` • Add a role to all matching members (Admin)"
+                "`/massrole` • Add a role to all members (Admin)"
             )
             embed.add_field(
                 name="👥 Role Management",
@@ -403,11 +405,11 @@ class Info(commands.Cog):
                 inline=False
             )
 
-            # Statistics & Analytics
+            # Statistics & Analytics Commands
             stats_commands = (
-                "`/stats` • View global bot statistics (Owner)\n"
-                "`/guildstats` • View detailed server statistics (Admin)\n"
-                "`/viewguild` • View detailed guild configuration (Admin)"
+                "`/stats [timeframe]` • View global bot statistics (Owner)\n"
+                "`/guildstats [timeframe]` • View detailed server statistics (Admin)\n"
+                "`/viewguild [guild_id]` • View detailed guild configuration (Admin)"
             )
             embed.add_field(
                 name="📈 Statistics & Analytics",
@@ -415,11 +417,12 @@ class Info(commands.Cog):
                 inline=False
             )
 
-            # Command Notes
+            # Command Usage Notes
             notes = (
                 "**Note:**\n"
                 "• Commands marked with (Admin) require administrator permissions\n"
                 "• Commands marked with (Owner) are restricted to bot owner\n"
+                "• Optional parameters are shown in [brackets]\n"
                 "• Use </help:ID> to see this menu again"
             )
             embed.add_field(
@@ -428,11 +431,27 @@ class Info(commands.Cog):
                 inline=False
             )
 
+            # Support Information
+            support_info = (
+                "**Need Help?**\n"
+                "• Join our [Support Server](https://discord.gg/DAJVS99yMq)\n"
+                "• Report bugs to `@og.kpnworld`\n"
+                "• View documentation on [GitHub](https://github.com/KpnWorld/onWhisper-Bot)"
+            )
+            embed.add_field(
+                name="🔧 Support",
+                value=support_info,
+                inline=False
+            )
+
             await interaction.response.send_message(embed=embed)
             logger.info(f"Help command used by {interaction.user}")
         except Exception as e:
             logger.error(f"Error in help command: {e}")
-            await interaction.response.send_message("❌ An error occurred while fetching help menu.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ An error occurred while fetching help menu.",
+                ephemeral=True
+            )
 
 async def setup(bot):
     await bot.add_cog(Info(bot))

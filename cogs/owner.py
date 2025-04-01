@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 class Owner(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = DatabaseManager('bot')
+        self.db = bot.db  # Use bot's database instance
+        logger.info("Owner cog initialized")
 
     def cog_check(self, ctx):
         """Only allow bot owner to use these commands"""

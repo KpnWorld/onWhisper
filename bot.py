@@ -11,6 +11,7 @@ from colorama import Fore, Style
 import time
 from datetime import datetime, timedelta
 import sqlite3
+from utils.db_manager import DatabaseManager
 
 # Initialize colorama for Windows
 colorama.init()
@@ -135,72 +136,6 @@ def convert_datetime(val: bytes) -> datetime:
 sqlite3.register_adapter(datetime, adapt_datetime)
 sqlite3.register_converter("timestamp", convert_datetime)
 
-class DatabaseManager:
-    def __init__(self, db_name):
-        self.db_name = db_name
-        self.db_path = os.path.join('db', f'{db_name}.db')
-        os.makedirs('db', exist_ok=True)
-
-    def update_guild_metrics(self, guild_id: int, member_count: int, active_users: int):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cur = conn.cursor()
-                cur.execute("""
-                    INSERT INTO guild_metrics 
-                    (guild_id, member_count, active_users)
-                    VALUES (?, ?, ?)
-                """, (guild_id, member_count, active_users))
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Failed to update metrics: {e}")
-
-    def batch_update_metrics(self, metrics_data):
-        try:
-            with sqlite3.connect(
-                self.db_path,
-                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
-            ) as conn:
-                cur = conn.cursor()
-                cur.executemany("""
-                    INSERT INTO guild_metrics 
-                    (guild_id, member_count, active_users, timestamp)
-                    VALUES (?, ?, ?, ?)
-                """, [(m['guild_id'], m['member_count'], m['active_users'], m['timestamp']) for m in metrics_data])
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Failed to batch update metrics: {e}")
-
-    def ensure_guild_exists(self, guild_id: int):
-        try:
-            with sqlite3.connect(
-                self.db_path,
-                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
-            ) as conn:
-                cur = conn.cursor()
-                cur.execute("""
-                    INSERT OR IGNORE INTO guild_settings (guild_id)
-                    VALUES (?)
-                """, (guild_id,))
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Failed to ensure guild exists: {e}")
-
-    def log_command(self, guild_id: int, user_id: int, command_name: str, success: bool = True, error: str = None):
-        try:
-            with sqlite3.connect(
-                self.db_path,
-                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
-            ) as conn:
-                cur = conn.cursor()
-                cur.execute("""
-                    INSERT INTO command_stats 
-                    (guild_id, user_id, command_name, success, error_message)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (guild_id, user_id, command_name, success, error))
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Failed to log command: {e}")
-
 class Bot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
@@ -281,13 +216,6 @@ class Bot(commands.Bot):
                 self._last_flush = datetime.now()
             except Exception as e:
                 logger.error(f"Error flushing metrics: {e}")
-
-    def cog_unload(self):
-        """Cleanup when cog is unloaded"""
-        if self._metrics_task:
-            self._metrics_task.cancel()
-        if self._flush_task:
-            self._flush_task.cancel()
 
     async def load_cogs(self):
         """Load all cogs from the cogs directory."""

@@ -17,7 +17,7 @@ ROLE_TYPES = [
 class AutoRole(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = DatabaseManager('autorole')
+        self.db = bot.db  # Use bot's database instance instead of creating a new one
         self._init_db()
         logger.info("AutoRole cog initialized")
 
