@@ -12,11 +12,53 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+class VerifyModal(discord.ui.Modal, title="Verification"):
+    code = discord.ui.TextInput(
+        label="Enter Verification Code",
+        placeholder="Enter the code from the image above",
+        min_length=6,
+        max_length=6,
+        required=True
+    )
+
+    def __init__(self, expected_code: str, role: discord.Role):
+        super().__init__()
+        self.expected_code = expected_code
+        self.role = role
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.code.value.upper() == self.expected_code:
+            try:
+                await interaction.user.add_roles(self.role)
+                await interaction.response.send_message(
+                    "✅ You have been successfully verified!", 
+                    ephemeral=True
+                )
+                logger.info(f"User {interaction.user} verified in {interaction.guild.name}")
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    "❌ Failed to assign verification role.", 
+                    ephemeral=True
+                )
+        else:
+            await interaction.response.send_message(
+                "❌ Incorrect code. Please try again.", 
+                ephemeral=True
+            )
+
+class VerifyButton(discord.ui.View):
+    def __init__(self, modal: VerifyModal):
+        super().__init__(timeout=None)
+        self.modal = modal
+
+    @discord.ui.button(label="Verify", style=discord.ButtonStyle.primary, emoji="✅")
+    async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(self.modal)
+
 class Verification(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
-        self.verifying_users = {}
         self.session = aiohttp.ClientSession()
         logger.info("Verification cog initialized")
     
@@ -214,66 +256,7 @@ class Verification(commands.Cog):
                 )
                 return
 
-            # Generate captcha
-            code = self.generate_verification_code()
-            self.verifying_users[interaction.user.id] = code
-            captcha = await self.generate_captcha(code)
-
-            embed = discord.Embed(
-                title="Verification Required",
-                description="Please enter the code shown in the image",
-                color=discord.Color.blue()
-            )
-            embed.set_image(url="attachment://captcha.png")
-
-            await interaction.response.send_message(
-                embed=embed,
-                file=discord.File(captcha, "captcha.png"),
-                ephemeral=True
-            )
-        except Exception as e:
-            logger.error(f"Error starting verification: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred during verification.",
-                ephemeral=True
-            )
-
-    @app_commands.command(name="verifycode", description="Submit verification code")
-    @app_commands.describe(code="The verification code from the captcha")
-    async def verifycode(self, interaction: discord.Interaction, code: str):
-        try:
-            if interaction.user.id not in self.verifying_users:
-                await interaction.response.send_message(
-                    "❌ Please start verification first using /verify",
-                    ephemeral=True
-                )
-                return
-
-            expected_code = self.verifying_users[interaction.user.id]
-            if code.upper() != expected_code:
-                await interaction.response.send_message(
-                    "❌ Incorrect code. Please try again.",
-                    ephemeral=True
-                )
-                return
-
-            # Get verification role
-            with self.db.cursor() as cur:
-                cur.execute("""
-                    SELECT role_id 
-                    FROM verification_settings 
-                    WHERE guild_id = ? AND enabled = 1
-                """, (interaction.guild_id,))
-                result = cur.fetchone()
-
-            if not result:
-                await interaction.response.send_message(
-                    "❌ Verification system is not properly configured.",
-                    ephemeral=True
-                )
-                return
-
-            role = interaction.guild.get_role(result[0])
+            role = interaction.guild.get_role(role_id)
             if not role:
                 await interaction.response.send_message(
                     "❌ Verification role not found.",
@@ -281,18 +264,28 @@ class Verification(commands.Cog):
                 )
                 return
 
-            await interaction.user.add_roles(role)
-            del self.verifying_users[interaction.user.id]
+            # Generate captcha
+            code = self.generate_verification_code()
+            captcha = await self.generate_captcha(code)
 
             embed = discord.Embed(
-                title="✅ Verification Successful",
-                description="You have been verified!",
-                color=discord.Color.green()
+                title="Verification Required",
+                description="Click the button below and enter the code shown in the image",
+                color=discord.Color.blue()
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            logger.info(f"User {interaction.user} verified in {interaction.guild.name}")
+            embed.set_image(url="attachment://captcha.png")
+
+            modal = VerifyModal(code, role)
+            view = VerifyButton(modal)
+
+            await interaction.response.send_message(
+                embed=embed,
+                file=discord.File(captcha, "captcha.png"),
+                view=view,
+                ephemeral=True
+            )
         except Exception as e:
-            logger.error(f"Error in verification code check: {e}")
+            logger.error(f"Error starting verification: {e}")
             await interaction.response.send_message(
                 "❌ An error occurred during verification.",
                 ephemeral=True
