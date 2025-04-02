@@ -412,8 +412,7 @@ class Info(commands.Cog):
             verify_commands = (
                 "`/setupverification` • Set up server verification (Admin)\n"
                 "`/disableverification` • Disable verification system (Admin)\n"
-                "`/verify` • Start verification process\n"
-                "`/verifycode` • Submit verification code"
+                "`/verify` • Start verification process"
             )
             embed.add_field(
                 name="✅ Verification System",
