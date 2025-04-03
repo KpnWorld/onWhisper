@@ -12,14 +12,20 @@ class Owner(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db  # Use bot's database instance
+        self.owner_id = 515894172276695051  # Replace with your Discord user ID
         logger.info("Owner cog initialized")
 
-    def cog_check(self, ctx):
-        """Only allow bot owner to use these commands"""
-        return ctx.author.id == self.bot.owner_id
+    async def cog_check(self, interaction: discord.Interaction) -> bool:
+        """Check if the user is the bot owner"""
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "❌ This command is restricted to the bot owner.", 
+                ephemeral=True
+            )
+            return False
+        return True
 
     @app_commands.command(name="stats", description="View global bot statistics and metrics")
-    @app_commands.default_permissions(administrator=True)
     async def stats(self, interaction: discord.Interaction, timeframe: Literal["day", "week", "month"] = "week"):
         """View detailed bot statistics across all guilds"""
         try:
@@ -160,7 +166,6 @@ class Owner(commands.Cog):
             )
 
     @app_commands.command(name="viewguild", description="View detailed guild information")
-    @app_commands.default_permissions(administrator=True)
     async def viewguild(self, interaction: discord.Interaction, guild_id: str = None):
         """View detailed information about a guild"""
         try:
@@ -253,7 +258,6 @@ class Owner(commands.Cog):
             )
 
     @app_commands.command(name="guildstats", description="View statistics for a specific guild")
-    @app_commands.default_permissions(administrator=True)
     async def guildstats(self, interaction: discord.Interaction, timeframe: Literal["day", "week", "month"] = "week"):
         """View detailed statistics for the current guild"""
         try:

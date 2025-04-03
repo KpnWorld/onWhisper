@@ -7,7 +7,7 @@ import os
 import psutil
 import platform
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -356,9 +356,13 @@ class Info(commands.Cog):
     async def help(self, interaction: discord.Interaction):
         """Shows all available commands and their descriptions"""
         try:
+            # Main help embed
             embed = discord.Embed(
                 title="📚 onWhisper Help Menu",
-                description="Here are all available commands, organized by category:",
+                description=(
+                    "A versatile Discord bot with leveling, verification, and role management features.\n"
+                    "All commands use `/` slash command format."
+                ),
                 color=discord.Color.blue()
             )
 
@@ -366,26 +370,27 @@ class Info(commands.Cog):
             info_commands = (
                 "`/help` • Show this help menu\n"
                 "`/ping` • Check bot's latency\n"
-                "`/uptime` • Check bot's uptime and system stats\n"
-                "`/botinfo` • Get detailed information about the bot\n"
-                "`/serverinfo` • Get comprehensive server information\n"
-                "`/userinfo [user]` • Get detailed user information"
+                "`/uptime` • Check bot's uptime\n"
+                "`/botinfo` • View bot information\n"
+                "`/serverinfo` • View server details\n"
+                "`/userinfo [user]` • View user details\n"
+                "`/guildstats [timeframe]` • View server statistics (Admin)"
             )
             embed.add_field(
-                name="ℹ️ Information & Utility",
+                name="ℹ️ Information",
                 value=info_commands,
                 inline=False
             )
 
             # Leveling System Commands
             leveling_commands = (
-                "`/level [user]` • Check your or another user's level\n"
-                "`/leaderboard` • View the server's XP leaderboard\n"
-                "`/levelconfig` • View leveling system settings (Admin)\n"
-                "`/setlevelrole` • Configure level-up role rewards (Admin)\n"
-                "`/deletelevelrole` • Remove a level role reward (Admin)\n"
-                "`/setcooldown` • Set XP gain cooldown (Admin)\n"
-                "`/setxprange` • Configure min/max XP per message (Admin)"
+                "`/level [user]` • View level progress\n"
+                "`/leaderboard` • View XP rankings\n"
+                "`/levelconfig` • View level settings (Admin)\n"
+                "`/setlevelrole` • Set level role rewards (Admin)\n"
+                "`/deletelevelrole` • Remove level roles (Admin)\n"
+                "`/setcooldown` • Set XP cooldown (Admin)\n"
+                "`/setxprange` • Set XP gain range (Admin)"
             )
             embed.add_field(
                 name="📊 Leveling System",
@@ -395,12 +400,12 @@ class Info(commands.Cog):
 
             # Role Management Commands
             role_commands = (
-                "`/setautorole` • Configure automatic roles for new members/bots (Admin)\n"
-                "`/removeautorole` • Disable autorole system (Admin)\n"
-                "`/massrole` • Add a role to all members (Admin)\n"
-                "`/reactrole` • Create reaction role message (Admin)\n"
-                "`/removereactrole` • Remove a reaction role (Admin)\n"
-                "`/listreactroles` • List all reaction roles (Admin)"
+                "`/setautorole` • Set auto-roles for new members (Admin)\n"
+                "`/removeautorole` • Disable auto-roles (Admin)\n"
+                "`/reactrole` • Create reaction roles (Admin)\n"
+                "`/removereactrole` • Remove reaction roles (Admin)\n"
+                "`/listreactroles` • List all reaction roles (Admin)\n"
+                "`/massrole` • Add role to all members (Admin)"
             )
             embed.add_field(
                 name="👥 Role Management",
@@ -410,8 +415,8 @@ class Info(commands.Cog):
 
             # Verification System Commands
             verify_commands = (
-                "`/setupverification` • Set up server verification (Admin)\n"
-                "`/disableverification` • Disable verification system (Admin)\n"
+                "`/setupverification` • Set up verification (Admin)\n"
+                "`/disableverification` • Disable verification (Admin)\n"
                 "`/verify` • Start verification process"
             )
             embed.add_field(
@@ -420,42 +425,19 @@ class Info(commands.Cog):
                 inline=False
             )
 
-            # Statistics & Analytics Commands
-            stats_commands = (
-                "`/stats [timeframe]` • View global bot statistics (Owner)\n"
-                "`/guildstats [timeframe]` • View detailed server statistics (Admin)\n"
-                "`/viewguild [guild_id]` • View detailed guild configuration (Admin)"
-            )
-            embed.add_field(
-                name="📈 Statistics & Analytics",
-                value=stats_commands,
-                inline=False
-            )
-
             # Command Usage Notes
             notes = (
-                "**Note:**\n"
-                "• Commands marked with (Admin) require administrator permissions\n"
-                "• Commands marked with (Owner) are restricted to bot owner\n"
-                "• Optional parameters are shown in [brackets]\n"
-                "• Use </help:ID> to see this menu again"
+                "**Command Requirements:**\n"
+                "• (Admin) - Requires administrator permissions\n"
+                "• [optional] - Optional command parameters\n"
+                "\n"
+                "**Need Help?**\n"
+                "• Join our [Support Server](https://discord.gg/DAJVS99yMq)\n"
+                "• Contact: `@og.kpnworld`"
             )
             embed.add_field(
                 name="📝 Additional Information",
                 value=notes,
-                inline=False
-            )
-
-            # Support Information
-            support_info = (
-                "**Need Help?**\n"
-                "• Join our [Support Server](https://discord.gg/DAJVS99yMq)\n"
-                "• Report bugs to `@og.kpnworld`\n"
-                "• View documentation on [GitHub](https://github.com/KpnWorld/onWhisper-Bot)"
-            )
-            embed.add_field(
-                name="🔧 Support",
-                value=support_info,
                 inline=False
             )
 
@@ -467,6 +449,71 @@ class Info(commands.Cog):
                 "❌ An error occurred while fetching help menu.",
                 ephemeral=True
             )
+
+    @app_commands.command(name="guildstats", description="View statistics for this server")
+    @app_commands.default_permissions(administrator=True)
+    async def guildstats(self, interaction: discord.Interaction, timeframe: Literal["day", "week", "month"] = "week"):
+        """View detailed statistics for the current guild"""
+        try:
+            await interaction.response.defer()
+
+            days_map = {"day": 1, "week": 7, "month": 30}
+            days = days_map[timeframe]
+
+            # Get guild metrics
+            with self.db.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        ROUND(AVG(CAST(member_count AS FLOAT)), 0) as avg_members,
+                        SUM(message_count) as total_messages,
+                        COUNT(DISTINCT metric_id) as data_points,
+                        ROUND(AVG(CAST(active_users AS FLOAT)), 0) as avg_active
+                    FROM guild_metrics
+                    WHERE guild_id = ? 
+                    AND timestamp >= datetime('now', ?)
+                """, (interaction.guild_id, f'-{days} days'))
+                metrics = cur.fetchone()
+
+            embed = discord.Embed(
+                title=f"📊 Server Statistics ({timeframe})",
+                description=f"Statistics for {interaction.guild.name}",
+                color=discord.Color.blue()
+            )
+
+            # Activity metrics
+            avg_members = int(metrics[0] or 0)
+            total_messages = int(metrics[1] or 0)
+            data_points = int(metrics[2] or 0)
+            avg_active = int(metrics[3] or 0)
+
+            # Get command usage count
+            with self.db.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM command_stats
+                    WHERE guild_id = ? 
+                    AND used_at >= datetime('now', ?)
+                """, (interaction.guild_id, f'-{days} days'))
+                total_commands = cur.fetchone()[0] or 0
+
+            stats_text = (
+                f"Average Members: {avg_members:,}\n"
+                f"Total Messages: {total_messages:,}\n"
+                f"Commands Used: {total_commands:,}\n"
+                f"Active Users (avg): {avg_active:,}\n"
+                f"Data Points: {data_points:,}"
+            )
+            embed.add_field(
+                name="📈 Activity Metrics",
+                value=f"```{stats_text}```",
+                inline=False
+            )
+
+            await interaction.response.send_message(embed=embed)
+            logger.info(f"Guild stats command used by {interaction.user}")
+        except Exception as e:
+            logger.error(f"Error in guildstats command: {e}")
+            await interaction.response.send_message("❌ An error occurred while fetching guild stats.", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Info(bot))
