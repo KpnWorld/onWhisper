@@ -336,9 +336,9 @@ class Info(commands.Cog):
             # Links and Support
             links_info = (
                 "Developer: @og.kpnworld\n"
-                "Support: [Discord Server](https://discord.gg/64bGK2SQpX)\n"
-                "GitHub: [Repository](https://github.com/your/repo)\n"
-                "Invite: [Add to Server](https://discord.com/oauth2/authorize)"
+                "Support: [Discord Server](https://discord.gg/DAJVS99yMq)\n"
+                "GitHub: [Repository](https://github.com/KpnWorld/onWhisper-Bot)\n"
+                "Invite: [Add to Server](https://discord.com/oauth2/authorize?client_id=1316917918239293543)"
             )
             embed.add_field(
                 name="🔗 Links",

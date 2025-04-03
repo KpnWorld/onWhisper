@@ -12,7 +12,7 @@ class Owner(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db  # Use bot's database instance
-        self.owner_id = 515894172276695051  # Replace with your Discord user ID
+        self.owner_id = 895767962722660372 # Replace with your Discord user ID
         logger.info("Owner cog initialized")
 
     async def cog_check(self, interaction: discord.Interaction) -> bool:
