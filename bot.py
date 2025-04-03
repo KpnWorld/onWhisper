@@ -147,6 +147,7 @@ class Bot(commands.Bot):
         self._metric_buffer = []
         self._buffer_lock = asyncio.Lock()
         self._last_flush = datetime.now()
+        self._rate_limit_retries = 0  # Track rate limit retries
 
     async def setup_hook(self):
         """Set up the bot's database and metrics collection"""
@@ -288,6 +289,24 @@ class Bot(commands.Bot):
                 success=True
             )
 
+    async def on_error(self, event_method: str, *args, **kwargs):
+        """Global error handler for bot events"""
+        try:
+            error = sys.exc_info()[1]
+            if isinstance(error, discord.errors.HTTPException) and error.status == 429:
+                retry_after = error.response.headers.get('Retry-After', 5)
+                self._rate_limit_retries += 1
+                wait_time = float(retry_after) * (2 ** self._rate_limit_retries)  # Exponential backoff
+                logger.warning(f"Rate limited. Waiting {wait_time:.2f} seconds before retry. Retry count: {self._rate_limit_retries}")
+                await asyncio.sleep(wait_time)
+                if event_method == "start":
+                    await self.start(TOKEN)
+            else:
+                self._rate_limit_retries = 0  # Reset retry counter on non-rate-limit errors
+                logger.error(f"Error in {event_method}: {str(error)}")
+        except Exception as e:
+            logger.error(f"Error in error handler: {str(e)}")
+
 # List of activities for the bot to cycle through
 ACTIVITIES = [
     discord.Game(name="with commands"),
@@ -304,13 +323,29 @@ async def change_activity():
     await bot.change_presence(activity=random.choice(ACTIVITIES))
 
 def run_bot():
-    """Start the bot with the token from environment variables."""
-    try:
-        asyncio.run(bot.run(TOKEN))
-    except KeyboardInterrupt:
-        logger.info('Bot shutdown initiated')
-    except Exception as e:
-        logger.error(f'Failed to start bot: {str(e)}')
+    """Start the bot with rate limit handling"""
+    retries = 0
+    max_retries = 5
+    base_delay = 5
+
+    while retries < max_retries:
+        try:
+            asyncio.run(bot.run(TOKEN))
+            break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:  # Rate limit error
+                retries += 1
+                delay = base_delay * (2 ** retries)  # Exponential backoff
+                logger.warning(f"Rate limited on startup. Attempt {retries}/{max_retries}. Waiting {delay} seconds...")
+                time.sleep(delay)
+            else:
+                raise
+        except KeyboardInterrupt:
+            logger.info('Bot shutdown initiated')
+            break
+        except Exception as e:
+            logger.error(f'Failed to start bot: {str(e)}')
+            break
 
 if __name__ == '__main__':
     check_dependencies()
