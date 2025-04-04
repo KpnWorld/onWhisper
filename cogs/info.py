@@ -505,15 +505,21 @@ class Info(commands.Cog):
             )
             embed.add_field(
                 name="📈 Activity Metrics",
-                value=f"```{stats_text}```",
+                value=f"```\n{stats_text}\n```",
                 inline=False
             )
 
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
             logger.info(f"Guild stats command used by {interaction.user}")
         except Exception as e:
             logger.error(f"Error in guildstats command: {e}")
-            await interaction.response.send_message("❌ An error occurred while fetching guild stats.", ephemeral=True)
+            try:
+                await interaction.followup.send(
+                    "❌ An error occurred while fetching guild stats.", 
+                    ephemeral=True
+                )
+            except:
+                pass
 
 async def setup(bot):
     await bot.add_cog(Info(bot))
