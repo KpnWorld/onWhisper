@@ -4,6 +4,7 @@ from discord.ext import commands, tasks
 import os
 import random
 import asyncio
+import sys
 import logging
 from dotenv import load_dotenv
 import colorama

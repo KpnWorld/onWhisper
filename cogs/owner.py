@@ -257,9 +257,9 @@ class Owner(commands.Cog):
                 ephemeral=True
             )
 
-    @app_commands.command(name="guildstats", description="View statistics for a specific guild")
-    async def guildstats(self, interaction: discord.Interaction, timeframe: Literal["day", "week", "month"] = "week"):
-        """View detailed statistics for the current guild"""
+    @app_commands.command(name="ownerserverstats", description="View statistics for a specific guild (Owner only)")
+    async def ownerserverstats(self, interaction: discord.Interaction, timeframe: Literal["day", "week", "month"] = "week"):
+        """View detailed statistics for a guild (Owner only)"""
         try:
             await interaction.response.defer()
 
