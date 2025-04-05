@@ -26,7 +26,7 @@ def get_size(bytes_size: int) -> str:
 
 def format_relative_time(dt: datetime) -> str:
     """Format datetime as relative time"""
-    now = datetime.now()
+    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
     delta = now - dt
     
     days = delta.days
