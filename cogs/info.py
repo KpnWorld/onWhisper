@@ -24,6 +24,26 @@ def get_size(bytes_size: int) -> str:
         bytes_size /= 1024.0
     return f"{bytes_size:.2f} PB"
 
+def format_relative_time(dt: datetime) -> str:
+    """Format datetime as relative time"""
+    now = datetime.now()
+    delta = now - dt
+    
+    days = delta.days
+    if days > 365:
+        years = days // 365
+        return f"{years} year{'s' if years != 1 else ''} ago"
+    if days > 30:
+        months = days // 30
+        return f"{months} month{'s' if months != 1 else ''} ago"
+    if days > 0:
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    hours = delta.seconds // 3600
+    if hours > 0:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    minutes = (delta.seconds % 3600) // 60
+    return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+
 class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -138,9 +158,9 @@ class Info(commands.Cog):
 
             # General Info
             general_info = (
-                f"ID: {guild.id}\n"
-                f"Owner: {guild.owner.mention}\n"
-                f"Created: {format_dt(guild.created_at)}\n"
+                f"Owner: {guild.owner.name}\n"  # Changed to show username instead of mention
+                f"Created: {format_relative_time(guild.created_at)}\n"  # Using relative time
+                f"Server ID: {guild.id}\n"
                 f"Region: {str(guild.preferred_locale)}"
             )
             embed.add_field(
@@ -209,11 +229,11 @@ class Info(commands.Cog):
             )
             embed.set_thumbnail(url=user.display_avatar.url)
 
-            # User Details
+            # User Details with relative time
             user_info = (
                 f"ID: {user.id}\n"
-                f"Created: {format_dt(user.created_at)}\n"
-                f"Joined: {format_dt(user.joined_at) if hasattr(user, 'joined_at') else 'N/A'}\n"
+                f"Created: {format_relative_time(user.created_at)}\n"
+                f"Joined: {format_relative_time(user.joined_at) if hasattr(user, 'joined_at') else 'N/A'}\n"
                 f"Bot: {'Yes' if user.bot else 'No'}"
             )
             embed.add_field(
@@ -222,19 +242,39 @@ class Info(commands.Cog):
                 inline=False
             )
 
-            # Status and Activity
+            # Status and Activity with improved formatting
             status_emoji = {
-                "online": "🟢",
-                "idle": "🟡",
-                "dnd": "🔴",
-                "offline": "⚫"
+                discord.Status.online: "🟢 Online",
+                discord.Status.idle: "🟡 Idle",
+                discord.Status.dnd: "🔴 Do Not Disturb",
+                discord.Status.offline: "⚫ Offline"
             }
 
-            current_status = str(user.status)
+            # Get all active activities
+            activities = []
+            for activity in user.activities:
+                if activity.type == discord.ActivityType.playing:
+                    activities.append(f"Playing {activity.name}")
+                elif activity.type == discord.ActivityType.streaming:
+                    activities.append(f"Streaming {activity.name}")
+                elif activity.type == discord.ActivityType.listening and isinstance(activity, discord.Spotify):
+                    activities.append(f"Listening to {activity.title} by {activity.artist}")
+                elif activity.type == discord.ActivityType.watching:
+                    activities.append(f"Watching {activity.name}")
+                elif activity.type == discord.ActivityType.competing:
+                    activities.append(f"Competing in {activity.name}")
+                elif activity.type == discord.ActivityType.custom:
+                    if activity.emoji and activity.name:
+                        activities.append(f"{activity.emoji} {activity.name}")
+                    elif activity.emoji:
+                        activities.append(f"{activity.emoji}")
+                    elif activity.name:
+                        activities.append(activity.name)
+
             status_info = (
-                f"Status: {status_emoji.get(current_status, '⚫')} {current_status.title()}\n"
+                f"Status: {status_emoji.get(user.status, '⚫ Offline')}\n"
                 f"Mobile: {'Yes' if user.is_on_mobile() else 'No'}\n"
-                f"Activity: {user.activity.name if user.activity else 'None'}"
+                f"Activity: {' | '.join(activities) if activities else 'None'}"
             )
             embed.add_field(
                 name="🎮 Presence",
