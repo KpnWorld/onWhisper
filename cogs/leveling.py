@@ -284,15 +284,6 @@ class Leveling(commands.Cog):
 
                 if user_data:
                     xp, level, messages, last_message = user_data
-                    # Get user rank
-                    cur.execute("""
-                        SELECT COUNT(*) + 1 FROM xp_data 
-                        WHERE guild_id = ? AND (
-                            level > ? OR (level = ? AND xp > ?)
-                        )
-                    """, (interaction.guild.id, level, level, xp))
-                    rank = cur.fetchone()[0]
-
                     next_level_xp = self.calculate_xp_for_level(level)
                     next_level = level + 1
                     remaining_xp = next_level_xp - xp
@@ -366,6 +357,12 @@ class Leveling(commands.Cog):
                 """, (interaction.guild.id,))
                 top_users = cur.fetchall()
 
+                # Get total ranked users
+                cur.execute("""
+                    SELECT COUNT(*) FROM xp_data WHERE guild_id = ?
+                """, (interaction.guild.id,))
+                total_ranked = cur.fetchone()[0]
+
                 # Get user's rank and stats
                 cur.execute("""
                     SELECT COUNT(*) + 1
@@ -386,45 +383,27 @@ class Leveling(commands.Cog):
 
             embed = discord.Embed(
                 title=f"📊 Server Leaderboard",
+                description=f"Top 10 out of {total_ranked:,} ranked users",
                 color=discord.Color.blue()
             )
 
-            # Top 3 Users (Special Format)
-            top_three = []
-            medals = {0: "🥇", 1: "🥈", 2: "🥉"}
+            # Generate leaderboard text
+            leaderboard_text = []
+            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
             
-            for idx, (user_id, xp, level, messages) in enumerate(top_users[:3]):
+            for idx, (user_id, xp, level, messages) in enumerate(top_users, 1):
                 user = interaction.guild.get_member(user_id)
                 if user:
-                    medal = medals.get(idx, "")
-                    stats = (
-                        f"Level {level} • {xp:,} XP\n"
-                        f"Messages: {messages:,}"
+                    medal = medals.get(idx, "•")
+                    leaderboard_text.append(
+                        f"{medal} {user.name}\n"
+                        f"Level {level} | {xp:,} XP"
                     )
-                    top_three.append(f"{medal} **{user.name}**\n{stats}")
 
-            if top_three:
+            if leaderboard_text:
                 embed.add_field(
-                    name="🏆 Top 3",
-                    value="\n\n".join(top_three),
-                    inline=False
-                )
-
-            # Remaining Users
-            remaining_users = []
-            for idx, (user_id, xp, level, messages) in enumerate(top_users[3:], 4):
-                user = interaction.guild.get_member(user_id)
-                if user:
-                    stats = (
-                        f"Level {level} • {xp:,} XP\n"
-                        f"Messages: {messages:,}"
-                    )
-                    remaining_users.append(f"**{idx}. {user.name}**\n{stats}")
-
-            if remaining_users:
-                embed.add_field(
-                    name="👥 Others",
-                    value="\n\n".join(remaining_users),
+                    name="📈 Rankings",
+                    value=f"```\n{'\n\n'.join(leaderboard_text)}\n```",
                     inline=False
                 )
 
