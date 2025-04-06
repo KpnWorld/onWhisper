@@ -113,6 +113,26 @@ class Leveling(commands.Cog):
         except Exception:
             return timestamp_str
 
+    def format_relative_time(self, dt: datetime) -> str:
+        """Format datetime as relative time"""
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        delta = now - dt
+        
+        days = delta.days
+        if days > 365:
+            years = days // 365
+            return f"{years} year{'s' if years != 1 else ''} ago"
+        if days > 30:
+            months = days // 30
+            return f"{months} month{'s' if months != 1 else ''} ago"
+        if days > 0:
+            return f"{days} day{'s' if days != 1 else ''} ago"
+        hours = delta.seconds // 3600
+        if hours > 0:
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        minutes = (delta.seconds % 3600) // 60
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+
     def get_cooldown(self, guild_id: int) -> int:
         """Get guild-specific cooldown or default"""
         return self.cooldown_settings.get(guild_id, 60)
@@ -253,9 +273,7 @@ class Leveling(commands.Cog):
         try:
             await interaction.response.defer()
             member = member or interaction.user
-            user_data = None
-            rank = None
-            
+
             with self.db.cursor() as cur:
                 cur.execute("""
                     SELECT xp, level, messages, last_message 
@@ -266,6 +284,7 @@ class Leveling(commands.Cog):
 
                 if user_data:
                     xp, level, messages, last_message = user_data
+                    # Get user rank
                     cur.execute("""
                         SELECT COUNT(*) + 1 FROM xp_data 
                         WHERE guild_id = ? AND (
@@ -274,54 +293,56 @@ class Leveling(commands.Cog):
                     """, (interaction.guild.id, level, level, xp))
                     rank = cur.fetchone()[0]
 
-            if user_data:
-                xp, level, messages, last_message = user_data
-                next_level_xp = self.calculate_xp_for_level(level)
-                
-                embed = discord.Embed(
-                    title=f"{member.display_name}'s Level Stats",
-                    color=discord.Color.blue()
-                )
-                
-                progress = self.generate_progress_bar(xp, next_level_xp)
-                embed.add_field(
-                    name="Level Progress",
-                    value=f"Level {level}\n{progress}",
-                    inline=False
-                )
-                
-                embed.add_field(
-                    name="Experience",
-                    value=f"Current XP: {xp:,}\nNeeded XP: {next_level_xp:,}",
-                    inline=True
-                )
-                
-                embed.add_field(
-                    name="Activity",
-                    value=f"Messages: {messages:,}",
-                    inline=True
-                )
+                    next_level_xp = self.calculate_xp_for_level(level)
+                    next_level = level + 1
+                    remaining_xp = next_level_xp - xp
 
-                embed.add_field(name="Server Rank", value=f"#{rank}", inline=True)
+                    embed = discord.Embed(
+                        title=f"📊 Level Stats: {member.display_name}",
+                        color=member.color if member.color != discord.Color.default() else discord.Color.blue()
+                    )
+                    embed.set_thumbnail(url=member.display_avatar.url)
 
-                next_level = level + 1
-                next_level_total = self.calculate_xp_for_level(next_level)
-                xp_needed = next_level_total - xp
-                embed.add_field(
-                    name="Next Level",
-                    value=f"Level {next_level} in {xp_needed:,} XP",
-                    inline=False
-                )
+                    # Core Stats
+                    core_stats = (
+                        f"Level: {level}\n"
+                        f"Rank: #{rank}\n"
+                        f"Messages: {messages:,}"
+                    )
+                    embed.add_field(
+                        name="📈 Statistics",
+                        value=core_stats,
+                        inline=False
+                    )
 
-                if last_message:
-                    formatted_time = self.format_timestamp(last_message)
-                    embed.set_footer(text=f"Last active: {formatted_time}")
-            else:
-                embed = discord.Embed(
-                    title=f"{member.display_name}'s Level Stats",
-                    description="No XP gained yet! Start chatting to earn experience.",
-                    color=discord.Color.blue()
-                )
+                    # XP Progress
+                    progress = self.generate_progress_bar(xp, next_level_xp)
+                    xp_stats = (
+                        f"Current XP: {xp:,}\n"
+                        f"XP to next level: {remaining_xp:,}\n"
+                        f"Progress: {progress}"
+                    )
+                    embed.add_field(
+                        name="🔋 XP Progress",
+                        value=xp_stats,
+                        inline=False
+                    )
+
+                    # Last Active
+                    if last_message:
+                        try:
+                            last_msg_dt = datetime.fromisoformat(last_message.replace('Z', '+00:00'))
+                            relative_time = self.format_relative_time(last_msg_dt)
+                            embed.set_footer(text=f"Last active: {relative_time}")
+                        except (ValueError, AttributeError):
+                            pass
+
+                else:
+                    embed = discord.Embed(
+                        title=f"{member.display_name}'s Level Stats",
+                        description="No XP gained yet! Start chatting to earn experience.",
+                        color=discord.Color.blue()
+                    )
 
             await interaction.followup.send(embed=embed)
             logger.info(f"Level command used by {interaction.user}")
@@ -337,7 +358,7 @@ class Leveling(commands.Cog):
             
             with self.db.cursor() as cur:
                 cur.execute("""
-                    SELECT user_id, xp, level, messages 
+                    SELECT user_id, xp, level
                     FROM xp_data 
                     WHERE guild_id = ? 
                     ORDER BY level DESC, xp DESC 
@@ -345,6 +366,7 @@ class Leveling(commands.Cog):
                 """, (interaction.guild.id,))
                 top_users = cur.fetchall()
 
+                # Get user's rank
                 cur.execute("""
                     SELECT COUNT(*) + 1
                     FROM xp_data 
@@ -358,45 +380,32 @@ class Leveling(commands.Cog):
                       interaction.guild.id))
                 user_rank = cur.fetchone()[0]
 
-                cur.execute("""
-                    SELECT xp, level, messages 
-                    FROM xp_data 
-                    WHERE user_id = ? AND guild_id = ?
-                """, (interaction.user.id, interaction.guild.id))
-                user_stats = cur.fetchone()
-
             if not top_users:
-                await interaction.followup.send("No leaderboard data yet!")
+                await interaction.followup.send("No leaderboard data yet! Start chatting to earn XP.")
                 return
 
             embed = discord.Embed(
-                title=f"🏆 Level Leaderboard - {interaction.guild.name}",
+                title=f"🏆 XP Leaderboard - Top 10",
                 color=discord.Color.gold()
             )
 
-            for idx, (user_id, xp, level, messages) in enumerate(top_users, 1):
+            leaderboard_text = []
+            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+            for idx, (user_id, xp, level) in enumerate(top_users, 1):
                 user = interaction.guild.get_member(user_id)
                 if user:
-                    progress = xp / self.calculate_xp_for_level(level) * 100
-                    value = (
-                        f"Level: {level} | XP: {xp:,}\n"
-                        f"Messages: {messages:,}\n"
-                        f"Progress: {progress:.1f}%"
-                    )
-                    embed.add_field(
-                        name=f"#{idx} {user.display_name}",
-                        value=value,
-                        inline=False
+                    medal = medals.get(idx, "👤")
+                    leaderboard_text.append(
+                        f"{medal} **{user.name}**\n"
+                        f"Level {level} • {xp:,} XP"
                     )
 
-            if user_stats:
-                xp, level, messages = user_stats
-                embed.set_footer(
-                    text=f"Your Stats • Rank: #{user_rank} • Level: {level} • "
-                         f"XP: {xp:,} • Messages: {messages:,}"
-                )
-            else:
-                embed.set_footer(text="You haven't earned any XP yet!")
+            embed.description = "\n\n".join(leaderboard_text)
+
+            # Only show user's position if they're not in top 10
+            if user_rank > 10:
+                embed.set_footer(text=f"Your Rank: #{user_rank}")
 
             await interaction.followup.send(embed=embed)
             logger.info(f"Leaderboard command used by {interaction.user}")
