@@ -275,6 +275,7 @@ class Leveling(commands.Cog):
             member = member or interaction.user
 
             with self.db.cursor() as cur:
+                # First get user data
                 cur.execute("""
                     SELECT xp, level, messages, last_message 
                     FROM xp_data 
@@ -284,6 +285,15 @@ class Leveling(commands.Cog):
 
                 if user_data:
                     xp, level, messages, last_message = user_data
+                    # Get user rank
+                    cur.execute("""
+                        SELECT COUNT(*) + 1 FROM xp_data 
+                        WHERE guild_id = ? AND (
+                            level > ? OR (level = ? AND xp > ?)
+                        )
+                    """, (interaction.guild.id, level, level, xp))
+                    rank = cur.fetchone()[0]
+
                     next_level_xp = self.calculate_xp_for_level(level)
                     next_level = level + 1
                     remaining_xp = next_level_xp - xp
@@ -297,7 +307,7 @@ class Leveling(commands.Cog):
                     # Core Stats
                     core_stats = (
                         f"Level: {level}\n"
-                        f"Rank: #{rank}\n"
+                        f"Rank: #{rank:,}\n"
                         f"Messages: {messages:,}"
                     )
                     embed.add_field(
