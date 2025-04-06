@@ -442,9 +442,16 @@ class Leveling(commands.Cog):
                 description="Role reward settings have been updated.",
                 color=discord.Color.blue()
             )
+            
+            details = (
+                f"Level: {level}\n"
+                f"Role: {role.mention}\n"
+                f"Members Eligible: {len([m for m in interaction.guild.members if m.guild_permissions.administrator])}"
+            )
+            
             embed.add_field(
                 name="Details",
-                value=f"```\nLevel: `{level}`\nRole: {role.mention}\nMembers Eligible: `{len([m for m in interaction.guild.members if m.guild_permissions.administrator])}`\n```",
+                value=f"```\n{details}\n```",
                 inline=False
             )
             embed.set_footer(text="Administrative Command • Level Rewards System")
