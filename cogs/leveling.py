@@ -443,6 +443,7 @@ class Leveling(commands.Cog):
                 color=discord.Color.blue()
             )
             
+            # Create details string separately to avoid f-string/backtick issues
             details = (
                 f"Level: {level}\n"
                 f"Role: {role.mention}\n"
