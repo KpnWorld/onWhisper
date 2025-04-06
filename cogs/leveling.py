@@ -436,20 +436,19 @@ class Leveling(commands.Cog):
                     "INSERT OR REPLACE INTO level_roles (guild_id, level, role_id) VALUES (?, ?, ?)", 
                     (interaction.guild.id, level, role.id)
                 )
-                
-            embed = discord.Embed(
-                title="⚙️ Level Role Configuration",
-                description="Role reward settings have been updated.",
-                color=discord.Color.blue()
-            )
             
-            # Create details string separately to avoid f-string/backtick issues
+            # Format details string separately to avoid f-string/backtick issues
             details = (
                 f"Level: {level}\n"
                 f"Role: {role.mention}\n"
                 f"Members Eligible: {len([m for m in interaction.guild.members if m.guild_permissions.administrator])}"
             )
             
+            embed = discord.Embed(
+                title="⚙️ Level Role Configuration",
+                description="Role reward settings have been updated.",
+                color=discord.Color.blue()
+            )
             embed.add_field(
                 name="Details",
                 value=f"```\n{details}\n```",
