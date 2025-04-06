@@ -311,7 +311,7 @@ class Leveling(commands.Cog):
                     )
                     embed.add_field(
                         name="📈 Statistics",
-                        value=core_stats,
+                        value=f"```\n{core_stats}\n```",
                         inline=False
                     )
 
@@ -324,7 +324,7 @@ class Leveling(commands.Cog):
                     )
                     embed.add_field(
                         name="🔋 XP Progress",
-                        value=xp_stats,
+                        value=f"```\n{xp_stats}\n```",
                         inline=False
                     )
 
@@ -358,7 +358,7 @@ class Leveling(commands.Cog):
             
             with self.db.cursor() as cur:
                 cur.execute("""
-                    SELECT user_id, xp, level
+                    SELECT user_id, xp, level, messages 
                     FROM xp_data 
                     WHERE guild_id = ? 
                     ORDER BY level DESC, xp DESC 
@@ -366,7 +366,7 @@ class Leveling(commands.Cog):
                 """, (interaction.guild.id,))
                 top_users = cur.fetchall()
 
-                # Get user's rank
+                # Get user's rank and stats
                 cur.execute("""
                     SELECT COUNT(*) + 1
                     FROM xp_data 
@@ -385,25 +385,50 @@ class Leveling(commands.Cog):
                 return
 
             embed = discord.Embed(
-                title=f"🏆 XP Leaderboard - Top 10",
-                color=discord.Color.gold()
+                title=f"📊 Server Leaderboard",
+                color=discord.Color.blue()
             )
 
-            leaderboard_text = []
-            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-
-            for idx, (user_id, xp, level) in enumerate(top_users, 1):
+            # Top 3 Users (Special Format)
+            top_three = []
+            medals = {0: "🥇", 1: "🥈", 2: "🥉"}
+            
+            for idx, (user_id, xp, level, messages) in enumerate(top_users[:3]):
                 user = interaction.guild.get_member(user_id)
                 if user:
-                    medal = medals.get(idx, "👤")
-                    leaderboard_text.append(
-                        f"{medal} **{user.name}**\n"
-                        f"Level {level} • {xp:,} XP"
+                    medal = medals.get(idx, "")
+                    stats = (
+                        f"Level {level} • {xp:,} XP\n"
+                        f"Messages: {messages:,}"
                     )
+                    top_three.append(f"{medal} **{user.name}**\n{stats}")
 
-            embed.description = "\n\n".join(leaderboard_text)
+            if top_three:
+                embed.add_field(
+                    name="🏆 Top 3",
+                    value="\n\n".join(top_three),
+                    inline=False
+                )
 
-            # Only show user's position if they're not in top 10
+            # Remaining Users
+            remaining_users = []
+            for idx, (user_id, xp, level, messages) in enumerate(top_users[3:], 4):
+                user = interaction.guild.get_member(user_id)
+                if user:
+                    stats = (
+                        f"Level {level} • {xp:,} XP\n"
+                        f"Messages: {messages:,}"
+                    )
+                    remaining_users.append(f"**{idx}. {user.name}**\n{stats}")
+
+            if remaining_users:
+                embed.add_field(
+                    name="👥 Others",
+                    value="\n\n".join(remaining_users),
+                    inline=False
+                )
+
+            # User's Rank
             if user_rank > 10:
                 embed.set_footer(text=f"Your Rank: #{user_rank}")
 
@@ -430,7 +455,7 @@ class Leveling(commands.Cog):
             )
             embed.add_field(
                 name="Details",
-                value=f"Level: `{level}`\nRole: {role.mention}\nMembers Eligible: `{len([m for m in interaction.guild.members if m.guild_permissions.administrator])}`",
+                value=f"```\nLevel: `{level}`\nRole: {role.mention}\nMembers Eligible: `{len([m for m in interaction.guild.members if m.guild_permissions.administrator])}`\n```",
                 inline=False
             )
             embed.set_footer(text="Administrative Command • Level Rewards System")
