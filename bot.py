@@ -144,17 +144,21 @@ class Bot(commands.Bot):
         self.start_time = time.time()
         self.db = DatabaseManager('bot')
         self._metrics_task = None
-        self._last_metrics = {}  # Will store datetime objects
+        self._last_metrics = {}
         self._metric_buffer = []
         self._buffer_lock = asyncio.Lock()
         self._last_flush = datetime.now()
-        self._rate_limit_retries = 0  # Track rate limit retries
+        self._rate_limit_retries = 0
+        self._reconnect_attempts = 0
+        self._max_reconnect_attempts = 5
+        self._session_valid = True
 
     async def setup_hook(self):
         """Set up the bot's database and metrics collection"""
         await self.load_cogs()
         self._metrics_task = self.loop.create_task(self._collect_metrics())
         self._flush_task = self.loop.create_task(self._flush_metrics())
+        self._session_task = self.loop.create_task(self._session_monitor())
         logger.info("Bot setup completed")
 
     async def _collect_metrics(self):
@@ -217,6 +221,34 @@ class Bot(commands.Bot):
                 self._last_flush = datetime.now()
             except Exception as e:
                 logger.error(f"Error flushing metrics: {e}")
+
+    async def _session_monitor(self):
+        """Monitor session status and handle reconnections"""
+        try:
+            while not self.is_closed():
+                if not self._session_valid:
+                    if self._reconnect_attempts < self._max_reconnect_attempts:
+                        self._reconnect_attempts += 1
+                        backoff = min(1800, 30 * (2 ** self._reconnect_attempts))  # Max 30 minute backoff
+                        logger.warning(f"Session invalidated. Attempting reconnect in {backoff} seconds... (Attempt {self._reconnect_attempts})")
+                        await asyncio.sleep(backoff)
+                        try:
+                            await self.close()
+                            await self.start(TOKEN)
+                            self._session_valid = True
+                            self._reconnect_attempts = 0
+                            logger.info("Successfully reconnected")
+                        except Exception as e:
+                            logger.error(f"Reconnection failed: {e}")
+                    else:
+                        logger.error("Max reconnection attempts reached. Manual restart required.")
+                        await self.close()
+                        break
+                await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in session monitor: {e}")
 
     async def load_cogs(self):
         """Load all cogs from the cogs directory."""
@@ -301,6 +333,38 @@ class Bot(commands.Bot):
         except Exception as e:
             logger.error(f"Error in error handler: {str(e)}")
 
+    async def on_shard_ready(self, shard_id):
+        """Called when a shard is ready"""
+        logger.info(f"Shard {shard_id} ready")
+        self._session_valid = True
+
+    async def on_shard_connect(self, shard_id):
+        """Called when a shard connects to Discord"""
+        logger.info(f"Shard {shard_id} connected")
+
+    async def on_shard_disconnect(self, shard_id):
+        """Called when a shard disconnects from Discord"""
+        logger.warning(f"Shard {shard_id} disconnected")
+
+    async def on_shard_resumed(self, shard_id):
+        """Called when a shard resumes its session"""
+        logger.info(f"Shard {shard_id} resumed")
+        self._session_valid = True
+
+    async def on_disconnect(self):
+        """Called when the bot disconnects from Discord"""
+        logger.warning("Bot disconnected from Discord")
+
+    async def on_resumed(self):
+        """Called when the bot resumes its session"""
+        logger.info("Session resumed")
+        self._session_valid = True
+
+    async def on_connect(self):
+        """Called when the bot connects to Discord"""
+        logger.info("Connected to Discord")
+        self._session_valid = True
+
 # List of activities for the bot to cycle through
 ACTIVITIES = [
     discord.Game(name="with commands"),
@@ -317,23 +381,33 @@ async def change_activity():
     await bot.change_presence(activity=random.choice(ACTIVITIES))
 
 def run_bot():
-    """Start the bot with rate limit handling"""
+    """Start the bot with improved error handling"""
     retries = 0
     max_retries = 5
     base_delay = 5
 
     while retries < max_retries:
         try:
-            asyncio.run(bot.run(TOKEN))
+            bot._session_valid = True
+            bot._reconnect_attempts = 0
+            asyncio.run(bot.start(TOKEN))
             break
         except discord.errors.HTTPException as e:
-            if e.status == 429:  # Rate limit error
+            if e.status == 429:
                 retries += 1
-                delay = base_delay * (2 ** retries)  # Exponential backoff
+                delay = min(1800, base_delay * (2 ** retries))
                 logger.warning(f"Rate limited on startup. Attempt {retries}/{max_retries}. Waiting {delay} seconds...")
                 time.sleep(delay)
             else:
                 raise
+        except discord.errors.GatewayNotFound:
+            logger.error("Unable to connect to Discord. Gateway not available.")
+            break
+        except discord.errors.ConnectionClosed as e:
+            retries += 1
+            delay = min(1800, base_delay * (2 ** retries))
+            logger.warning(f"Connection closed. Attempt {retries}/{max_retries}. Waiting {delay} seconds...")
+            time.sleep(delay)
         except KeyboardInterrupt:
             logger.info('Bot shutdown initiated')
             break
