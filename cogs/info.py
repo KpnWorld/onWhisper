@@ -47,9 +47,28 @@ def format_relative_time(dt: datetime) -> str:
 class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = bot.db  # Use bot's database instance
+        self.db = bot.db
         self.start_time = time.time()
+        bot.loop.create_task(self._init_db())
         logger.info("Info cog initialized")
+
+    async def _init_db(self):
+        """Initialize database and ensure guild settings exist"""
+        try:
+            for guild in self.bot.guilds:
+                await self.db.ensure_guild_exists(guild.id)
+            logger.info("Info cog database initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize info cog database: {e}")
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild):
+        """Initialize settings when bot joins a new guild"""
+        try:
+            await self.db.ensure_guild_exists(guild.id)
+            logger.info(f"Initialized info settings for new guild: {guild.name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize info settings for guild {guild.name}: {e}")
 
     @app_commands.command(name="ping", description="Check the bot's latency")
     async def ping(self, interaction: discord.Interaction):
@@ -501,8 +520,8 @@ class Info(commands.Cog):
             days = days_map[timeframe]
 
             # Get guild metrics
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT 
                         ROUND(AVG(CAST(member_count AS FLOAT)), 0) as avg_members,
                         SUM(message_count) as total_messages,
@@ -512,7 +531,7 @@ class Info(commands.Cog):
                     WHERE guild_id = ? 
                     AND timestamp >= datetime('now', ?)
                 """, (interaction.guild_id, f'-{days} days'))
-                metrics = cur.fetchone()
+                metrics = await cur.fetchone()
 
             embed = discord.Embed(
                 title=f"📊 Server Statistics ({timeframe})",
@@ -527,14 +546,14 @@ class Info(commands.Cog):
             avg_active = int(metrics[3] or 0)
 
             # Get command usage count
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT COUNT(*) 
                     FROM command_stats
                     WHERE guild_id = ? 
                     AND used_at >= datetime('now', ?)
                 """, (interaction.guild_id, f'-{days} days'))
-                total_commands = cur.fetchone()[0] or 0
+                total_commands = (await cur.fetchone())[0] or 0
 
             stats_text = (
                 f"Average Members: {avg_members:,}\n"

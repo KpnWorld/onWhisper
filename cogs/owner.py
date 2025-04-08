@@ -13,7 +13,17 @@ class Owner(commands.Cog):
         self.bot = bot
         self.db = bot.db  # Use bot's database instance
         self.owner_id = 895767962722660372 # Replace with your Discord user ID
+        bot.loop.create_task(self._init_db())
         logger.info("Owner cog initialized")
+
+    async def _init_db(self):
+        """Initialize database and ensure guild settings exist"""
+        try:
+            for guild in self.bot.guilds:
+                await self.db.ensure_guild_exists(guild.id)
+            logger.info("Owner cog database initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize owner cog database: {e}")
 
     async def cog_check(self, interaction: discord.Interaction) -> bool:
         """Check if the user is the bot owner"""
@@ -25,6 +35,15 @@ class Owner(commands.Cog):
             return False
         return True
 
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild):
+        """Initialize settings when bot joins a new guild"""
+        try:
+            await self.db.ensure_guild_exists(guild.id)
+            logger.info(f"Initialized owner settings for new guild: {guild.name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize owner settings for guild {guild.name}: {e}")
+
     @app_commands.command(name="stats", description="View global bot statistics and metrics")
     async def stats(self, interaction: discord.Interaction, timeframe: Literal["day", "week", "month"] = "week"):
         """View detailed bot statistics across all guilds"""
@@ -35,8 +54,8 @@ class Owner(commands.Cog):
             days = days_map[timeframe]
             
             # Get global metrics
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT 
                         COUNT(DISTINCT guild_id) as total_guilds,
                         SUM(member_count) as total_members,
@@ -45,7 +64,7 @@ class Owner(commands.Cog):
                     FROM guild_metrics
                     WHERE timestamp >= datetime('now', ?)
                 """, (f'-{days} days',))
-                metrics = cur.fetchone()
+                metrics = await cur.fetchone()
 
             embed = discord.Embed(
                 title=f"📊 Bot Statistics ({timeframe})",
@@ -60,13 +79,13 @@ class Owner(commands.Cog):
             data_points = int(metrics[3] or 0)
             
             # Get global command usage
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT COUNT(*) 
                     FROM command_stats
                     WHERE used_at >= datetime('now', ?)
                 """, (f'-{days} days',))
-                total_commands = cur.fetchone()[0] or 0
+                total_commands = await cur.fetchone()[0] or 0
 
             stats_text = (
                 f"Total Guilds: {len(self.bot.guilds):,}\n"
@@ -82,8 +101,8 @@ class Owner(commands.Cog):
             )
 
             # Most Used Commands Globally
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT 
                         command_name,
                         COUNT(*) as uses,
@@ -94,7 +113,7 @@ class Owner(commands.Cog):
                     ORDER BY uses DESC
                     LIMIT 5
                 """, (f'-{days} days',))
-                top_commands = cur.fetchall()
+                top_commands = await cur.fetchall()
 
             if top_commands:
                 cmd_text = "\n".join(
@@ -108,15 +127,15 @@ class Owner(commands.Cog):
                 )
 
             # Global Error Rate
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT 
                         COUNT(*) as total,
                         SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as errors
                     FROM command_stats
                     WHERE used_at >= datetime('now', ?)
                 """, (f'-{days} days',))
-                result = cur.fetchone()
+                result = await cur.fetchone()
                 total = int(result[0] or 0)
                 errors = int(result[1] or 0)
                 error_rate = (errors / total * 100) if total > 0 else 0
@@ -129,8 +148,8 @@ class Owner(commands.Cog):
                 )
 
             # Most Active Guilds
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT 
                         guild_id,
                         COUNT(*) as command_count
@@ -140,7 +159,7 @@ class Owner(commands.Cog):
                     ORDER BY command_count DESC
                     LIMIT 3
                 """, (f'-{days} days',))
-                active_guilds = cur.fetchall()
+                active_guilds = await cur.fetchall()
 
             if active_guilds:
                 guild_text = []
@@ -222,8 +241,8 @@ class Owner(commands.Cog):
             )
 
             # User Stats
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT COUNT(DISTINCT user_id) as total_users,
                            AVG(level) as avg_level,
                            MAX(level) as max_level,
@@ -231,7 +250,7 @@ class Owner(commands.Cog):
                     FROM xp_data
                     WHERE guild_id = ?
                 """, (target_guild_id,))
-                user_stats = cur.fetchone()
+                user_stats = await cur.fetchone()
 
             if user_stats and user_stats[0]:
                 stats = (
@@ -267,8 +286,8 @@ class Owner(commands.Cog):
             days = days_map[timeframe]
 
             # Get guild metrics
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT 
                         ROUND(AVG(CAST(member_count AS FLOAT)), 0) as avg_members,
                         SUM(message_count) as total_messages,
@@ -278,7 +297,7 @@ class Owner(commands.Cog):
                     WHERE guild_id = ? 
                     AND timestamp >= datetime('now', ?)
                 """, (interaction.guild_id, f'-{days} days'))
-                metrics = cur.fetchone()
+                metrics = await cur.fetchone()
 
             embed = discord.Embed(
                 title=f"📊 Guild Statistics ({timeframe})",
@@ -293,14 +312,14 @@ class Owner(commands.Cog):
             avg_active = int(metrics[3] or 0)
 
             # Get command usage count
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT COUNT(*) 
                     FROM command_stats
                     WHERE guild_id = ? 
                     AND used_at >= datetime('now', ?)
                 """, (interaction.guild_id, f'-{days} days'))
-                total_commands = cur.fetchone()[0] or 0
+                total_commands = await cur.fetchone()[0] or 0
 
             stats_text = (
                 f"Average Members: {avg_members:,}\n"
@@ -316,8 +335,8 @@ class Owner(commands.Cog):
             )
 
             # Command Usage with percentage
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT 
                         command_name,
                         COUNT(*) as uses,
@@ -329,7 +348,7 @@ class Owner(commands.Cog):
                     ORDER BY uses DESC
                     LIMIT 5
                 """, (interaction.guild_id, f'-{days} days'))
-                top_commands = cur.fetchall()
+                top_commands = await cur.fetchall()
 
             if top_commands:
                 cmd_text = "\n".join(
@@ -343,8 +362,8 @@ class Owner(commands.Cog):
                 )
 
             # Most Active Users
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT 
                         user_id,
                         COUNT(*) as cmd_count
@@ -355,7 +374,7 @@ class Owner(commands.Cog):
                     ORDER BY cmd_count DESC
                     LIMIT 3
                 """, (interaction.guild_id, f'-{days} days'))
-                active_users = cur.fetchall()
+                active_users = await cur.fetchall()
 
             if active_users:
                 user_text = []
@@ -372,8 +391,8 @@ class Owner(commands.Cog):
                     )
 
             # Activity Trend
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT 
                         strftime('%Y-%m-%d', timestamp) as day,
                         COUNT(*) as commands,
@@ -384,7 +403,7 @@ class Owner(commands.Cog):
                     GROUP BY day
                     ORDER BY day DESC
                 """, (interaction.guild_id, f'-{days} days'))
-                activity = cur.fetchall()
+                activity = await cur.fetchall()
 
             if activity:
                 trend = "\n".join(

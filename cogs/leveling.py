@@ -62,10 +62,69 @@ class Leveling(commands.Cog):
         self.xp_cooldowns[guild_id][user_id] = datetime.now() + timedelta(seconds=seconds)
 
     async def _init_db(self):
-        """Initialize database and load settings asynchronously"""
+        """Initialize database and ensure guild settings exist"""
         try:
-            cursor = await self.db.cursor()
-            async with cursor as cur:
+            async with self.db.cursor() as cur:
+                # Create leveling tables if they don't exist
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS leveling_settings (
+                        guild_id INTEGER PRIMARY KEY,
+                        xp_cooldown INTEGER DEFAULT 60,
+                        min_xp INTEGER DEFAULT 15,
+                        max_xp INTEGER DEFAULT 25,
+                        voice_xp_enabled BOOLEAN DEFAULT 0,
+                        voice_xp_per_minute INTEGER DEFAULT 10,
+                        level_up_message TEXT DEFAULT 'Congratulations {user}, you reached level {level}!',
+                        level_up_channel_id INTEGER,
+                        stack_roles BOOLEAN DEFAULT 1,
+                        ignore_channels TEXT,
+                        xp_multiplier REAL DEFAULT 1.0,
+                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    )
+                """)
+
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS xp_data (
+                        user_id INTEGER,
+                        guild_id INTEGER,
+                        xp INTEGER DEFAULT 0,
+                        level INTEGER DEFAULT 1,
+                        messages INTEGER DEFAULT 0,
+                        last_message TIMESTAMP,
+                        PRIMARY KEY (user_id, guild_id),
+                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    )
+                """)
+
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS level_roles (
+                        guild_id INTEGER,
+                        level INTEGER,
+                        role_id INTEGER,
+                        remove_lower BOOLEAN DEFAULT 0,
+                        temporary BOOLEAN DEFAULT 0,
+                        duration INTEGER,
+                        PRIMARY KEY (guild_id, level),
+                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    )
+                """)
+
+                # Create indexes
+                await cur.execute("CREATE INDEX IF NOT EXISTS idx_xp_data_guild ON xp_data(guild_id)")
+                await cur.execute("CREATE INDEX IF NOT EXISTS idx_xp_data_level ON xp_data(level DESC)")
+                await cur.execute("CREATE INDEX IF NOT EXISTS idx_level_roles_guild ON level_roles(guild_id)")
+
+            # Initialize settings for all guilds
+            for guild in self.bot.guilds:
+                await self.db.ensure_guild_exists(guild.id)
+                async with self.db.cursor() as cur:
+                    await cur.execute("""
+                        INSERT OR IGNORE INTO leveling_settings (guild_id)
+                        VALUES (?)
+                    """, (guild.id,))
+
+            # Load settings into memory
+            async with self.db.cursor() as cur:
                 await cur.execute("""
                     SELECT guild_id, xp_cooldown, min_xp, max_xp
                     FROM leveling_settings
@@ -75,21 +134,9 @@ class Leveling(commands.Cog):
                     self.cooldown_settings[guild_id] = cooldown
                     self.xp_ranges[guild_id] = (min_xp, max_xp)
 
-            # Initialize settings for new guilds
-            for guild in self.bot.guilds:
-                await self.db.ensure_guild_exists(guild.id)
-                cursor = await self.db.cursor()
-                async with cursor as cur:
-                    await cur.execute("""
-                        INSERT OR IGNORE INTO leveling_settings 
-                        (guild_id, xp_cooldown, min_xp, max_xp)
-                        VALUES (?, ?, ?, ?)
-                    """, (guild.id, 60, 15, 25))
-
-            logger.info("Leveling system initialized successfully")
+            logger.info("Leveling database initialized")
         except Exception as e:
-            logger.error(f"Failed to initialize leveling system: {e}")
-            raise
+            logger.error(f"Failed to initialize leveling database: {e}")
 
     def calculate_xp_for_level(self, level: int) -> int:
         """Calculate XP needed with balanced curve"""
@@ -221,50 +268,32 @@ class Leveling(commands.Cog):
         try:
             min_xp, max_xp = self.get_xp_range(guild_id)
             xp_gained = random.randint(min_xp, max_xp)
-            new_level, current_xp, xp_needed = await self.add_xp(message, xp_gained)
+            level_info = await self.add_xp(message, xp_gained)
 
-            self.add_cooldown(guild_id, user_id, self.get_cooldown(guild_id))
+            if level_info:
+                new_level, current_xp, xp_needed = level_info
+                # Handle level up
+                role_id = await self._get_level_role(guild_id, new_level)
+                if role_id:
+                    role = message.guild.get_role(role_id)
+                    if role:
+                        await message.author.add_roles(role)
 
-            if new_level:
+                # Send level up message
                 embed = discord.Embed(
-                    title="🌟 Level Up!",
-                    description=f"Congratulations {message.author.mention}!",
-                    color=discord.Color.gold()
+                    title="🎉 Level Up!",
+                    description=f"{message.author.mention} reached Level {new_level}!",
+                    color=discord.Color.green()
                 )
-                
-                progress_bar = self.generate_progress_bar(current_xp, xp_needed)
                 embed.add_field(
-                    name=f"Level {new_level} Achieved!",
-                    value=f"XP: {current_xp:,}/{xp_needed:,}\n{progress_bar}",
+                    name="Progress",
+                    value=self.generate_progress_bar(current_xp, xp_needed),
                     inline=False
                 )
-
-                # Get rank and roles in parallel
-                rank_task = asyncio.create_task(self._get_user_rank(message.guild.id, new_level, current_xp))
-                role_task = asyncio.create_task(self._get_level_role(message.guild.id, new_level))
-                
-                rank = await rank_task
-                role_data = await role_task
-
-                embed.add_field(name="Server Rank", value=f"#{rank}", inline=True)
-
-                if role_data:
-                    new_role = message.guild.get_role(role_data)
-                    if new_role:
-                        try:
-                            await message.author.add_roles(new_role)
-                            embed.add_field(
-                                name="🎭 Role Reward",
-                                value=f"You've earned the {new_role.mention} role!",
-                                inline=False
-                            )
-                        except discord.Forbidden:
-                            logger.warning(f"Missing permissions to assign role in {message.guild.id}")
-                        except Exception as e:
-                            logger.error(f"Error assigning level role: {e}")
-
                 await message.channel.send(embed=embed)
-                logger.info(f"User {message.author} leveled up to {new_level}")
+
+            self.add_cooldown(guild_id, user_id, self.get_cooldown(guild_id))
+            
         except Exception as e:
             logger.error(f"Error in XP processing: {e}")
 
@@ -293,395 +322,256 @@ class Leveling(commands.Cog):
     async def level(self, interaction: discord.Interaction, member: discord.Member = None):
         """Display level and XP information for a user"""
         try:
-            await interaction.response.defer()
-            member = member or interaction.user
-
+            target = member or interaction.user
+            
             async with self.db.cursor() as cur:
-                # First get user data
                 await cur.execute("""
-                    SELECT xp, level, messages, last_message 
+                    SELECT level, xp, messages, last_message 
                     FROM xp_data 
-                    WHERE user_id=? AND guild_id=?
-                """, (member.id, interaction.guild.id))
-                user_data = await cur.fetchone()
+                    WHERE user_id = ? AND guild_id = ?
+                """, (target.id, interaction.guild_id))
+                result = await cur.fetchone()
 
-                if user_data:
-                    xp, level, messages, last_message = user_data
-                    # Get user rank
-                    await cur.execute("""
-                        SELECT COUNT(*) + 1 FROM xp_data 
-                        WHERE guild_id = ? AND (
-                            level > ? OR (level = ? AND xp > ?)
-                        )
-                    """, (interaction.guild.id, level, level, xp))
-                    rank = (await cur.fetchone())[0]
+            if not result:
+                await interaction.response.send_message(
+                    f"{target.mention} hasn't earned any XP yet!",
+                    ephemeral=True
+                )
+                return
 
-                    next_level_xp = self.calculate_xp_for_level(level)
-                    next_level = level + 1
-                    remaining_xp = next_level_xp - xp
+            level, xp, messages, last_message = result
+            xp_needed = self.calculate_xp_for_level(level)
+            rank = await self._get_user_rank(interaction.guild_id, level, xp)
 
-                    embed = discord.Embed(
-                        title=f"📊 Level Stats: {member.display_name}",
-                        color=member.color if member.color != discord.Color.default() else discord.Color.blue()
-                    )
-                    embed.set_thumbnail(url=member.display_avatar.url)
+            embed = discord.Embed(
+                title=f"📊 Level Stats: {target.display_name}",
+                color=target.color if target.color != discord.Color.default() else discord.Color.blue()
+            )
+            
+            if target.avatar:
+                embed.set_thumbnail(url=target.avatar.url)
 
-                    # Core Stats
-                    core_stats = (
-                        f"Level: {level}\n"
-                        f"Rank: #{rank:,}\n"
-                        f"Messages: {messages:,}"
-                    )
-                    embed.add_field(
-                        name="📈 Statistics",
-                        value=f"```{core_stats}```",
-                        inline=False
-                    )
+            # Core Stats
+            stats = (
+                f"Level: `{level}`\n"
+                f"Rank: `#{rank}`\n"
+                f"Messages: `{messages:,}`\n"
+                f"Total XP: `{xp:,}`"
+            )
+            embed.add_field(
+                name="📈 Statistics", 
+                value=stats,
+                inline=False
+            )
 
-                    # XP Progress
-                    progress = self.generate_progress_bar(xp, next_level_xp)
-                    xp_stats = (
-                        f"Current XP: {xp:,}\n"
-                        f"XP to next level: {remaining_xp:,}\n"
-                        f"Progress: {progress}"
-                    )
-                    embed.add_field(
-                        name="🔋 XP Progress",
-                        value=f"```\n{xp_stats}\n```",
-                        inline=False
-                    )
+            # Progress Bar
+            embed.add_field(
+                name="📊 Progress",
+                value=self.generate_progress_bar(xp, xp_needed),
+                inline=False
+            )
 
-                    # Last Active
-                    if last_message:
-                        try:
-                            last_msg_dt = datetime.fromisoformat(last_message.replace('Z', '+00:00'))
-                            relative_time = self.format_relative_time(last_msg_dt)
-                            embed.set_footer(text=f"Last active: {relative_time}")
-                        except (ValueError, AttributeError):
-                            pass
+            # Activity Info
+            if last_message:
+                last_active = self.format_relative_time(
+                    datetime.fromisoformat(last_message.replace('Z', '+00:00'))
+                )
+                embed.add_field(
+                    name="⏰ Last Active",
+                    value=f"`{last_active}`",
+                    inline=False
+                )
 
-                else:
-                    embed = discord.Embed(
-                        title=f"{member.display_name}'s Level Stats",
-                        description="No XP gained yet! Start chatting to earn experience.",
-                        color=discord.Color.blue()
-                    )
-
-            await interaction.followup.send(embed=embed)
-            logger.info(f"Level command used by {interaction.user}")
+            await interaction.response.send_message(embed=embed)
+            logger.info(f"Level info viewed for {target} in {interaction.guild}")
         except Exception as e:
-            logger.error(f"Error in level command: {e}")
-            await interaction.followup.send("❌ An error occurred while fetching level information.", ephemeral=True)
+            logger.error(f"Error showing level info: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while fetching level information.",
+                ephemeral=True
+            )
 
     @app_commands.command(name="leaderboard", description="View the XP leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
         """Display the server's XP leaderboard"""
         try:
-            await interaction.response.defer()
-            
             async with self.db.cursor() as cur:
                 await cur.execute("""
-                    SELECT user_id, xp, level, messages 
+                    SELECT 
+                        user_id,
+                        level,
+                        xp,
+                        messages
                     FROM xp_data 
-                    WHERE guild_id = ? 
-                    ORDER BY level DESC, xp DESC 
+                    WHERE guild_id = ?
+                    ORDER BY level DESC, xp DESC
                     LIMIT 10
-                """, (interaction.guild.id,))
-                top_users = await cur.fetchall()
+                """, (interaction.guild_id,))
+                leaders = await cur.fetchall()
 
-                # Get total ranked users
-                await cur.execute("""
-                    SELECT COUNT(*) FROM xp_data WHERE guild_id = ?
-                """, (interaction.guild.id,))
-                total_ranked = (await cur.fetchone())[0]
-
-                # Get user's rank and stats
-                await cur.execute("""
-                    SELECT COUNT(*) + 1
-                    FROM xp_data 
-                    WHERE guild_id = ? AND (
-                        level > (SELECT level FROM xp_data WHERE user_id = ? AND guild_id = ?)
-                        OR (level = (SELECT level FROM xp_data WHERE user_id = ? AND guild_id = ?) 
-                            AND xp > (SELECT xp FROM xp_data WHERE user_id = ? AND guild_id = ?))
-                    )
-                """, (interaction.guild.id, interaction.user.id, interaction.guild.id,
-                      interaction.user.id, interaction.guild.id, interaction.user.id,
-                      interaction.guild.id))
-                user_rank = (await cur.fetchone())[0]
-
-            if not top_users:
-                await interaction.followup.send("No leaderboard data yet! Start chatting to earn XP.")
+            if not leaders:
+                await interaction.response.send_message(
+                    "No XP data found for this server!",
+                    ephemeral=True
+                )
                 return
 
             embed = discord.Embed(
-                title=f"📊 Server Leaderboard",
-                description=f"Top 10 out of {total_ranked:,} ranked users",
-                color=discord.Color.blue()
+                title="🏆 XP Leaderboard",
+                description=f"Top members in {interaction.guild.name}",
+                color=discord.Color.gold()
             )
 
-            # Generate leaderboard text
-            leaderboard_text = []
-            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-            
-            for idx, (user_id, xp, level, messages) in enumerate(top_users, 1):
-                user = interaction.guild.get_member(user_id)
-                if user:
-                    medal = medals.get(idx, "•")
-                    leaderboard_text.append(
-                        f"{medal} {user.name}\n"
-                        f"Level {level} | {xp:,} XP"
-                    )
+            for idx, (user_id, level, xp, messages) in enumerate(leaders, 1):
+                member = interaction.guild.get_member(user_id)
+                if not member:
+                    continue
 
-            if leaderboard_text:
-                joined_leaderboard = "\n\n".join(leaderboard_text)
+                medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(idx, "🏅")
+                stats = (
+                    f"Level: {level} • "
+                    f"XP: {xp:,} • "
+                    f"Messages: {messages:,}"
+                )
                 embed.add_field(
-                    name="📈 Rankings",
-                    value=f"```\n{joined_leaderboard}\n```",
+                    name=f"{medal} #{idx} {member.display_name}",
+                    value=f"```{stats}```",
                     inline=False
                 )
 
-            # User's Rank
-            if user_rank > 10:
-                embed.set_footer(text=f"Your Rank: #{user_rank}")
-
-            await interaction.followup.send(embed=embed)
-            logger.info(f"Leaderboard command used by {interaction.user}")
+            await interaction.response.send_message(embed=embed)
+            logger.info(f"Leaderboard viewed in {interaction.guild}")
         except Exception as e:
-            logger.error(f"Error in leaderboard command: {e}")
-            await interaction.followup.send("❌ An error occurred while fetching the leaderboard.", ephemeral=True)
+            logger.error(f"Error showing leaderboard: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while fetching the leaderboard.",
+                ephemeral=True
+            )
 
-    @app_commands.command(name="setlevelrole", description="Set a role to be assigned at a specific level (Admin only).")
-    @commands.has_permissions(administrator=True)
+    @app_commands.command(name="setlevelrole", description="Set a role to be assigned at a specific level (Admin only)")
+    @app_commands.default_permissions(administrator=True)
     async def setlevelrole(self, interaction: discord.Interaction, level: int, role: discord.Role):
         try:
-            # Add level validation
-            if level < 1:
+            if role.position >= interaction.guild.me.top_role.position:
                 await interaction.response.send_message(
-                    "❌ Level must be greater than 0!", 
-                    ephemeral=True
-                )
-                return
-
-            # Check role hierarchy
-            if role >= interaction.guild.me.top_role:
-                await interaction.response.send_message(
-                    "❌ I cannot assign roles higher than my highest role!",
-                    ephemeral=True
-                )
-                return
-
-            # Check if role is managed by integration
-            if role.managed:
-                await interaction.response.send_message(
-                    "❌ Cannot use roles managed by integrations!",
+                    "❌ I cannot manage roles higher than my highest role!",
                     ephemeral=True
                 )
                 return
 
             async with self.db.cursor() as cur:
-                # Get existing roles to check hierarchy
                 await cur.execute("""
-                    SELECT role_id FROM level_roles 
-                    WHERE guild_id = ? AND level <= ?
-                    ORDER BY level DESC
-                """, (interaction.guild.id, level))
-                existing_roles = await cur.fetchall()
+                    INSERT OR REPLACE INTO level_roles (guild_id, level, role_id)
+                    VALUES (?, ?, ?)
+                """, (interaction.guild_id, level, role.id))
 
-                # Insert new role
-                await cur.execute(
-                    "INSERT OR REPLACE INTO level_roles (guild_id, level, role_id) VALUES (?, ?, ?)", 
-                    (interaction.guild.id, level, role.id)
-                )
-
-            # Create the details text separately to avoid f-string/backtick issues            
-            details = (
-                f"Level: {level}\n"
-                f"Role: {role.mention}\n"
-                f"Members Eligible: {len([m for m in interaction.guild.members if m.guild_permissions.administrator])}"
-            )
-
-            # Create and send embed
             embed = discord.Embed(
-                title="⚙️ Level Role Configuration",
-                description="Role reward settings have been updated.",
-                color=discord.Color.blue()
+                title="✅ Level Role Set",
+                description=f"Members will receive {role.mention} at Level {level}",
+                color=discord.Color.green()
             )
-            
-            # Add field with proper formatting
-            embed.add_field(
-                name="Details",
-                value=f"```\n{details}\n```",
-                inline=False
-            )
-            embed.set_footer(text="Administrative Command • Level Rewards System")
-            
+            embed.set_footer(text="Administrative Command • Leveling System")
+
             await interaction.response.send_message(embed=embed)
-            logger.info(f"Level role set: Level {level} -> Role {role.name} ({role.id})")
+            logger.info(f"Level role set in {interaction.guild}: {role.name} at level {level}")
         except Exception as e:
             logger.error(f"Error setting level role: {e}")
-            error_embed = discord.Embed(
-                title="⚙️ Configuration Error",
-                description="❌ Failed to set level role configuration.",
-                color=discord.Color.red()
+            await interaction.response.send_message(
+                "❌ An error occurred while setting the level role.",
+                ephemeral=True
             )
-            error_embed.set_footer(text="Administrative Command • Error")
-            await interaction.response.send_message(embed=error_embed)
 
     @app_commands.command(name="deletelevelrole", description="Remove a level role assignment (Admin only)")
     @app_commands.default_permissions(administrator=True)
     async def deletelevelrole(self, interaction: discord.Interaction, level: int):
-        """Remove a role assignment for a specific level"""
         try:
             async with self.db.cursor() as cur:
-                # Check if a role exists for this level
                 await cur.execute("""
-                    SELECT role_id FROM level_roles
+                    DELETE FROM level_roles 
                     WHERE guild_id = ? AND level = ?
-                """, (interaction.guild.id, level))
-                result = await cur.fetchone()
+                """, (interaction.guild_id, level))
 
-                if not result:
-                    await interaction.response.send_message(f"❌ No role is assigned to level {level}.", ephemeral=True)
-                    return
+            embed = discord.Embed(
+                title="✅ Level Role Removed",
+                description=f"Role assignment for Level {level} has been removed",
+                color=discord.Color.green()
+            )
+            embed.set_footer(text="Administrative Command • Leveling System")
 
-                # Delete the level role assignment
-                await cur.execute("""
-                    DELETE FROM level_roles
-                    WHERE guild_id = ? AND level = ?
-                """, (interaction.guild.id, level))
-
-                await interaction.response.send_message(f"✅ Successfully removed the role assignment for level {level}.", ephemeral=True)
-                logger.info(f"Level role removed for level {level} in guild {interaction.guild.id}")
+            await interaction.response.send_message(embed=embed)
+            logger.info(f"Level role removed in {interaction.guild} for level {level}")
         except Exception as e:
             logger.error(f"Error removing level role: {e}")
-            await interaction.response.send_message("❌ An error occurred while removing the level role.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ An error occurred while removing the level role.",
+                ephemeral=True
+            )
 
     @app_commands.command(name="setcooldown", description="Set the XP gain cooldown time")
     @app_commands.default_permissions(administrator=True)
     async def setcooldown(self, interaction: discord.Interaction, time: Literal["15s", "30s", "1m", "2m", "5m"]):
         try:
-            cooldown_map = {
-                "15s": 15,
-                "30s": 30,
-                "1m": 60,
-                "2m": 120,
-                "5m": 300
-            }
-            
-            guild_id = interaction.guild.id
-            old_cooldown = self.get_cooldown(guild_id)
-            seconds = cooldown_map[time]
-            
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    INSERT OR REPLACE INTO leveling_settings (guild_id, xp_cooldown)
-                    VALUES (?, ?)
-                """, (guild_id, seconds))
-            
-            self.cooldown_settings[guild_id] = seconds
-            
-            embed = discord.Embed(
-                title="⚙️ XP System Configuration",
-                description="Cooldown settings have been updated.",
-                color=discord.Color.blue()
-            )
-            embed.add_field(
-                name="Previous Setting",
-                value=f"```\nCooldown: {old_cooldown} seconds```",
-                inline=True
-            )
-            embed.add_field(
-                name="New Setting",
-                value=f"```\nCooldown: {seconds} seconds```",
-                inline=True
-            )
-            embed.add_field(
-                name="Effect",
-                value="This change affects how frequently users can gain XP from messages.",
-                inline=False
-            )
-            embed.set_footer(text="Administrative Command • XP System Settings")
-            
-            await interaction.response.send_message(embed=embed)
-            logger.info(f"XP cooldown changed to {seconds}s by {interaction.user} in guild {guild_id}")
-        except Exception as e:
-            logger.error(f"Error setting cooldown: {e}")
-            error_embed = discord.Embed(
-                title="⚙️ Configuration Error",
-                description="❌ Failed to update XP cooldown settings.",
-                color=discord.Color.red()
-            )
-            error_embed.set_footer(text="Administrative Command • Error")
-            await interaction.response.send_message(embed=error_embed)
+            time_map = {"15s": 15, "30s": 30, "1m": 60, "2m": 120, "5m": 300}
+            cooldown = time_map[time]
 
-    @app_commands.command(name="setxprange", description="Set the XP range for message rewards")
-    @app_commands.describe(
-        min_xp="Minimum XP per message (1-100)",
-        max_xp="Maximum XP per message (1-100)"
-    )
-    @app_commands.default_permissions(administrator=True)
-    async def setxprange(self, interaction: discord.Interaction, min_xp: int, max_xp: int):
-        try:
-            if not 1 <= min_xp <= 100 or not 1 <= max_xp <= 100:
-                await interaction.response.send_message(
-                    "❌ XP values must be between 1 and 100!",
-                    ephemeral=True
-                )
-                return
-
-            if min_xp > max_xp:
-                await interaction.response.send_message(
-                    "❌ Minimum XP cannot be greater than maximum XP!",
-                    ephemeral=True
-                )
-                return
-
-            guild_id = interaction.guild.id
-            old_min, old_max = self.get_xp_range(guild_id)
-
-            # Update database with new XP range
             async with self.db.cursor() as cur:
                 await cur.execute("""
                     UPDATE leveling_settings 
-                    SET min_xp = ?, max_xp = ?
+                    SET xp_cooldown = ? 
                     WHERE guild_id = ?
-                """, (min_xp, max_xp, guild_id))
+                """, (cooldown, interaction.guild_id))
 
-            # Update cache
-            self.xp_ranges[guild_id] = (min_xp, max_xp)
+            self.cooldown_settings[interaction.guild_id] = cooldown
 
             embed = discord.Embed(
-                title="⚙️ XP Range Configuration",
-                description="Message reward settings have been updated.",
+                title="⚙️ Cooldown Updated",
+                description=f"XP cooldown set to {time}",
                 color=discord.Color.blue()
             )
-
-            old_xp_text = f"Min XP: {old_min}\nMax XP: {old_max}"
-            new_xp_text = f"Min XP: {min_xp}\nMax XP: {max_xp}"
-
-            embed.add_field(
-                name="Previous Setting",
-                value=f"```\n{old_xp_text}\n```",
-                inline=True
-            )
-            embed.add_field(
-                name="New Setting",
-                value=f"```\n{new_xp_text}\n```",
-                inline=True
-            )
-            embed.add_field(
-                name="Effect",
-                value="This change affects how much XP users gain from each message.",
-                inline=False
-            )
-            embed.set_footer(text="Administrative Command • XP System Settings")
+            embed.set_footer(text="Administrative Command • Leveling System")
 
             await interaction.response.send_message(embed=embed)
-            logger.info(f"XP range updated in {interaction.guild.name}: {min_xp}-{max_xp}")
+            logger.info(f"XP cooldown updated in {interaction.guild}: {time}")
+        except Exception as e:
+            logger.error(f"Error setting cooldown: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while updating the cooldown.",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="setxprange", description="Set the XP range for message rewards")
+    @app_commands.default_permissions(administrator=True)
+    async def setxprange(self, interaction: discord.Interaction, min_xp: int, max_xp: int):
+        try:
+            if not (1 <= min_xp <= max_xp <= 100):
+                await interaction.response.send_message(
+                    "❌ Invalid XP range! Min must be at least 1, max cannot exceed 100, and min must be less than max.",
+                    ephemeral=True
+                )
+                return
+
+            async with self.db.cursor() as cur:
+                await cur.execute("""
+                    UPDATE leveling_settings 
+                    SET min_xp = ?, max_xp = ? 
+                    WHERE guild_id = ?
+                """, (min_xp, max_xp, interaction.guild_id))
+
+            self.xp_ranges[interaction.guild_id] = (min_xp, max_xp)
+
+            embed = discord.Embed(
+                title="⚙️ XP Range Updated",
+                description=f"Message XP range set to {min_xp}-{max_xp}",
+                color=discord.Color.blue()
+            )
+            embed.set_footer(text="Administrative Command • Leveling System")
+
+            await interaction.response.send_message(embed=embed)
+            logger.info(f"XP range updated in {interaction.guild}: {min_xp}-{max_xp}")
         except Exception as e:
             logger.error(f"Error setting XP range: {e}")
             await interaction.response.send_message(
-                "❌ An error occurred while updating XP range settings.",
+                "❌ An error occurred while updating the XP range.",
                 ephemeral=True
             )
 
@@ -689,152 +579,98 @@ class Leveling(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     async def levelconfig(self, interaction: discord.Interaction):
         try:
-            await interaction.response.defer()
+            async with self.db.cursor() as cur:
+                # Get leveling settings
+                await cur.execute("""
+                    SELECT * FROM leveling_settings 
+                    WHERE guild_id = ?
+                """, (interaction.guild_id,))
+                settings = await cur.fetchone()
+
+                # Get level roles
+                await cur.execute("""
+                    SELECT level, role_id 
+                    FROM level_roles 
+                    WHERE guild_id = ?
+                    ORDER BY level ASC
+                """, (interaction.guild_id,))
+                roles = await cur.fetchall()
+
+            if not settings:
+                await interaction.response.send_message(
+                    "❌ No leveling configuration found!",
+                    ephemeral=True
+                )
+                return
 
             embed = discord.Embed(
                 title="⚙️ Leveling System Configuration",
-                description="Current settings for this server",
                 color=discord.Color.blue()
             )
 
-            # Get current cooldown and XP range from cache
-            cooldown = self.get_cooldown(interaction.guild.id)
-            min_xp, max_xp = self.get_xp_range(interaction.guild.id)
-
             # XP Settings
+            xp_settings = (
+                f"XP Range: {settings['min_xp']}-{settings['max_xp']}\n"
+                f"Cooldown: {settings['xp_cooldown']}s\n"
+                f"Multiplier: {settings['xp_multiplier']}x"
+            )
             embed.add_field(
-                name="⏱️ XP Gain Settings",
-                value=f"```\nCooldown: {cooldown} seconds\nXP per message: {min_xp}-{max_xp}\n```",
+                name="📊 XP Settings",
+                value=f"```{xp_settings}```",
                 inline=False
             )
 
-            # Get level-up message and channel
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    SELECT level_up_message, level_up_channel_id
-                    FROM leveling_settings
-                    WHERE guild_id = ?
-                """, (interaction.guild.id,))
-                level_up_settings = await cur.fetchone()
-                
-            if level_up_settings:
-                message, channel_id = level_up_settings
-                channel = f"<#{channel_id}>" if channel_id else "Same channel"
-                msg_text = f"Message: {message}\nChannel: {channel}"
+            # Voice XP (if enabled)
+            if settings['voice_xp_enabled']:
+                voice_settings = (
+                    f"Enabled: Yes\n"
+                    f"XP per minute: {settings['voice_xp_per_minute']}"
+                )
                 embed.add_field(
-                    name="📢 Level Up Settings",
-                    value=f"```\n{msg_text}\n```",
+                    name="🎤 Voice XP",
+                    value=f"```{voice_settings}```",
                     inline=False
                 )
 
-            # Get level roles
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    SELECT level, role_id
-                    FROM level_roles
-                    WHERE guild_id = ?
-                    ORDER BY level ASC
-                """, (interaction.guild.id,))
-                level_roles = await cur.fetchall()
-
-            if level_roles:
-                roles_text = []
-                for level, role_id in level_roles:
+            # Level Roles
+            if roles:
+                role_text = []
+                for level, role_id in roles:
                     role = interaction.guild.get_role(role_id)
                     if role:
-                        roles_text.append(f"Level {level}: {role.mention}")
-                
+                        role_text.append(f"Level {level}: {role.name}")
+                if role_text:
+                    embed.add_field(
+                        name="🎭 Level Roles",
+                        value=f"```{chr(10).join(role_text)}```",
+                        inline=False
+                    )
+
+            # Additional Settings
+            other_settings = []
+            if settings['level_up_channel_id']:
+                channel = interaction.guild.get_channel(settings['level_up_channel_id'])
+                if channel:
+                    other_settings.append(f"Level Up Channel: #{channel.name}")
+            if settings['stack_roles']:
+                other_settings.append("Role Stacking: Enabled")
+            if settings['ignore_channels']:
+                other_settings.append(f"Ignored Channels: {len(settings['ignore_channels'].split(','))}")
+
+            if other_settings:
                 embed.add_field(
-                    name="🎭 Level Role Rewards",
-                    value="\n".join(roles_text),
-                    inline=False
-                )
-            else:
-                embed.add_field(
-                    name="🎭 Level Role Rewards",
-                    value="No role rewards configured",
-                    inline=False
-                )
-
-            # Add XP curve information
-            example_levels = [1, 5, 10, 20, 50]
-            xp_info = []
-            for level in example_levels:
-                xp_needed = self.calculate_xp_for_level(level)
-                xp_info.append(f"Level {level}: {xp_needed:,} XP")
-
-            embed.add_field(
-                name="📈 XP Requirements",
-                value="```\n" + "\n".join(xp_info) + "\n```",
-                inline=False
-            )
-
-            # Server Statistics
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    SELECT COUNT(*), AVG(CAST(level AS FLOAT)), MAX(level)
-                    FROM xp_data
-                    WHERE guild_id = ?
-                """, (interaction.guild.id,))
-                user_count, avg_level, max_level = await cur.fetchone()
-
-            if user_count:
-                # Format average level properly outside of f-string
-                avg_level_str = f"{avg_level:.1f}" if avg_level else "0.0"
-                stats = (
-                    f"Users tracked: {int(user_count) if user_count else 0}\n"
-                    f"Average level: {avg_level_str}\n"
-                    f"Highest level: {int(max_level) if max_level else 0}"
-                )
-                embed.add_field(
-                    name="📊 Server Statistics",
-                    value=f"```\n{stats}\n```",
+                    name="🔧 Other Settings",
+                    value=f"```{chr(10).join(other_settings)}```",
                     inline=False
                 )
 
             embed.set_footer(text="Administrative Command • Leveling System")
-            await interaction.followup.send(embed=embed)
-            logger.info(f"Level config displayed for {interaction.guild.name}")
+            await interaction.response.send_message(embed=embed)
+            logger.info(f"Level config viewed in {interaction.guild}")
         except Exception as e:
             logger.error(f"Error showing level config: {e}")
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "❌ An error occurred while fetching the configuration.",
-                ephemeral=True
-            )
-
-    @app_commands.command(name="togglexp", description="Toggle XP notifications")
-    async def togglexp(self, interaction: discord.Interaction):
-        """Toggle XP gain notifications for the user"""
-        try:
-            async with self.db.cursor() as cur:
-                # Get current setting
-                await cur.execute("""
-                    SELECT notifications_enabled 
-                    FROM user_settings 
-                    WHERE user_id = ? AND guild_id = ?
-                """, (interaction.user.id, interaction.guild.id))
-                result = await cur.fetchone()
-                
-                enabled = not (result and result[0]) if result else False
-                
-                # Update setting
-                await cur.execute("""
-                    INSERT INTO user_settings (user_id, guild_id, notifications_enabled)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(user_id, guild_id) 
-                    DO UPDATE SET notifications_enabled = ?
-                """, (interaction.user.id, interaction.guild.id, enabled, enabled))
-
-            status = "enabled" if enabled else "disabled"
-            await interaction.response.send_message(
-                f"✅ XP notifications {status}!",
-                ephemeral=True
-            )
-            logger.info(f"User {interaction.user} {status} XP notifications")
-        except Exception as e:
-            logger.error(f"Error toggling XP notifications: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred while updating your preferences.",
                 ephemeral=True
             )
 

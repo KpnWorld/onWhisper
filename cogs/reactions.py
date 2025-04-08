@@ -16,9 +16,26 @@ class ReactionRoles(commands.Cog):
     async def _init_db(self):
         """Initialize database and ensure guild settings exist"""
         try:
+            async with self.db.cursor() as cur:
+                # Create reaction roles table if it doesn't exist
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS reaction_roles (
+                        guild_id INTEGER,
+                        channel_id INTEGER,
+                        message_id INTEGER,
+                        emoji TEXT,
+                        role_id INTEGER,
+                        description TEXT,
+                        PRIMARY KEY (message_id, emoji),
+                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    )
+                """)
+                await cur.execute("CREATE INDEX IF NOT EXISTS idx_reaction_roles_guild ON reaction_roles(guild_id)")
+
+            # Initialize settings for all guilds
             for guild in self.bot.guilds:
                 await self.db.ensure_guild_exists(guild.id)
-            logger.info("Reaction Roles database initialized")
+            logger.info("Reaction roles database initialized")
         except Exception as e:
             logger.error(f"Failed to initialize reaction roles database: {e}")
 

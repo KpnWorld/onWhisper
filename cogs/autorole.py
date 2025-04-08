@@ -24,10 +24,24 @@ class AutoRole(commands.Cog):
     async def _init_db(self):
         """Initialize database and ensure guild settings exist"""
         try:
+            async with self.db.cursor() as cur:
+                # Create autorole table if it doesn't exist
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS autorole (
+                        guild_id INTEGER,
+                        role_id INTEGER,
+                        type TEXT,
+                        enabled BOOLEAN DEFAULT 1,
+                        PRIMARY KEY (guild_id, type),
+                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    )
+                """)
+                await cur.execute("CREATE INDEX IF NOT EXISTS idx_autorole_guild ON autorole(guild_id)")
+
             # Initialize settings for all guilds
             for guild in self.bot.guilds:
                 await self.db.ensure_guild_exists(guild.id)
-            logger.info("Autorole database initialized successfully")
+            logger.info("Autorole database initialized")
         except Exception as e:
             logger.error(f"Failed to initialize autorole database: {e}")
 

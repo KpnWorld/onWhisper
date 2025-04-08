@@ -69,8 +69,24 @@ class Verification(commands.Cog):
             asyncio.create_task(self.session.close())
 
     async def _init_db(self):
-        """Initialize database settings for all guilds"""
+        """Initialize database and ensure guild settings exist"""
         try:
+            async with self.db.cursor() as cur:
+                # Create verification settings table if it doesn't exist
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS verification_settings (
+                        guild_id INTEGER PRIMARY KEY,
+                        enabled BOOLEAN DEFAULT 0,
+                        channel_id INTEGER,
+                        role_id INTEGER,
+                        message TEXT,
+                        type TEXT DEFAULT 'reaction',
+                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    )
+                """)
+                await cur.execute("CREATE INDEX IF NOT EXISTS idx_verification_guild ON verification_settings(guild_id)")
+
+            # Initialize settings for all guilds
             for guild in self.bot.guilds:
                 await self.db.ensure_guild_exists(guild.id)
             logger.info("Verification database initialized")

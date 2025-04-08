@@ -155,11 +155,16 @@ class Bot(commands.Bot):
 
     async def setup_hook(self):
         """Set up the bot's database and metrics collection"""
-        await self.load_cogs()
-        self._metrics_task = self.loop.create_task(self._collect_metrics())
-        self._flush_task = self.loop.create_task(self._flush_metrics())
-        self._session_task = self.loop.create_task(self._session_monitor())
-        logger.info("Bot setup completed")
+        try:
+            await self.db.setup_database()
+            await self.load_cogs()
+            self._metrics_task = self.loop.create_task(self._collect_metrics())
+            self._flush_task = self.loop.create_task(self._flush_metrics())
+            self._session_task = self.loop.create_task(self._session_monitor())
+            logger.info("Bot setup completed")
+        except Exception as e:
+            logger.error(f"Error during bot setup: {e}")
+            raise
 
     async def _collect_metrics(self):
         """Collect guild metrics every 5 minutes"""
@@ -289,31 +294,72 @@ class Bot(commands.Bot):
         except Exception as e:
             logger.error(f"Error setting up new guild {guild.name}: {e}")
 
-    async def on_command_error(self, ctx, error):
-        """Global error handler with logging"""
-        if isinstance(error, commands.CommandNotFound):
-            return
-
-        await self.db.log_command(
-            guild_id=ctx.guild.id if ctx.guild else None,
-            user_id=ctx.author.id,
-            command_name=ctx.command.name if ctx.command else "unknown",
-            success=False,
-            error=str(error)
-        )
-        
-        logger.error(f'Error occurred: {str(error)}')
-        await ctx.send(f'An error occurred: {str(error)}')
-
     async def on_app_command_completion(self, interaction: discord.Interaction, command: app_commands.Command):
-        """Log successful slash command usage"""
-        if interaction.guild:
-            await self.db.log_command(
-                guild_id=interaction.guild_id,
-                user_id=interaction.user.id,
-                command_name=command.name,
-                success=True
-            )
+        """Log successful slash command usage with execution time"""
+        try:
+            if interaction.guild:
+                execution_time = (datetime.now() - interaction.created_at).total_seconds()
+                await self.db.log_command(
+                    guild_id=interaction.guild_id,
+                    user_id=interaction.user.id,
+                    command_name=command.name,
+                    success=True,
+                    execution_time=execution_time
+                )
+                if hasattr(command, 'logging_enabled') and command.logging_enabled:
+                    logger.info(f"{command.name} command used by {interaction.user}")
+        except Exception as e:
+            logger.error(f"Error in command logging: {e}")
+
+    async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """Log failed slash command usage"""
+        try:
+            if interaction.guild:
+                execution_time = (datetime.now() - interaction.created_at).total_seconds()
+                await self.db.log_command(
+                    guild_id=interaction.guild_id,
+                    user_id=interaction.user.id,
+                    command_name=interaction.command.name if interaction.command else "unknown",
+                    success=False,
+                    error=str(error),
+                    execution_time=execution_time
+                )
+            logger.error(f"Command error: {str(error)}")
+        except Exception as e:
+            logger.error(f"Error in command error logging: {e}")
+
+    async def on_command_completion(self, ctx):
+        """Log successful prefix command usage"""
+        try:
+            if ctx.guild:
+                execution_time = (datetime.now() - ctx.message.created_at).total_seconds()
+                await self.db.log_command(
+                    guild_id=ctx.guild.id,
+                    user_id=ctx.author.id,
+                    command_name=ctx.command.name,
+                    success=True,
+                    execution_time=execution_time
+                )
+        except Exception as e:
+            logger.error(f"Error in command completion logging: {e}")
+
+    async def on_command_error(self, ctx, error):
+        """Log failed prefix command usage"""
+        try:
+            if not isinstance(error, commands.CommandNotFound) and ctx.guild:
+                execution_time = (datetime.now() - ctx.message.created_at).total_seconds()
+                await self.db.log_command(
+                    guild_id=ctx.guild.id,
+                    user_id=ctx.author.id,
+                    command_name=ctx.command.name if ctx.command else "unknown",
+                    success=False,
+                    error=str(error),
+                    execution_time=execution_time
+                )
+            if not isinstance(error, commands.CommandNotFound):
+                logger.error(f"Command error: {str(error)}")
+        except Exception as e:
+            logger.error(f"Error in command error logging: {e}")
 
     async def on_error(self, event_method: str, *args, **kwargs):
         """Global error handler for bot events"""
