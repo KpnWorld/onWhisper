@@ -27,6 +27,11 @@ class DatabaseManager:
             await self._connection.execute("PRAGMA foreign_keys = ON")
         return self._connection
 
+    async def cursor(self):
+        """Get a database cursor in an async context manager"""
+        conn = await self.get_connection()
+        return await conn.cursor()
+
     async def setup_database(self) -> None:
         """Initialize database schema with proper constraints"""
         async with self._lock:

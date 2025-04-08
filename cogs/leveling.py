@@ -64,7 +64,8 @@ class Leveling(commands.Cog):
     async def _init_db(self):
         """Initialize database and load settings asynchronously"""
         try:
-            async with self.db.cursor() as cur:
+            cursor = await self.db.cursor()
+            async with cursor as cur:
                 await cur.execute("""
                     SELECT guild_id, xp_cooldown, min_xp, max_xp
                     FROM leveling_settings
@@ -77,7 +78,8 @@ class Leveling(commands.Cog):
             # Initialize settings for new guilds
             for guild in self.bot.guilds:
                 await self.db.ensure_guild_exists(guild.id)
-                async with self.db.cursor() as cur:
+                cursor = await self.db.cursor()
+                async with cursor as cur:
                     await cur.execute("""
                         INSERT OR IGNORE INTO leveling_settings 
                         (guild_id, xp_cooldown, min_xp, max_xp)
