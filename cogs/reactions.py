@@ -10,7 +10,26 @@ class ReactionRoles(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
+        bot.loop.create_task(self._init_db())
         logger.info("Reaction Roles cog initialized")
+
+    async def _init_db(self):
+        """Initialize database and ensure guild settings exist"""
+        try:
+            for guild in self.bot.guilds:
+                await self.db.ensure_guild_exists(guild.id)
+            logger.info("Reaction Roles database initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize reaction roles database: {e}")
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild):
+        """Initialize settings when bot joins a new guild"""
+        try:
+            await self.db.ensure_guild_exists(guild.id)
+            logger.info(f"Initialized reaction roles for new guild: {guild.name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize reaction roles for guild {guild.name}: {e}")
 
     @app_commands.command(name="reactrole", description="Create a reaction role message")
     @app_commands.describe(
@@ -73,8 +92,8 @@ class ReactionRoles(commands.Cog):
             await message.add_reaction(emoji)
 
             # Save to database
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     INSERT INTO reaction_roles 
                     (guild_id, channel_id, message_id, emoji, role_id, description)
                     VALUES (?, ?, ?, ?, ?, ?)
@@ -119,13 +138,13 @@ class ReactionRoles(commands.Cog):
     async def removereactrole(self, interaction: discord.Interaction, message_id: str):
         try:
             # Find reaction role in database
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT channel_id 
                     FROM reaction_roles 
                     WHERE guild_id = ? AND message_id = ?
                 """, (interaction.guild_id, int(message_id)))
-                result = cur.fetchone()
+                result = await cur.fetchone()
 
             if not result:
                 error_embed = discord.Embed(
@@ -147,8 +166,8 @@ class ReactionRoles(commands.Cog):
                     pass  # Message already deleted
 
             # Remove from database
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     DELETE FROM reaction_roles 
                     WHERE guild_id = ? AND message_id = ?
                 """, (interaction.guild_id, int(message_id)))
@@ -186,13 +205,13 @@ class ReactionRoles(commands.Cog):
 
         try:
             # Check if this is a reaction role message
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT role_id, emoji 
                     FROM reaction_roles 
                     WHERE guild_id = ? AND message_id = ?
                 """, (payload.guild_id, payload.message_id))
-                result = cur.fetchone()
+                result = await cur.fetchone()
 
             if not result:
                 return
@@ -225,13 +244,13 @@ class ReactionRoles(commands.Cog):
 
         try:
             # Check if this is a reaction role message
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT role_id, emoji 
                     FROM reaction_roles 
                     WHERE guild_id = ? AND message_id = ?
                 """, (payload.guild_id, payload.message_id))
-                result = cur.fetchone()
+                result = await cur.fetchone()
 
             if not result:
                 return
@@ -261,14 +280,14 @@ class ReactionRoles(commands.Cog):
     @app_commands.default_permissions(manage_roles=True)
     async def listreactroles(self, interaction: discord.Interaction):
         try:
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT message_id, channel_id, emoji, role_id, description 
                     FROM reaction_roles 
                     WHERE guild_id = ?
                     ORDER BY message_id DESC
                 """, (interaction.guild_id,))
-                roles = cur.fetchall()
+                roles = await cur.fetchall()
 
             if not roles:
                 embed = discord.Embed(

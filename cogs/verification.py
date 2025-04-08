@@ -60,10 +60,31 @@ class Verification(commands.Cog):
         self.bot = bot
         self.db = bot.db
         self.session = aiohttp.ClientSession()
+        bot.loop.create_task(self._init_db())
         logger.info("Verification cog initialized")
     
     def cog_unload(self):
-        asyncio.create_task(self.session.close())
+        """Cleanup when cog is unloaded"""
+        if self.session:
+            asyncio.create_task(self.session.close())
+
+    async def _init_db(self):
+        """Initialize database settings for all guilds"""
+        try:
+            for guild in self.bot.guilds:
+                await self.db.ensure_guild_exists(guild.id)
+            logger.info("Verification database initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize verification database: {e}")
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild):
+        """Initialize settings when bot joins a new guild"""
+        try:
+            await self.db.ensure_guild_exists(guild.id)
+            logger.info(f"Initialized verification for new guild: {guild.name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize verification for guild {guild.name}: {e}")
 
     async def generate_captcha(self, text: str) -> BytesIO:
         """Generate a captcha image"""
@@ -151,12 +172,11 @@ class Verification(commands.Cog):
                 await verify_msg.add_reaction("✅")
 
             # Save settings to database
-            with self.db.cursor() as cur:
-                cur.execute("""
-                    INSERT OR REPLACE INTO verification_settings
-                    (guild_id, enabled, channel_id, role_id, message, type)
-                    VALUES (?, 1, ?, ?, ?, ?)
-                """, (interaction.guild_id, channel.id, role.id, verify_message, type.value))
+            await self.db.execute("""
+                INSERT OR REPLACE INTO verification_settings
+                (guild_id, enabled, channel_id, role_id, message, type)
+                VALUES (?, 1, ?, ?, ?, ?)
+            """, (interaction.guild_id, channel.id, role.id, verify_message, type.value))
 
             await interaction.response.send_message("✅ Verification system set up successfully!", ephemeral=True)
             logger.info(f"Verification set up in {interaction.guild.name}")
@@ -171,12 +191,11 @@ class Verification(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     async def disableverification(self, interaction: discord.Interaction):
         try:
-            with self.db.cursor() as cur:
-                cur.execute("""
-                    UPDATE verification_settings
-                    SET enabled = 0
-                    WHERE guild_id = ?
-                """, (interaction.guild_id,))
+            await self.db.execute("""
+                UPDATE verification_settings
+                SET enabled = 0
+                WHERE guild_id = ?
+            """, (interaction.guild_id,))
 
             await interaction.response.send_message("✅ Verification system disabled.", ephemeral=True)
             logger.info(f"Verification disabled in {interaction.guild.name}")
@@ -194,13 +213,11 @@ class Verification(commands.Cog):
 
         try:
             # Check if this is a verification message
-            with self.db.cursor() as cur:
-                cur.execute("""
-                    SELECT role_id, type 
-                    FROM verification_settings 
-                    WHERE guild_id = ? AND channel_id = ? AND enabled = 1
-                """, (payload.guild_id, payload.channel_id))
-                result = cur.fetchone()
+            result = await self.db.fetchrow("""
+                SELECT role_id, type 
+                FROM verification_settings 
+                WHERE guild_id = ? AND channel_id = ? AND enabled = 1
+            """, (payload.guild_id, payload.channel_id))
 
             if not result or str(payload.emoji) != "✅":
                 return
@@ -239,13 +256,11 @@ class Verification(commands.Cog):
     @app_commands.command(name="verify", description="Start the verification process")
     async def verify(self, interaction: discord.Interaction):
         try:
-            with self.db.cursor() as cur:
-                cur.execute("""
-                    SELECT role_id, type 
-                    FROM verification_settings 
-                    WHERE guild_id = ? AND enabled = 1
-                """, (interaction.guild_id,))
-                result = cur.fetchone()
+            result = await self.db.fetchrow("""
+                SELECT role_id, type 
+                FROM verification_settings 
+                WHERE guild_id = ? AND enabled = 1
+            """, (interaction.guild_id,))
 
             if not result:
                 await interaction.response.send_message(

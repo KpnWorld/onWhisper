@@ -17,26 +17,25 @@ ROLE_TYPES = [
 class AutoRole(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = bot.db  # Use bot's database instance instead of creating a new one
-        self._init_db()
+        self.db = bot.db
+        bot.loop.create_task(self._init_db())
         logger.info("AutoRole cog initialized")
 
-    def _init_db(self):
+    async def _init_db(self):
         """Initialize database and ensure guild settings exist"""
         try:
             # Initialize settings for all guilds
             for guild in self.bot.guilds:
-                self.db.ensure_guild_exists(guild.id)
+                await self.db.ensure_guild_exists(guild.id)
             logger.info("Autorole database initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize autorole database: {e}")
-            raise
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
         """Initialize settings when bot joins a new guild"""
         try:
-            self.db.ensure_guild_exists(guild.id)
+            await self.db.ensure_guild_exists(guild.id)
             logger.info(f"Initialized settings for new guild: {guild.name}")
         except Exception as e:
             logger.error(f"Failed to initialize settings for guild {guild.name}: {e}")

@@ -1,4 +1,5 @@
 import aiosqlite
+import sqlite3
 import logging
 from datetime import datetime
 import os
@@ -21,7 +22,7 @@ class DatabaseManager:
         if self._connection is None:
             self._connection = await aiosqlite.connect(
                 self.db_path,
-                detect_types=aiosqlite.PARSE_DECLTYPES | aiosqlite.PARSE_COLNAMES
+                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
             )
             await self._connection.execute("PRAGMA foreign_keys = ON")
         return self._connection

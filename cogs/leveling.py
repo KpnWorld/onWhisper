@@ -332,7 +332,7 @@ class Leveling(commands.Cog):
                     )
                     embed.add_field(
                         name="📈 Statistics",
-                        value=f"```\n{core_stats}\n```",
+                        value=f"```{core_stats}```",
                         inline=False
                     )
 
@@ -431,9 +431,10 @@ class Leveling(commands.Cog):
                     )
 
             if leaderboard_text:
+                joined_leaderboard = "\n\n".join(leaderboard_text)
                 embed.add_field(
                     name="📈 Rankings",
-                    value=f"```\n{'\n\n'.join(leaderboard_text)}\n```",
+                    value=f"```\n{joined_leaderboard}\n```",
                     inline=False
                 )
 
@@ -652,14 +653,18 @@ class Leveling(commands.Cog):
                 description="Message reward settings have been updated.",
                 color=discord.Color.blue()
             )
+
+            old_xp_text = f"Min XP: {old_min}\nMax XP: {old_max}"
+            new_xp_text = f"Min XP: {min_xp}\nMax XP: {max_xp}"
+
             embed.add_field(
                 name="Previous Setting",
-                value=f"```\nMin XP: {old_min}\nMax XP: {old_max}\n```",
+                value=f"```\n{old_xp_text}\n```",
                 inline=True
             )
             embed.add_field(
                 name="New Setting",
-                value=f"```\nMin XP: {min_xp}\nMax XP: {max_xp}\n```",
+                value=f"```\n{new_xp_text}\n```",
                 inline=True
             )
             embed.add_field(
@@ -713,9 +718,10 @@ class Leveling(commands.Cog):
             if level_up_settings:
                 message, channel_id = level_up_settings
                 channel = f"<#{channel_id}>" if channel_id else "Same channel"
+                msg_text = f"Message: {message}\nChannel: {channel}"
                 embed.add_field(
                     name="📢 Level Up Settings",
-                    value=f"```\nMessage: {message}\nChannel: {channel}\n```",
+                    value=f"```\n{msg_text}\n```",
                     inline=False
                 )
 
