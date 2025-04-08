@@ -1,67 +1,37 @@
-import sqlite3
+import aiosqlite
 import logging
 from datetime import datetime
 import os
 from pathlib import Path
-import json
 from typing import Optional, List, Dict, Any
+import asyncio
 
 logger = logging.getLogger(__name__)
 
-class DatabaseCursor:
-    def __init__(self, db_manager):
-        self.db_manager = db_manager
-        self.conn = None
-        self.cursor = None
-
-    def __enter__(self):
-        self.conn = self.db_manager.get_connection()
-        self.cursor = self.conn.cursor()
-        return self.cursor
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            self.conn.commit()
-        self.cursor.close()
-        self.conn.close()
-
 class DatabaseManager:
     def __init__(self, db_name: str):
-        """Initialize database connection"""
         self.db_name = db_name
         self.db_path = os.path.join('db', f'{db_name}.db')
         os.makedirs('db', exist_ok=True)
+        self._connection = None
+        self._lock = asyncio.Lock()
         
-        # Register datetime adapter
-        sqlite3.register_adapter(datetime, lambda dt: dt.isoformat())
-        sqlite3.register_converter('TIMESTAMP', lambda b: datetime.fromisoformat(b.decode()))
-        
-        self.setup_database()
+    async def get_connection(self) -> aiosqlite.Connection:
+        """Get or create database connection"""
+        if self._connection is None:
+            self._connection = await aiosqlite.connect(
+                self.db_path,
+                detect_types=aiosqlite.PARSE_DECLTYPES | aiosqlite.PARSE_COLNAMES
+            )
+            await self._connection.execute("PRAGMA foreign_keys = ON")
+        return self._connection
 
-    def get_connection(self) -> sqlite3.Connection:
-        """Get a database connection with proper settings"""
-        conn = sqlite3.connect(
-            self.db_path,
-            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
-        )
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def cursor(self):
-        """Get a database cursor with context manager support"""
-        return DatabaseCursor(self)
-
-    def setup_database(self) -> None:
-        """Initialize database schema"""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            
-            # Enable foreign keys
-            cur.execute("PRAGMA foreign_keys = ON")
-            
-            # Create tables with proper defaults and constraints
-            cur.executescript("""
-                -- Core guild settings
+    async def setup_database(self) -> None:
+        """Initialize database schema with proper constraints"""
+        async with self._lock:
+            conn = await self.get_connection()
+            await conn.executescript("""
+                -- Core guild settings with improved constraints
                 CREATE TABLE IF NOT EXISTS guilds (
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -69,25 +39,31 @@ class DatabaseManager:
                     prefix TEXT DEFAULT '!',
                     locale TEXT DEFAULT 'en-US',
                     timezone TEXT DEFAULT 'UTC',
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_active TIMESTAMP,
+                    CHECK (prefix != '')
                 );
 
-                -- Extended guild settings
+                -- Extended guild settings with better organization
                 CREATE TABLE IF NOT EXISTS guild_settings (
                     guild_id INTEGER PRIMARY KEY,
                     welcome_channel_id INTEGER,
+                    welcome_message TEXT,
                     goodbye_channel_id INTEGER,
+                    goodbye_message TEXT,
                     log_channel_id INTEGER,
+                    mod_log_channel_id INTEGER,
                     mute_role_id INTEGER,
                     autorole_enabled BOOLEAN DEFAULT 0,
                     autorole_id INTEGER,
-                    level_channel_id INTEGER DEFAULT NULL,
+                    level_channel_id INTEGER,
                     embed_color TEXT DEFAULT '0000FF',
                     premium_status INTEGER DEFAULT 0,
+                    premium_until TIMESTAMP,
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
-                -- User statistics
+                -- Enhanced user statistics
                 CREATE TABLE IF NOT EXISTS user_stats (
                     user_id INTEGER,
                     guild_id INTEGER,
@@ -98,25 +74,31 @@ class DatabaseManager:
                     voice_time INTEGER DEFAULT 0,
                     invites INTEGER DEFAULT 0,
                     warnings INTEGER DEFAULT 0,
+                    total_voice_messages INTEGER DEFAULT 0,
+                    total_reactions_added INTEGER DEFAULT 0,
+                    total_reactions_received INTEGER DEFAULT 0,
                     PRIMARY KEY (user_id, guild_id),
-                    FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE,
+                    CHECK (xp >= 0),
+                    CHECK (level >= 0)
                 );
 
-                -- Command logging
+                -- Detailed command logging
                 CREATE TABLE IF NOT EXISTS command_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER,
                     user_id INTEGER,
-                    command_name TEXT,
+                    command_name TEXT NOT NULL,
                     success BOOLEAN,
                     error TEXT,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     args TEXT,
                     context TEXT,
+                    execution_time REAL,
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
-                -- Guild metrics
+                -- Comprehensive guild metrics
                 CREATE TABLE IF NOT EXISTS guild_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER,
@@ -124,11 +106,16 @@ class DatabaseManager:
                     active_users INTEGER,
                     message_count INTEGER DEFAULT 0,
                     voice_users INTEGER DEFAULT 0,
+                    bot_count INTEGER DEFAULT 0,
+                    channel_count INTEGER DEFAULT 0,
+                    role_count INTEGER DEFAULT 0,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE,
+                    CHECK (member_count >= 0),
+                    CHECK (active_users >= 0)
                 );
 
-                -- Leveling system settings
+                -- Enhanced leveling system
                 CREATE TABLE IF NOT EXISTS leveling_settings (
                     guild_id INTEGER PRIMARY KEY,
                     xp_cooldown INTEGER DEFAULT 60,
@@ -139,30 +126,40 @@ class DatabaseManager:
                     level_up_message TEXT DEFAULT 'Congratulations {user}, you reached level {level}!',
                     level_up_channel_id INTEGER,
                     stack_roles BOOLEAN DEFAULT 1,
-                    FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    ignore_channels TEXT, -- JSON array of channel IDs
+                    xp_multiplier REAL DEFAULT 1.0,
+                    FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE,
+                    CHECK (xp_cooldown > 0),
+                    CHECK (min_xp > 0),
+                    CHECK (max_xp >= min_xp)
                 );
 
-                -- Level role rewards
+                -- Improved level roles with role removal tracking
                 CREATE TABLE IF NOT EXISTS level_roles (
                     guild_id INTEGER,
                     level INTEGER,
                     role_id INTEGER,
+                    remove_lower BOOLEAN DEFAULT 0,
+                    temporary BOOLEAN DEFAULT 0,
+                    duration INTEGER, -- Duration in minutes if temporary
                     PRIMARY KEY (guild_id, level),
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
-                -- User preferences
+                -- Enhanced user settings
                 CREATE TABLE IF NOT EXISTS user_settings (
                     user_id INTEGER,
                     guild_id INTEGER,
                     notifications_enabled BOOLEAN DEFAULT 1,
                     private_levels BOOLEAN DEFAULT 0,
                     level_dms BOOLEAN DEFAULT 0,
+                    custom_color TEXT,
+                    custom_background TEXT,
                     PRIMARY KEY (user_id, guild_id),
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
-                -- New: Reaction role system
+                -- Improved reaction roles with groups
                 CREATE TABLE IF NOT EXISTS reaction_roles (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER,
@@ -172,10 +169,14 @@ class DatabaseManager:
                     role_id INTEGER,
                     description TEXT,
                     exclusive_group INTEGER DEFAULT 0,
+                    temporary BOOLEAN DEFAULT 0,
+                    duration INTEGER, -- Duration in minutes if temporary
+                    max_users INTEGER DEFAULT 0, -- 0 means unlimited
+                    required_role_id INTEGER,
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
 
-                -- New: Verification system
+                -- Enhanced verification system
                 CREATE TABLE IF NOT EXISTS verification_settings (
                     guild_id INTEGER PRIMARY KEY,
                     enabled BOOLEAN DEFAULT 0,
@@ -186,197 +187,139 @@ class DatabaseManager:
                     timeout INTEGER DEFAULT 300,
                     captcha_enabled BOOLEAN DEFAULT 0,
                     verification_logs BOOLEAN DEFAULT 1,
+                    min_account_age INTEGER DEFAULT 0, -- Minimum account age in hours
+                    required_inviter_role_id INTEGER,
                     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
                 );
-            """)
 
-            # Create additional indexes
-            cur.executescript("""
-                CREATE INDEX IF NOT EXISTS idx_user_stats_guild ON user_stats(guild_id);
-                CREATE INDEX IF NOT EXISTS idx_command_logs_guild ON command_logs(guild_id);
+                -- Create optimized indexes
+                CREATE INDEX IF NOT EXISTS idx_user_stats_guild ON user_stats(guild_id, level DESC);
+                CREATE INDEX IF NOT EXISTS idx_command_logs_guild_time ON command_logs(guild_id, timestamp);
                 CREATE INDEX IF NOT EXISTS idx_metrics_guild_time ON guild_metrics(guild_id, timestamp);
-                CREATE INDEX IF NOT EXISTS idx_reaction_roles_guild ON reaction_roles(guild_id);
                 CREATE INDEX IF NOT EXISTS idx_reaction_roles_message ON reaction_roles(message_id);
+                CREATE INDEX IF NOT EXISTS idx_level_roles_guild ON level_roles(guild_id, level);
+                CREATE INDEX IF NOT EXISTS idx_user_settings_guild ON user_settings(guild_id);
             """)
+            await conn.commit()
 
-    def ensure_guild_exists(self, guild_id: int, guild_name: str = None) -> None:
-        """Ensure guild exists in database with all required settings"""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            
-            # Check if guild exists
-            cur.execute("SELECT 1 FROM guilds WHERE id = ?", (guild_id,))
-            if not cur.fetchone():
-                # Insert new guild
-                cur.execute(
-                    "INSERT INTO guilds (id, name) VALUES (?, ?)",
+    async def ensure_guild_exists(self, guild_id: int, guild_name: str = None) -> None:
+        """Ensure guild exists with all required settings"""
+        async with self._lock:
+            conn = await self.get_connection()
+            await conn.execute("BEGIN")
+            try:
+                await conn.execute(
+                    "INSERT OR IGNORE INTO guilds (id, name) VALUES (?, ?)",
                     (guild_id, guild_name or str(guild_id))
                 )
-                # Create default settings
-                cur.execute(
-                    "INSERT INTO guild_settings (guild_id) VALUES (?)",
+                
+                # Initialize all required settings atomically
+                await conn.execute(
+                    "INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)",
                     (guild_id,)
                 )
-                # Create default leveling settings
-                cur.execute("""
-                    INSERT INTO leveling_settings 
-                    (guild_id, xp_cooldown, min_xp, max_xp)
-                    VALUES (?, 60, 15, 25)
-                """, (guild_id,))
-                conn.commit()
-
-    def get_all_guild_settings(self, guild_id: int) -> tuple:
-        """Get comprehensive guild settings including all related data"""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT 
-                    g.id,
-                    g.prefix,
-                    g.locale,
-                    g.timezone,
-                    COALESCE(ls.xp_cooldown, 60) as xp_cooldown,
-                    COALESCE(ls.min_xp, 15) as min_xp,
-                    COALESCE(ls.max_xp, 25) as max_xp,
-                    COALESCE(gs.level_channel_id, NULL) as level_channel_id,
-                    g.joined_at,
-                    g.updated_at,
-                    COALESCE(ls.level_up_message, 'Congratulations {user}, you reached level {level}!') as level_up_message,
-                    COALESCE(ls.level_up_channel_id, NULL) as level_up_channel_id
-                FROM guilds g
-                LEFT JOIN leveling_settings ls ON g.id = ls.guild_id 
-                LEFT JOIN guild_settings gs ON g.id = gs.guild_id
-                WHERE g.id = ?
-            """, (guild_id,))
-            result = cur.fetchone()
-            
-            if result and not any([result[4], result[5], result[6]]):  # Check if leveling settings exist
-                cur.execute("""
-                    INSERT OR REPLACE INTO leveling_settings 
-                    (guild_id, xp_cooldown, min_xp, max_xp)
-                    VALUES (?, 60, 15, 25)
-                """, (guild_id,))
-                conn.commit()
                 
-                # Re-fetch after initialization
-                cur.execute("""
-                    SELECT 
-                        g.id,
-                        g.prefix,
-                        g.locale,
-                        g.timezone,
-                        ls.xp_cooldown,
-                        ls.min_xp,
-                        ls.max_xp,
-                        gs.level_channel_id,
-                        g.joined_at,
-                        g.updated_at,
-                        ls.level_up_message,
-                        ls.level_up_channel_id
-                    FROM guilds g
-                    LEFT JOIN leveling_settings ls ON g.id = ls.guild_id
-                    LEFT JOIN guild_settings gs ON g.id = gs.guild_id
-                    WHERE g.id = ?
+                await conn.execute("""
+                    INSERT OR IGNORE INTO leveling_settings 
+                    (guild_id, xp_cooldown, min_xp, max_xp)
+                    VALUES (?, 60, 15, 25)
                 """, (guild_id,))
-                result = cur.fetchone()
-            
-            return result
+                
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
 
-    def reset_guild_settings(self, guild_id: int) -> bool:
-        """Reset guild settings to defaults"""
-        try:
-            with self.get_connection() as conn:
-                cur = conn.cursor()
-                # Delete existing settings
-                cur.execute("DELETE FROM guild_settings WHERE guild_id = ?", (guild_id,))
-                cur.execute("DELETE FROM leveling_settings WHERE guild_id = ?", (guild_id,))
-                # Reinitialize with defaults
-                self.ensure_guild_exists(guild_id)
-                return True
-        except Exception as e:
-            logger.error(f"Failed to reset guild settings: {e}")
-            return False
+    async def batch_update_metrics(self, metrics: List[Dict[str, Any]]) -> None:
+        """Batch insert guild metrics asynchronously"""
+        async with self._lock:
+            conn = await self.get_connection()
+            await conn.execute("BEGIN")
+            try:
+                await conn.executemany("""
+                    INSERT INTO guild_metrics 
+                    (guild_id, member_count, active_users, message_count, timestamp)
+                    VALUES (?, ?, ?, ?, ?)
+                """, [
+                    (m['guild_id'], m['member_count'], m['active_users'],
+                     m.get('message_count', 0), m.get('timestamp', datetime.now()))
+                    for m in metrics
+                ])
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
 
-    def get_guild_settings(self, guild_id: int) -> Dict[str, Any]:
-        """Get guild settings"""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("""
+    async def log_command(self, guild_id: int, user_id: int, command_name: str,
+                         success: bool, error: str = None, execution_time: float = None) -> None:
+        """Log command usage asynchronously"""
+        async with self._lock:
+            conn = await self.get_connection()
+            await conn.execute("""
+                INSERT INTO command_logs 
+                (guild_id, user_id, command_name, success, error, execution_time)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (guild_id, user_id, command_name, success, error, execution_time))
+            await conn.commit()
+
+    async def get_guild_settings(self, guild_id: int) -> Dict[str, Any]:
+        """Get guild settings asynchronously"""
+        async with self._lock:
+            conn = await self.get_connection()
+            async with conn.execute("""
                 SELECT g.*, gs.*
                 FROM guilds g
                 LEFT JOIN guild_settings gs ON g.id = gs.guild_id
                 WHERE g.id = ?
-            """, (guild_id,))
-            row = cur.fetchone()
-            return dict(row) if row else None
+            """, (guild_id,)) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
-    def update_guild_settings(self, guild_id: int, **settings) -> bool:
-        """Update guild settings"""
+    async def update_guild_settings(self, guild_id: int, **settings) -> bool:
+        """Update guild settings asynchronously"""
         valid_columns = {
             'prefix', 'locale', 'timezone', 'welcome_channel_id',
             'goodbye_channel_id', 'log_channel_id', 'mute_role_id',
             'autorole_enabled', 'autorole_id', 'level_channel_id'
         }
         
-        # Filter invalid columns
         settings = {k: v for k, v in settings.items() if k in valid_columns}
         if not settings:
             return False
 
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            for key, value in settings.items():
-                table = 'guilds' if key in {'prefix', 'locale', 'timezone'} else 'guild_settings'
-                cur.execute(
-                    f"UPDATE {table} SET {key} = ? WHERE {'id' if table == 'guilds' else 'guild_id'} = ?",
-                    (value, guild_id)
-                )
-            conn.commit()
-            return True
+        async with self._lock:
+            conn = await self.get_connection()
+            await conn.execute("BEGIN")
+            try:
+                for key, value in settings.items():
+                    table = 'guilds' if key in {'prefix', 'locale', 'timezone'} else 'guild_settings'
+                    await conn.execute(
+                        f"UPDATE {table} SET {key} = ? WHERE {'id' if table == 'guilds' else 'guild_id'} = ?",
+                        (value, guild_id)
+                    )
+                await conn.commit()
+                return True
+            except Exception:
+                await conn.rollback()
+                return False
 
-    def batch_update_metrics(self, metrics: List[Dict[str, Any]]) -> None:
-        """Batch insert guild metrics"""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.executemany("""
-                INSERT INTO guild_metrics 
-                (guild_id, member_count, active_users, message_count, timestamp)
-                VALUES (?, ?, ?, ?, ?)
-            """, [
-                (
-                    m['guild_id'], 
-                    m['member_count'],
-                    m['active_users'],
-                    m.get('message_count', 0),
-                    m.get('timestamp', datetime.now())
-                )
-                for m in metrics
-            ])
-            conn.commit()
-
-    def log_command(self, guild_id: int, user_id: int, command_name: str,
-                   success: bool, error: str = None) -> None:
-        """Log command usage"""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO command_logs 
-                (guild_id, user_id, command_name, success, error)
-                VALUES (?, ?, ?, ?, ?)
-            """, (guild_id, user_id, command_name, success, error))
-            conn.commit()
-
-    def backup_database(self) -> Optional[str]:
-        """Create a backup of the database"""
+    async def backup_database(self) -> Optional[str]:
+        """Create a backup of the database asynchronously"""
         try:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             backup_dir = os.path.join('db', 'backups')
             os.makedirs(backup_dir, exist_ok=True)
             backup_path = os.path.join(backup_dir, f'{self.db_name}_{timestamp}.db')
             
-            with self.get_connection() as src, \
-                 sqlite3.connect(backup_path) as dst:
-                src.backup(dst)
+            # Create backup connection
+            await self._lock.acquire()
+            try:
+                conn = await self.get_connection()
+                backup_conn = await aiosqlite.connect(backup_path)
+                await conn.backup(backup_conn)
+                await backup_conn.close()
+            finally:
+                self._lock.release()
             
             # Keep only last 5 backups
             backups = sorted(Path(backup_dir).glob(f'{self.db_name}_*.db'))

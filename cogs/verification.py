@@ -134,9 +134,15 @@ class Verification(commands.Cog):
             verify_message = message or default_message
 
             embed = discord.Embed(
-                title="Verification Required",
+                title="✅ Verification Setup",
                 description=verify_message,
                 color=discord.Color.blue()
+            )
+            
+            embed.add_field(
+                name="⚙️ Settings",
+                value=f"```\nType: {type.value}\nChannel: {channel.name}\nRole: {role.name}\n```",
+                inline=False
             )
 
             # Create verification message

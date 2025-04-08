@@ -142,47 +142,67 @@ class Leveling(commands.Cog):
         return self.xp_ranges.get(guild_id, (15, 25))
 
     async def add_xp(self, message, xp_gained: int):
-        """Enhanced XP system with message tracking"""
+        """Enhanced XP system with message tracking and race condition prevention"""
         user_id = message.author.id
         guild_id = message.guild.id
         timestamp = message.created_at.isoformat()
 
-        with self.db.cursor() as cur:
-            # Ensure user settings exist
-            cur.execute("""
-                INSERT OR IGNORE INTO user_settings (user_id, guild_id)
-                VALUES (?, ?)
-            """, (user_id, guild_id))
+        async with self.db.cursor() as cur:
+            # Use transaction to prevent race conditions
+            await cur.execute("BEGIN EXCLUSIVE")
+            try:
+                # Ensure user settings exist
+                await cur.execute("""
+                    INSERT OR IGNORE INTO user_settings (user_id, guild_id)
+                    VALUES (?, ?)
+                """, (user_id, guild_id))
 
-            # Update XP data
-            cur.execute("""
-                INSERT INTO xp_data (user_id, guild_id, xp, level, messages, last_message)
-                VALUES (?, ?, ?, 1, 1, ?)
-                ON CONFLICT(user_id, guild_id) 
-                DO UPDATE SET
-                    xp = xp + excluded.xp,
-                    messages = messages + 1,
-                    last_message = excluded.last_message
-            """, (user_id, guild_id, xp_gained, timestamp))
-            
-            # Get current XP and level
-            cur.execute("""
-                SELECT xp, level 
-                FROM xp_data 
-                WHERE user_id=? AND guild_id=?
-            """, (user_id, guild_id))
-            current_xp, current_level = cur.fetchone()
+                # Get current XP and level atomically
+                await cur.execute("""
+                    SELECT xp, level 
+                    FROM xp_data 
+                    WHERE user_id=? AND guild_id=?
+                    FOR UPDATE
+                """, (user_id, guild_id))
+                result = await cur.fetchone()
 
-            xp_needed = self.calculate_xp_for_level(current_level)
-            if current_xp >= xp_needed:
-                new_level = current_level + 1
-                cur.execute("""
-                    UPDATE xp_data 
-                    SET level = ?, xp = ? 
-                    WHERE user_id = ? AND guild_id = ?
-                """, (new_level, current_xp - xp_needed, user_id, guild_id))
-                return new_level, current_xp - xp_needed, self.calculate_xp_for_level(new_level)
-            return None, current_xp, xp_needed
+                if result:
+                    current_xp, current_level = result
+                    new_xp = current_xp + xp_gained
+                else:
+                    current_level = 1
+                    new_xp = xp_gained
+
+                # Calculate level ups
+                level_changed = False
+                while True:
+                    xp_needed = self.calculate_xp_for_level(current_level)
+                    if new_xp >= xp_needed:
+                        current_level += 1
+                        new_xp -= xp_needed
+                        level_changed = True
+                    else:
+                        break
+
+                # Update with new values
+                await cur.execute("""
+                    INSERT INTO xp_data (user_id, guild_id, xp, level, messages, last_message)
+                    VALUES (?, ?, ?, ?, 1, ?)
+                    ON CONFLICT(user_id, guild_id) 
+                    DO UPDATE SET
+                        xp = ?,
+                        level = ?,
+                        messages = messages + 1,
+                        last_message = ?
+                """, (user_id, guild_id, new_xp, current_level, timestamp,
+                      new_xp, current_level, timestamp))
+
+                await cur.execute("COMMIT")
+                return (current_level, new_xp, self.calculate_xp_for_level(current_level)) if level_changed else (None, new_xp, xp_needed)
+
+            except Exception:
+                await cur.execute("ROLLBACK")
+                raise
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -431,8 +451,41 @@ class Leveling(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def setlevelrole(self, interaction: discord.Interaction, level: int, role: discord.Role):
         try:
-            with self.db.cursor() as cur:
-                cur.execute(
+            # Add level validation
+            if level < 1:
+                await interaction.response.send_message(
+                    "❌ Level must be greater than 0!", 
+                    ephemeral=True
+                )
+                return
+
+            # Check role hierarchy
+            if role >= interaction.guild.me.top_role:
+                await interaction.response.send_message(
+                    "❌ I cannot assign roles higher than my highest role!",
+                    ephemeral=True
+                )
+                return
+
+            # Check if role is managed by integration
+            if role.managed:
+                await interaction.response.send_message(
+                    "❌ Cannot use roles managed by integrations!",
+                    ephemeral=True
+                )
+                return
+
+            async with self.db.cursor() as cur:
+                # Get existing roles to check hierarchy
+                await cur.execute("""
+                    SELECT role_id FROM level_roles 
+                    WHERE guild_id = ? AND level <= ?
+                    ORDER BY level DESC
+                """, (interaction.guild.id, level))
+                existing_roles = await cur.fetchall()
+
+                # Insert new role
+                await cur.execute(
                     "INSERT OR REPLACE INTO level_roles (guild_id, level, role_id) VALUES (?, ?, ?)", 
                     (interaction.guild.id, level, role.id)
                 )
@@ -738,6 +791,42 @@ class Leveling(commands.Cog):
             logger.error(f"Error showing level config: {e}")
             await interaction.followup.send(
                 "❌ An error occurred while fetching the configuration.",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="togglexp", description="Toggle XP notifications")
+    async def togglexp(self, interaction: discord.Interaction):
+        """Toggle XP gain notifications for the user"""
+        try:
+            with self.db.cursor() as cur:
+                # Get current setting
+                cur.execute("""
+                    SELECT notifications_enabled 
+                    FROM user_settings 
+                    WHERE user_id = ? AND guild_id = ?
+                """, (interaction.user.id, interaction.guild.id))
+                result = cur.fetchone()
+                
+                enabled = not (result and result[0]) if result else False
+                
+                # Update setting
+                cur.execute("""
+                    INSERT INTO user_settings (user_id, guild_id, notifications_enabled)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(user_id, guild_id) 
+                    DO UPDATE SET notifications_enabled = ?
+                """, (interaction.user.id, interaction.guild.id, enabled, enabled))
+
+            status = "enabled" if enabled else "disabled"
+            await interaction.response.send_message(
+                f"✅ XP notifications {status}!",
+                ephemeral=True
+            )
+            logger.info(f"User {interaction.user} {status} XP notifications")
+        except Exception as e:
+            logger.error(f"Error toggling XP notifications: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while updating your preferences.",
                 ephemeral=True
             )
 

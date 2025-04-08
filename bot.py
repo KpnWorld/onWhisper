@@ -202,17 +202,16 @@ class Bot(commands.Bot):
             logger.error(f"Error in metrics flush: {e}")
 
     async def _flush_metrics_buffer(self):
-        """Flush metrics buffer to database"""
+        """Flush metrics buffer to database asynchronously"""
         async with self._buffer_lock:
             if not self._metric_buffer:
                 return
             
             try:
-                # Process in chunks of 50 to avoid overwhelming the database
                 chunk_size = 50
                 for i in range(0, len(self._metric_buffer), chunk_size):
                     chunk = self._metric_buffer[i:i + chunk_size]
-                    await asyncio.to_thread(self.db.batch_update_metrics, chunk)
+                    await self.db.batch_update_metrics(chunk)
                 
                 self._metric_buffer.clear()
                 self._last_flush = datetime.now()
@@ -269,7 +268,7 @@ class Bot(commands.Bot):
         if isinstance(error, commands.CommandNotFound):
             return
 
-        self.db.log_command(
+        await self.db.log_command(
             guild_id=ctx.guild.id if ctx.guild else None,
             user_id=ctx.author.id,
             command_name=ctx.command.name if ctx.command else "unknown",
@@ -283,7 +282,7 @@ class Bot(commands.Bot):
     async def on_app_command_completion(self, interaction: discord.Interaction, command: app_commands.Command):
         """Log successful slash command usage"""
         if interaction.guild:
-            self.db.log_command(
+            await self.db.log_command(
                 guild_id=interaction.guild_id,
                 user_id=interaction.user.id,
                 command_name=command.name,

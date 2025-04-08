@@ -33,28 +33,42 @@ class ReactionRoles(commands.Cog):
             
             # Verify bot permissions
             if not interaction.guild.me.guild_permissions.manage_roles:
-                await interaction.response.send_message(
-                    "❌ I need Manage Roles permission to set up reaction roles.",
-                    ephemeral=True
+                error_embed = discord.Embed(
+                    title="❌ Permission Error",
+                    description="I need Manage Roles permission to set up reaction roles.",
+                    color=discord.Color.red()
                 )
+                error_embed.set_footer(text="Administrative Command • Error")
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
                 return
 
             if role.position >= interaction.guild.me.top_role.position:
-                await interaction.response.send_message(
-                    "❌ I cannot assign roles higher than my highest role.",
-                    ephemeral=True
+                error_embed = discord.Embed(
+                    title="❌ Role Hierarchy Error",
+                    description="I cannot assign roles higher than my highest role.",
+                    color=discord.Color.red()
                 )
+                error_embed.set_footer(text="Administrative Command • Error")
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
                 return
 
-            # Create the reaction role message
+            # Create the reaction role message with consistent style
             embed = discord.Embed(
-                title="Role Assignment",
-                description=f"React with {emoji} to get the {role.mention} role\n\n{description}",
-                color=role.color
+                title="🎭 Role Assignment",
+                description=f"React with {emoji} to get the {role.mention} role",
+                color=role.color if role.color != discord.Color.default() else discord.Color.blue()
             )
-            embed.set_footer(text=f"Role ID: {role.id}")
+            
+            # Add description field if provided
+            if description:
+                embed.add_field(name="ℹ️ About this role", value=description, inline=False)
+            
+            embed.set_footer(text=f"Role ID: {role.id} • Reaction Roles")
 
-            await interaction.response.send_message("Creating reaction role message...", ephemeral=True)
+            progress_msg = await interaction.response.send_message(
+                "⚙️ Creating reaction role...", 
+                ephemeral=True
+            )
             message = await target_channel.send(embed=embed)
             await message.add_reaction(emoji)
 
@@ -73,14 +87,31 @@ class ReactionRoles(commands.Cog):
                     description
                 ))
 
-            await interaction.edit_original_response(content="✅ Reaction role created successfully!")
-            logger.info(f"Reaction role created for role {role.name} in {interaction.guild.name}")
+            # Success message with consistent style
+            success_embed = discord.Embed(
+                title="✅ Reaction Role Created",
+                description="Role assignment has been configured successfully.",
+                color=discord.Color.green()
+            )
+            success_embed.add_field(
+                name="Details",
+                value=f"```\nRole: {role.name}\nEmoji: {emoji}\nChannel: {target_channel.name}\n```",
+                inline=False
+            )
+            success_embed.set_footer(text="Administrative Command • Reaction Roles")
+            
+            await interaction.edit_original_response(embed=success_embed)
+            logger.info(f"Reaction role created: {role.name} in {interaction.guild.name}")
+
         except Exception as e:
             logger.error(f"Error creating reaction role: {e}")
-            await interaction.followup.send(
-                "❌ An error occurred while setting up the reaction role.",
-                ephemeral=True
+            error_embed = discord.Embed(
+                title="❌ Configuration Error",
+                description="Failed to set up reaction role.",
+                color=discord.Color.red()
             )
+            error_embed.set_footer(text="Administrative Command • Error")
+            await interaction.followup.send(embed=error_embed, ephemeral=True)
 
     @app_commands.command(name="removereactrole", description="Remove a reaction role message")
     @app_commands.describe(message_id="The ID of the reaction role message to remove")
@@ -97,10 +128,13 @@ class ReactionRoles(commands.Cog):
                 result = cur.fetchone()
 
             if not result:
-                await interaction.response.send_message(
-                    "❌ No reaction role found with that message ID.",
-                    ephemeral=True
+                error_embed = discord.Embed(
+                    title="❌ Not Found",
+                    description="No reaction role found with that message ID.",
+                    color=discord.Color.red()
                 )
+                error_embed.set_footer(text="Administrative Command • Error")
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
                 return
 
             # Delete the message
@@ -119,16 +153,31 @@ class ReactionRoles(commands.Cog):
                     WHERE guild_id = ? AND message_id = ?
                 """, (interaction.guild_id, int(message_id)))
 
-            await interaction.response.send_message("✅ Reaction role removed successfully!", ephemeral=True)
+            success_embed = discord.Embed(
+                title="✅ Reaction Role Removed",
+                description="The reaction role has been removed successfully.",
+                color=discord.Color.green()
+            )
+            success_embed.set_footer(text="Administrative Command • Reaction Roles")
+            await interaction.response.send_message(embed=success_embed, ephemeral=True)
             logger.info(f"Reaction role removed in {interaction.guild.name}")
         except ValueError:
-            await interaction.response.send_message("❌ Invalid message ID.", ephemeral=True)
+            error_embed = discord.Embed(
+                title="❌ Invalid Input",
+                description="Invalid message ID provided.",
+                color=discord.Color.red()
+            )
+            error_embed.set_footer(text="Administrative Command • Error")
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
         except Exception as e:
             logger.error(f"Error removing reaction role: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred while removing the reaction role.",
-                ephemeral=True
+            error_embed = discord.Embed(
+                title="❌ Removal Error",
+                description="An error occurred while removing the reaction role.",
+                color=discord.Color.red()
             )
+            error_embed.set_footer(text="Administrative Command • Error")
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
@@ -222,10 +271,13 @@ class ReactionRoles(commands.Cog):
                 roles = cur.fetchall()
 
             if not roles:
-                await interaction.response.send_message(
-                    "No reaction roles set up in this server.",
-                    ephemeral=True
+                embed = discord.Embed(
+                    title="📜 Reaction Roles",
+                    description="No reaction roles set up in this server.",
+                    color=discord.Color.blue()
                 )
+                embed.set_footer(text="Administrative Command • Reaction Roles")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
             embed = discord.Embed(
@@ -244,14 +296,18 @@ class ReactionRoles(commands.Cog):
                         inline=False
                     )
 
+            embed.set_footer(text="Administrative Command • Reaction Roles")
             await interaction.response.send_message(embed=embed)
             logger.info(f"Listed reaction roles for {interaction.guild.name}")
         except Exception as e:
             logger.error(f"Error listing reaction roles: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred while fetching reaction roles.",
-                ephemeral=True
+            error_embed = discord.Embed(
+                title="❌ Listing Error",
+                description="An error occurred while fetching reaction roles.",
+                color=discord.Color.red()
             )
+            error_embed.set_footer(text="Administrative Command • Error")
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(ReactionRoles(bot))
