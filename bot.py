@@ -234,18 +234,12 @@ class Bot(commands.Bot):
             # Initialize settings for all guilds
             for guild in self.guilds:
                 try:
-                    self.db.ensure_guild_exists(guild.id)
-                except sqlite3.IntegrityError:
-                    # Skip if guild settings already exist
-                    continue
+                    await self.db.ensure_guild_exists(guild.id, guild.name)
                 except Exception as e:
                     logger.error(f"Error initializing guild {guild.id}: {e}")
 
             # Count and sync slash commands
-            command_count = 0
-            for cmd in self.tree.walk_commands():
-                command_count += 1
-            
+            command_count = len([cmd for cmd in self.tree.walk_commands()])
             await self.tree.sync()
             logger.info(f"✓ Successfully registered {command_count} slash commands")
             
@@ -258,7 +252,7 @@ class Bot(commands.Bot):
     async def on_guild_join(self, guild):
         """Called when the bot joins a new guild"""
         try:
-            self.db.ensure_guild_exists(guild.id)
+            await self.db.ensure_guild_exists(guild.id, guild.name)
             logger.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
         except Exception as e:
             logger.error(f"Error setting up new guild {guild.name}: {e}")

@@ -17,8 +17,8 @@ class Leveling(commands.Cog):
         self.xp_cooldowns: Dict[int, Dict[int, datetime]] = {}
         self.cooldown_settings = {}
         self.xp_ranges = {}
-        self._init_db()
         self._cleanup_task = bot.loop.create_task(self._cleanup_cooldowns())
+        bot.loop.create_task(self._init_db())
         logger.info("Leveling cog initialized")
 
     def cog_unload(self):
@@ -61,24 +61,24 @@ class Leveling(commands.Cog):
             self.xp_cooldowns[guild_id] = {}
         self.xp_cooldowns[guild_id][user_id] = datetime.now() + timedelta(seconds=seconds)
 
-    def _init_db(self):
-        """Initialize database and load settings"""
+    async def _init_db(self):
+        """Initialize database and load settings asynchronously"""
         try:
-            # Load settings for all guilds
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT guild_id, xp_cooldown, min_xp, max_xp
                     FROM leveling_settings
                 """)
-                for guild_id, cooldown, min_xp, max_xp in cur.fetchall():
+                rows = await cur.fetchall()
+                for guild_id, cooldown, min_xp, max_xp in rows:
                     self.cooldown_settings[guild_id] = cooldown
                     self.xp_ranges[guild_id] = (min_xp, max_xp)
 
             # Initialize settings for new guilds
             for guild in self.bot.guilds:
-                self.db.ensure_guild_exists(guild.id)
-                with self.db.cursor() as cur:
-                    cur.execute("""
+                await self.db.ensure_guild_exists(guild.id)
+                async with self.db.cursor() as cur:
+                    await cur.execute("""
                         INSERT OR IGNORE INTO leveling_settings 
                         (guild_id, xp_cooldown, min_xp, max_xp)
                         VALUES (?, ?, ?, ?)
@@ -268,23 +268,23 @@ class Leveling(commands.Cog):
 
     async def _get_user_rank(self, guild_id: int, level: int, xp: int) -> int:
         """Get user's rank in an async way"""
-        with self.db.cursor() as cur:
-            cur.execute("""
+        async with self.db.cursor() as cur:
+            await cur.execute("""
                 SELECT COUNT(*) + 1 FROM xp_data 
                 WHERE guild_id = ? AND (
                     level > ? OR (level = ? AND xp > ?)
                 )
             """, (guild_id, level, level, xp))
-            return cur.fetchone()[0]
+            return (await cur.fetchone())[0]
 
     async def _get_level_role(self, guild_id: int, level: int) -> int:
         """Get role ID for level in an async way"""
-        with self.db.cursor() as cur:
-            cur.execute("""
+        async with self.db.cursor() as cur:
+            await cur.execute("""
                 SELECT role_id FROM level_roles 
                 WHERE guild_id = ? AND level = ?
             """, (guild_id, level))
-            result = cur.fetchone()
+            result = await cur.fetchone()
             return result[0] if result else None
 
     @app_commands.command(name="level", description="Check your current level and XP")
@@ -294,25 +294,25 @@ class Leveling(commands.Cog):
             await interaction.response.defer()
             member = member or interaction.user
 
-            with self.db.cursor() as cur:
+            async with self.db.cursor() as cur:
                 # First get user data
-                cur.execute("""
+                await cur.execute("""
                     SELECT xp, level, messages, last_message 
                     FROM xp_data 
                     WHERE user_id=? AND guild_id=?
                 """, (member.id, interaction.guild.id))
-                user_data = cur.fetchone()
+                user_data = await cur.fetchone()
 
                 if user_data:
                     xp, level, messages, last_message = user_data
                     # Get user rank
-                    cur.execute("""
+                    await cur.execute("""
                         SELECT COUNT(*) + 1 FROM xp_data 
                         WHERE guild_id = ? AND (
                             level > ? OR (level = ? AND xp > ?)
                         )
                     """, (interaction.guild.id, level, level, xp))
-                    rank = cur.fetchone()[0]
+                    rank = (await cur.fetchone())[0]
 
                     next_level_xp = self.calculate_xp_for_level(level)
                     next_level = level + 1
@@ -377,24 +377,24 @@ class Leveling(commands.Cog):
         try:
             await interaction.response.defer()
             
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT user_id, xp, level, messages 
                     FROM xp_data 
                     WHERE guild_id = ? 
                     ORDER BY level DESC, xp DESC 
                     LIMIT 10
                 """, (interaction.guild.id,))
-                top_users = cur.fetchall()
+                top_users = await cur.fetchall()
 
                 # Get total ranked users
-                cur.execute("""
+                await cur.execute("""
                     SELECT COUNT(*) FROM xp_data WHERE guild_id = ?
                 """, (interaction.guild.id,))
-                total_ranked = cur.fetchone()[0]
+                total_ranked = (await cur.fetchone())[0]
 
                 # Get user's rank and stats
-                cur.execute("""
+                await cur.execute("""
                     SELECT COUNT(*) + 1
                     FROM xp_data 
                     WHERE guild_id = ? AND (
@@ -405,7 +405,7 @@ class Leveling(commands.Cog):
                 """, (interaction.guild.id, interaction.user.id, interaction.guild.id,
                       interaction.user.id, interaction.guild.id, interaction.user.id,
                       interaction.guild.id))
-                user_rank = cur.fetchone()[0]
+                user_rank = (await cur.fetchone())[0]
 
             if not top_users:
                 await interaction.followup.send("No leaderboard data yet! Start chatting to earn XP.")
@@ -529,26 +529,26 @@ class Leveling(commands.Cog):
     async def deletelevelrole(self, interaction: discord.Interaction, level: int):
         """Remove a role assignment for a specific level"""
         try:
-            with self.db.cursor() as cur:
+            async with self.db.cursor() as cur:
                 # Check if a role exists for this level
-                cur.execute("""
+                await cur.execute("""
                     SELECT role_id FROM level_roles
                     WHERE guild_id = ? AND level = ?
-                """, (interaction.guild_id, level))
-                result = cur.fetchone()
+                """, (interaction.guild.id, level))
+                result = await cur.fetchone()
 
                 if not result:
                     await interaction.response.send_message(f"❌ No role is assigned to level {level}.", ephemeral=True)
                     return
 
                 # Delete the level role assignment
-                cur.execute("""
+                await cur.execute("""
                     DELETE FROM level_roles
                     WHERE guild_id = ? AND level = ?
-                """, (interaction.guild_id, level))
+                """, (interaction.guild.id, level))
 
                 await interaction.response.send_message(f"✅ Successfully removed the role assignment for level {level}.", ephemeral=True)
-                logger.info(f"Level role removed for level {level} in guild {interaction.guild_id}")
+                logger.info(f"Level role removed for level {level} in guild {interaction.guild.id}")
         except Exception as e:
             logger.error(f"Error removing level role: {e}")
             await interaction.response.send_message("❌ An error occurred while removing the level role.", ephemeral=True)
@@ -565,12 +565,12 @@ class Leveling(commands.Cog):
                 "5m": 300
             }
             
-            guild_id = interaction.guild_id
+            guild_id = interaction.guild.id
             old_cooldown = self.get_cooldown(guild_id)
             seconds = cooldown_map[time]
             
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     INSERT OR REPLACE INTO leveling_settings (guild_id, xp_cooldown)
                     VALUES (?, ?)
                 """, (guild_id, seconds))
@@ -633,12 +633,12 @@ class Leveling(commands.Cog):
                 )
                 return
 
-            guild_id = interaction.guild_id
+            guild_id = interaction.guild.id
             old_min, old_max = self.get_xp_range(guild_id)
 
             # Update database with new XP range
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     UPDATE leveling_settings 
                     SET min_xp = ?, max_xp = ?
                     WHERE guild_id = ?
@@ -691,8 +691,8 @@ class Leveling(commands.Cog):
             )
 
             # Get current cooldown and XP range from cache
-            cooldown = self.get_cooldown(interaction.guild_id)
-            min_xp, max_xp = self.get_xp_range(interaction.guild_id)
+            cooldown = self.get_cooldown(interaction.guild.id)
+            min_xp, max_xp = self.get_xp_range(interaction.guild.id)
 
             # XP Settings
             embed.add_field(
@@ -702,13 +702,13 @@ class Leveling(commands.Cog):
             )
 
             # Get level-up message and channel
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT level_up_message, level_up_channel_id
                     FROM leveling_settings
                     WHERE guild_id = ?
                 """, (interaction.guild.id,))
-                level_up_settings = cur.fetchone()
+                level_up_settings = await cur.fetchone()
                 
             if level_up_settings:
                 message, channel_id = level_up_settings
@@ -720,14 +720,14 @@ class Leveling(commands.Cog):
                 )
 
             # Get level roles
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT level, role_id
                     FROM level_roles
                     WHERE guild_id = ?
                     ORDER BY level ASC
                 """, (interaction.guild.id,))
-                level_roles = cur.fetchall()
+                level_roles = await cur.fetchall()
 
             if level_roles:
                 roles_text = []
@@ -762,13 +762,13 @@ class Leveling(commands.Cog):
             )
 
             # Server Statistics
-            with self.db.cursor() as cur:
-                cur.execute("""
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT COUNT(*), AVG(CAST(level AS FLOAT)), MAX(level)
                     FROM xp_data
                     WHERE guild_id = ?
                 """, (interaction.guild.id,))
-                user_count, avg_level, max_level = cur.fetchone()
+                user_count, avg_level, max_level = await cur.fetchone()
 
             if user_count:
                 # Format average level properly outside of f-string
@@ -798,19 +798,19 @@ class Leveling(commands.Cog):
     async def togglexp(self, interaction: discord.Interaction):
         """Toggle XP gain notifications for the user"""
         try:
-            with self.db.cursor() as cur:
+            async with self.db.cursor() as cur:
                 # Get current setting
-                cur.execute("""
+                await cur.execute("""
                     SELECT notifications_enabled 
                     FROM user_settings 
                     WHERE user_id = ? AND guild_id = ?
                 """, (interaction.user.id, interaction.guild.id))
-                result = cur.fetchone()
+                result = await cur.fetchone()
                 
                 enabled = not (result and result[0]) if result else False
                 
                 # Update setting
-                cur.execute("""
+                await cur.execute("""
                     INSERT INTO user_settings (user_id, guild_id, notifications_enabled)
                     VALUES (?, ?, ?)
                     ON CONFLICT(user_id, guild_id) 
