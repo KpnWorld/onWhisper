@@ -196,24 +196,19 @@ class Leveling(commands.Cog):
         guild_id = message.guild.id
         timestamp = message.created_at.isoformat()
 
-        async with self.db.cursor() as cur:
-            # Use transaction to prevent race conditions
-            await cur.execute("BEGIN EXCLUSIVE")
+        async with self.db._lock:
+            conn = await self.db.get_connection()
+            await conn.execute("BEGIN EXCLUSIVE")
             try:
-                # Ensure user settings exist
-                await cur.execute("""
-                    INSERT OR IGNORE INTO user_settings (user_id, guild_id)
-                    VALUES (?, ?)
-                """, (user_id, guild_id))
-
                 # Get current XP and level atomically
-                await cur.execute("""
+                cursor = await conn.execute("""
                     SELECT xp, level 
                     FROM xp_data 
                     WHERE user_id=? AND guild_id=?
                     FOR UPDATE
                 """, (user_id, guild_id))
-                result = await cur.fetchone()
+                result = await cursor.fetchone()
+                await cursor.close()
 
                 if result:
                     current_xp, current_level = result
@@ -234,7 +229,7 @@ class Leveling(commands.Cog):
                         break
 
                 # Update with new values
-                await cur.execute("""
+                await conn.execute("""
                     INSERT INTO xp_data (user_id, guild_id, xp, level, messages, last_message)
                     VALUES (?, ?, ?, ?, 1, ?)
                     ON CONFLICT(user_id, guild_id) 
@@ -246,11 +241,12 @@ class Leveling(commands.Cog):
                 """, (user_id, guild_id, new_xp, current_level, timestamp,
                       new_xp, current_level, timestamp))
 
-                await cur.execute("COMMIT")
-                return (current_level, new_xp, self.calculate_xp_for_level(current_level)) if level_changed else (None, new_xp, xp_needed)
+                await conn.commit()
+                return (current_level, new_xp, self.calculate_xp_for_level(current_level)) if level_changed else None
 
-            except Exception:
-                await cur.execute("ROLLBACK")
+            except Exception as e:
+                await conn.rollback()
+                logger.error(f"Error in add_xp: {e}")
                 raise
 
     @commands.Cog.listener()
@@ -298,24 +294,27 @@ class Leveling(commands.Cog):
             logger.error(f"Error in XP processing: {e}")
 
     async def _get_user_rank(self, guild_id: int, level: int, xp: int) -> int:
-        """Get user's rank in an async way"""
-        async with self.db.cursor() as cur:
-            await cur.execute("""
+        async with self.db._lock:
+            conn = await self.db.get_connection()
+            cursor = await conn.execute("""
                 SELECT COUNT(*) + 1 FROM xp_data 
                 WHERE guild_id = ? AND (
                     level > ? OR (level = ? AND xp > ?)
                 )
             """, (guild_id, level, level, xp))
-            return (await cur.fetchone())[0]
+            result = await cursor.fetchone()
+            await cursor.close()
+            return result[0] if result else 1
 
     async def _get_level_role(self, guild_id: int, level: int) -> int:
-        """Get role ID for level in an async way"""
-        async with self.db.cursor() as cur:
-            await cur.execute("""
+        async with self.db._lock:
+            conn = await self.db.get_connection()
+            cursor = await conn.execute("""
                 SELECT role_id FROM level_roles 
                 WHERE guild_id = ? AND level = ?
             """, (guild_id, level))
-            result = await cur.fetchone()
+            result = await cursor.fetchone()
+            await cursor.close()
             return result[0] if result else None
 
     @app_commands.command(name="level", description="Check your current level and XP")
@@ -324,13 +323,11 @@ class Leveling(commands.Cog):
         try:
             target = member or interaction.user
             
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    SELECT level, xp, messages, last_message 
-                    FROM xp_data 
-                    WHERE user_id = ? AND guild_id = ?
-                """, (target.id, interaction.guild_id))
-                result = await cur.fetchone()
+            result = await self.db.fetchrow("""
+                SELECT level, xp, messages, last_message 
+                FROM xp_data 
+                WHERE user_id = ? AND guild_id = ?
+            """, (target.id, interaction.guild_id))
 
             if not result:
                 await interaction.response.send_message(

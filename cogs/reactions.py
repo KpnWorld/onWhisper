@@ -39,6 +39,19 @@ class ReactionRoles(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to initialize reaction roles database: {e}")
 
+    async def get_reaction_role(self, guild_id: int, message_id: int, emoji: str):
+        """Get reaction role data with proper async context management"""
+        async with self.db._lock:
+            conn = await self.db.get_connection()
+            cursor = await conn.execute("""
+                SELECT role_id, description
+                FROM reaction_roles
+                WHERE guild_id = ? AND message_id = ? AND emoji = ?
+            """, (guild_id, message_id, emoji))
+            result = await cursor.fetchone()
+            await cursor.close()
+            return result
+
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
         """Initialize settings when bot joins a new guild"""
@@ -108,20 +121,13 @@ class ReactionRoles(commands.Cog):
             message = await target_channel.send(embed=embed)
             await message.add_reaction(emoji)
 
-            # Save to database
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    INSERT INTO reaction_roles 
-                    (guild_id, channel_id, message_id, emoji, role_id, description)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    interaction.guild_id,
-                    target_channel.id,
-                    message.id,
-                    emoji,
-                    role.id,
-                    description
-                ))
+            # Save to database using proper async context
+            result = await self.db.fetchrow("""
+                INSERT INTO reaction_roles 
+                (guild_id, channel_id, message_id, emoji, role_id, description)
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING *
+            """, (interaction.guild_id, target_channel.id, message.id, emoji, role.id, description))
 
             # Success message with consistent style
             success_embed = discord.Embed(
@@ -154,40 +160,40 @@ class ReactionRoles(commands.Cog):
     @app_commands.default_permissions(manage_roles=True)
     async def removereactrole(self, interaction: discord.Interaction, message_id: str):
         try:
-            # Find reaction role in database
-            async with self.db.cursor() as cur:
-                await cur.execute("""
+            async with self.db._lock:
+                conn = await self.db.get_connection()
+                cursor = await conn.execute("""
                     SELECT channel_id 
                     FROM reaction_roles 
                     WHERE guild_id = ? AND message_id = ?
                 """, (interaction.guild_id, int(message_id)))
-                result = await cur.fetchone()
+                result = await cursor.fetchone()
+                await cursor.close()
 
-            if not result:
-                error_embed = discord.Embed(
-                    title="❌ Not Found",
-                    description="No reaction role found with that message ID.",
-                    color=discord.Color.red()
-                )
-                error_embed.set_footer(text="Administrative Command • Error")
-                await interaction.response.send_message(embed=error_embed, ephemeral=True)
-                return
+                if not result:
+                    error_embed = discord.Embed(
+                        title="❌ Not Found",
+                        description="No reaction role found with that message ID.",
+                        color=discord.Color.red()
+                    )
+                    error_embed.set_footer(text="Administrative Command • Error")
+                    await interaction.response.send_message(embed=error_embed, ephemeral=True)
+                    return
 
-            # Delete the message
-            channel = interaction.guild.get_channel(result[0])
-            if channel:
-                try:
-                    message = await channel.fetch_message(int(message_id))
-                    await message.delete()
-                except discord.NotFound:
-                    pass  # Message already deleted
+                # Delete the message
+                channel = interaction.guild.get_channel(result[0])
+                if channel:
+                    try:
+                        message = await channel.fetch_message(int(message_id))
+                        await message.delete()
+                    except discord.NotFound:
+                        pass  # Message already deleted
 
-            # Remove from database
-            async with self.db.cursor() as cur:
-                await cur.execute("""
+                await conn.execute("""
                     DELETE FROM reaction_roles 
                     WHERE guild_id = ? AND message_id = ?
                 """, (interaction.guild_id, int(message_id)))
+                await conn.commit()
 
             success_embed = discord.Embed(
                 title="✅ Reaction Role Removed",
@@ -221,22 +227,11 @@ class ReactionRoles(commands.Cog):
             return
 
         try:
-            # Check if this is a reaction role message
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    SELECT role_id, emoji 
-                    FROM reaction_roles 
-                    WHERE guild_id = ? AND message_id = ?
-                """, (payload.guild_id, payload.message_id))
-                result = await cur.fetchone()
-
+            result = await self.get_reaction_role(payload.guild_id, payload.message_id, str(payload.emoji))
             if not result:
                 return
 
-            role_id, expected_emoji = result
-            if str(payload.emoji) != expected_emoji:
-                return
-
+            role_id = result[0]
             guild = self.bot.get_guild(payload.guild_id)
             if not guild:
                 return
@@ -260,22 +255,11 @@ class ReactionRoles(commands.Cog):
             return
 
         try:
-            # Check if this is a reaction role message
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    SELECT role_id, emoji 
-                    FROM reaction_roles 
-                    WHERE guild_id = ? AND message_id = ?
-                """, (payload.guild_id, payload.message_id))
-                result = await cur.fetchone()
-
+            result = await self.get_reaction_role(payload.guild_id, payload.message_id, str(payload.emoji))
             if not result:
                 return
 
-            role_id, expected_emoji = result
-            if str(payload.emoji) != expected_emoji:
-                return
-
+            role_id = result[0]
             guild = self.bot.get_guild(payload.guild_id)
             if not guild:
                 return

@@ -139,6 +139,19 @@ class Verification(commands.Cog):
         """Generate a random verification code"""
         return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
+    async def get_verification_settings(self, guild_id: int):
+        """Get verification settings with proper async context management"""
+        async with self.db._lock:
+            conn = await self.db.get_connection()
+            cursor = await conn.execute("""
+                SELECT role_id, type 
+                FROM verification_settings 
+                WHERE guild_id = ? AND enabled = 1
+            """, (guild_id,))
+            result = await cursor.fetchone()
+            await cursor.close()
+            return result
+
     @app_commands.command(name="setupverification", description="Set up the verification system")
     @app_commands.describe(
         channel="Channel for verification",
@@ -187,11 +200,12 @@ class Verification(commands.Cog):
             if type.value == "reaction":
                 await verify_msg.add_reaction("✅")
 
-            # Save settings to database
-            await self.db.execute("""
+            # Save settings to database using proper async context
+            await self.db.fetchrow("""
                 INSERT OR REPLACE INTO verification_settings
                 (guild_id, enabled, channel_id, role_id, message, type)
                 VALUES (?, 1, ?, ?, ?, ?)
+                RETURNING *
             """, (interaction.guild_id, channel.id, role.id, verify_message, type.value))
 
             await interaction.response.send_message("✅ Verification system set up successfully!", ephemeral=True)
@@ -207,11 +221,14 @@ class Verification(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     async def disableverification(self, interaction: discord.Interaction):
         try:
-            await self.db.execute("""
-                UPDATE verification_settings
-                SET enabled = 0
-                WHERE guild_id = ?
-            """, (interaction.guild_id,))
+            async with self.db._lock:
+                conn = await self.db.get_connection()
+                await conn.execute("""
+                    UPDATE verification_settings
+                    SET enabled = 0
+                    WHERE guild_id = ?
+                """, (interaction.guild_id,))
+                await conn.commit()
 
             await interaction.response.send_message("✅ Verification system disabled.", ephemeral=True)
             logger.info(f"Verification disabled in {interaction.guild.name}")
@@ -229,8 +246,8 @@ class Verification(commands.Cog):
 
         try:
             # Check if this is a verification message
-            result = await self.db.fetchrow("""
-                SELECT role_id, type 
+            result = await self.db.fetchone("""
+                SELECT role_id, type, channel_id 
                 FROM verification_settings 
                 WHERE guild_id = ? AND channel_id = ? AND enabled = 1
             """, (payload.guild_id, payload.channel_id))
@@ -238,7 +255,8 @@ class Verification(commands.Cog):
             if not result or str(payload.emoji) != "✅":
                 return
 
-            role_id, verify_type = result
+            role_id = result['role_id']
+            verify_type = result['type']
             if verify_type != "reaction":
                 return
 
@@ -258,7 +276,7 @@ class Verification(commands.Cog):
             logger.info(f"Verified {member} in {guild.name}")
 
             # Log verification if enabled
-            channel = guild.get_channel(payload.channel_id)
+            channel = guild.get_channel(result['channel_id'])
             if channel:
                 embed = discord.Embed(
                     title="✅ User Verified",
@@ -272,12 +290,7 @@ class Verification(commands.Cog):
     @app_commands.command(name="verify", description="Start the verification process")
     async def verify(self, interaction: discord.Interaction):
         try:
-            result = await self.db.fetchrow("""
-                SELECT role_id, type 
-                FROM verification_settings 
-                WHERE guild_id = ? AND enabled = 1
-            """, (interaction.guild_id,))
-
+            result = await self.get_verification_settings(interaction.guild_id)
             if not result:
                 await interaction.response.send_message(
                     "❌ Verification is not set up in this server.",

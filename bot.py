@@ -14,6 +14,16 @@ from datetime import datetime, timedelta
 import sqlite3
 from utils.db_manager import DatabaseManager
 
+# Initial extensions to load
+INITIAL_EXTENSIONS = [
+    'cogs.owner',
+    'cogs.info',
+    'cogs.autorole',
+    'cogs.reactions',
+    'cogs.verification',
+    'cogs.leveling'
+]
+
 # Initialize colorama for Windows
 colorama.init()
 
@@ -153,18 +163,18 @@ class Bot(commands.Bot):
         self._max_reconnect_attempts = 5
         self._session_valid = True
 
-    async def setup_hook(self):
-        """Set up the bot's database and metrics collection"""
-        try:
-            await self.db.setup_database()
-            await self.load_cogs()
-            self._metrics_task = self.loop.create_task(self._collect_metrics())
-            self._flush_task = self.loop.create_task(self._flush_metrics())
-            self._session_task = self.loop.create_task(self._session_monitor())
-            logger.info("Bot setup completed")
-        except Exception as e:
-            logger.error(f"Error during bot setup: {e}")
-            raise
+    async def setup_hook(self) -> None:
+        """Initialize bot hooks and database"""
+        self.db = DatabaseManager('bot')
+        await self.db.setup_database()
+        logger.info("Database initialized")
+
+        # Load extensions
+        for cog in INITIAL_EXTENSIONS:
+            try:
+                await self.load_extension(cog)
+            except Exception as e:
+                logger.error(f'Failed to load extension {cog}: {e}')
 
     async def _collect_metrics(self):
         """Collect guild metrics every 5 minutes"""
@@ -286,16 +296,16 @@ class Bot(commands.Bot):
         except Exception as e:
             logger.error(f'Error in on_ready: {str(e)}')
 
-    async def on_guild_join(self, guild):
-        """Called when the bot joins a new guild"""
+    async def on_guild_join(self, guild: discord.Guild):
+        """Initialize settings when bot joins a new guild"""
         try:
             await self.db.ensure_guild_exists(guild.id, guild.name)
-            logger.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
+            logger.info(f"Initialized settings for new guild: {guild.name}")
         except Exception as e:
-            logger.error(f"Error setting up new guild {guild.name}: {e}")
+            logger.error(f"Failed to initialize settings for guild {guild.name}: {e}")
 
     async def on_app_command_completion(self, interaction: discord.Interaction, command: app_commands.Command):
-        """Log successful slash command usage with execution time"""
+        """Log successful slash command usage"""
         try:
             if interaction.guild:
                 execution_time = (datetime.now() - interaction.created_at).total_seconds()
@@ -306,6 +316,7 @@ class Bot(commands.Bot):
                     success=True,
                     execution_time=execution_time
                 )
+                
                 if hasattr(command, 'logging_enabled') and command.logging_enabled:
                     logger.info(f"{command.name} command used by {interaction.user}")
         except Exception as e:

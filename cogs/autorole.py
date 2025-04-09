@@ -45,6 +45,19 @@ class AutoRole(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to initialize autorole database: {e}")
 
+    async def get_autorole(self, guild_id: int, type: str) -> int:
+        """Get autorole with proper async context management"""
+        async with self.db._lock:
+            conn = await self.db.get_connection()
+            cursor = await conn.execute("""
+                SELECT role_id 
+                FROM autorole 
+                WHERE guild_id = ? AND type = ? AND enabled = 1
+            """, (guild_id, type))
+            result = await cursor.fetchone()
+            await cursor.close()
+            return result[0] if result else None
+
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
         """Initialize settings when bot joins a new guild"""
@@ -56,72 +69,22 @@ class AutoRole(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        """Automatically assign role based on member type (bot or human)"""
+        """Automatically assign role based on member type"""
         try:
-            # Verify member still exists and is in guild
-            if not member.guild.get_member(member.id):
-                return
-
             role_type = "bot" if member.bot else "member"
+            result = await self.db.fetchone("""
+                SELECT role_id 
+                FROM autorole 
+                WHERE guild_id = ? AND type = ? AND enabled = 1
+            """, (member.guild.id, role_type))
             
-            # Use transaction to prevent race conditions
-            async with self.db.cursor() as cur:
-                await cur.execute("BEGIN EXCLUSIVE")
-                try:
-                    await cur.execute("""
-                        SELECT role_id 
-                        FROM autorole
-                        WHERE guild_id = ? AND type = ? AND enabled = 1
-                        FOR UPDATE
-                    """, (member.guild.id, role_type))
-                    result = await cur.fetchone()
-
-                    if result and result[0]:
-                        role_id = result[0]
-                        role = member.guild.get_role(role_id)
-
-                        if role:
-                            # Validate role can be assigned
-                            if not role.managed and role.position < member.guild.me.top_role.position:
-                                try:
-                                    await member.add_roles(
-                                        role,
-                                        reason=f"Autorole: {role_type} role assignment"
-                                    )
-                                    logger.info(
-                                        f"Assigned {role_type} autorole ({role.name}) to {member} in {member.guild}"
-                                    )
-                                except discord.Forbidden:
-                                    logger.error(
-                                        f"Missing permissions to assign role {role.name} in {member.guild.id}"
-                                    )
-                                except discord.HTTPException as e:
-                                    logger.error(
-                                        f"HTTP error assigning role {role.name}: {str(e)}"
-                                    )
-                            else:
-                                logger.warning(
-                                    f"Cannot assign autorole in {member.guild.id}: "
-                                    f"Role {role.name} is managed or higher than bot's role"
-                                )
-                        else:
-                            # Role no longer exists - clean up database
-                            await cur.execute("""
-                                UPDATE autorole 
-                                SET enabled = 0
-                                WHERE guild_id = ? AND role_id = ?
-                            """, (member.guild.id, role_id))
-                            logger.warning(
-                                f"Disabled invalid autorole {role_id} in {member.guild.id}"
-                            )
-
-                    await cur.execute("COMMIT")
-                except Exception:
-                    await cur.execute("ROLLBACK")
-                    raise
-
+            if result and 'role_id' in result:
+                role = member.guild.get_role(result['role_id'])
+                if role and not role.managed and role.position < member.guild.me.top_role.position:
+                    await member.add_roles(role, reason=f"Autorole: {role_type}")
+                    logger.info(f"Assigned autorole to {member} in {member.guild}")
         except Exception as e:
-            logger.error(f"Error assigning autorole: {e}")
+            logger.error(f"Error in autorole assignment: {e}")
 
     @app_commands.command(name="setautorole", description="Set the automatic role for new members or bots")
     @app_commands.default_permissions(manage_roles=True)
@@ -168,26 +131,13 @@ class AutoRole(commands.Cog):
                 )
                 return
 
-            # Use transaction for database operations
-            async with self.db.cursor() as cur:
-                await cur.execute("BEGIN EXCLUSIVE")
-                try:
-                    # First ensure guild settings exist
-                    await cur.execute("""
-                        INSERT OR IGNORE INTO guild_settings (guild_id)
-                        VALUES (?)
-                    """, (interaction.guild_id,))
-                    
-                    # Then set the autorole
-                    await cur.execute("""
-                        INSERT OR REPLACE INTO autorole (guild_id, role_id, type, enabled)
-                        VALUES (?, ?, ?, 1)
-                    """, (interaction.guild_id, role.id, type.value))
-
-                    await cur.execute("COMMIT")
-                except Exception:
-                    await cur.execute("ROLLBACK")
-                    raise
+            async with self.db._lock:
+                conn = await self.db.get_connection()
+                await conn.execute("""
+                    INSERT OR REPLACE INTO autorole (guild_id, role_id, type, enabled)
+                    VALUES (?, ?, ?, 1)
+                """, (interaction.guild_id, role.id, type.value))
+                await conn.commit()
 
             embed = discord.Embed(
                 title="⚙️ AutoRole Configuration",
@@ -225,17 +175,19 @@ class AutoRole(commands.Cog):
     async def removeautorole(self, interaction: discord.Interaction, type: app_commands.Choice[str]):
         """Remove autorole settings"""
         try:
-            with self.db.cursor() as cur:
+            async with self.db._lock:
+                conn = await self.db.get_connection()
                 if type.value == "all":
-                    cur.execute("""
+                    await conn.execute("""
                         DELETE FROM autorole 
                         WHERE guild_id = ?
                     """, (interaction.guild_id,))
                 else:
-                    cur.execute("""
+                    await conn.execute("""
                         DELETE FROM autorole 
                         WHERE guild_id = ? AND type = ?
                     """, (interaction.guild_id, type.value))
+                await conn.commit()
 
             embed = discord.Embed(
                 title="⚙️ AutoRole Configuration",

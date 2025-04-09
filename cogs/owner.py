@@ -54,17 +54,31 @@ class Owner(commands.Cog):
             days = days_map[timeframe]
             
             # Get global metrics
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    SELECT 
-                        COUNT(DISTINCT guild_id) as total_guilds,
-                        SUM(member_count) as total_members,
-                        SUM(active_users) as total_active,
-                        COUNT(DISTINCT metric_id) as data_points
-                    FROM guild_metrics
-                    WHERE timestamp >= datetime('now', ?)
-                """, (f'-{days} days',))
-                metrics = await cur.fetchone()
+            result = await self.db.fetchrow("""
+                SELECT 
+                    COUNT(DISTINCT guild_id) as total_guilds,
+                    SUM(member_count) as total_members,
+                    SUM(active_users) as total_active,
+                    COUNT(DISTINCT metric_id) as data_points
+                FROM guild_metrics
+                WHERE timestamp >= datetime('now', ?)
+            """, (f'-{days} days',))
+
+            if result:
+                total_guilds = int(result[0] or 0)
+                total_members = int(result[1] or 0)
+                total_active = int(result[2] or 0)
+                data_points = int(result[3] or 0)
+            else:
+                total_guilds = total_members = total_active = data_points = 0
+
+            # Get global command usage
+            command_result = await self.db.fetchrow("""
+                SELECT COUNT(*) 
+                FROM command_stats
+                WHERE used_at >= datetime('now', ?)
+            """, (f'-{days} days',))
+            total_commands = int(command_result[0] if command_result else 0)
 
             embed = discord.Embed(
                 title=f"📊 Bot Statistics ({timeframe})",
@@ -73,20 +87,6 @@ class Owner(commands.Cog):
             )
 
             # Global Activity Metrics
-            total_guilds = int(metrics[0] or 0)
-            total_members = int(metrics[1] or 0)
-            total_active = int(metrics[2] or 0)
-            data_points = int(metrics[3] or 0)
-            
-            # Get global command usage
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM command_stats
-                    WHERE used_at >= datetime('now', ?)
-                """, (f'-{days} days',))
-                total_commands = await cur.fetchone()[0] or 0
-
             stats_text = (
                 f"Total Guilds: {len(self.bot.guilds):,}\n"
                 f"Total Members: {sum(g.member_count for g in self.bot.guilds):,}\n"
