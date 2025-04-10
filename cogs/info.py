@@ -8,6 +8,7 @@ import psutil
 import platform
 from datetime import datetime
 from typing import Optional, Literal
+from utils.ui_manager import UIManager
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
+        self.ui = UIManager()
         self.start_time = time.time()
         bot.loop.create_task(self._init_db())
         logger.info("Info cog initialized")
@@ -55,8 +57,9 @@ class Info(commands.Cog):
     async def _init_db(self):
         """Initialize database and ensure guild settings exist"""
         try:
-            for guild in self.bot.guilds:
-                await self.db.ensure_guild_exists(guild.id)
+            async with self.db.transaction():
+                for guild in self.bot.guilds:
+                    await self.db.ensure_guild_exists(guild.id)
             logger.info("Info cog database initialized")
         except Exception as e:
             logger.error(f"Failed to initialize info cog database: {e}")
@@ -65,8 +68,9 @@ class Info(commands.Cog):
     async def on_guild_join(self, guild):
         """Initialize settings when bot joins a new guild"""
         try:
-            await self.db.ensure_guild_exists(guild.id)
-            logger.info(f"Initialized info settings for new guild: {guild.name}")
+            async with self.db.transaction():
+                await self.db.ensure_guild_exists(guild.id)
+                logger.info(f"Initialized info settings for new guild: {guild.name}")
         except Exception as e:
             logger.error(f"Failed to initialize info settings for guild {guild.name}: {e}")
 
@@ -80,6 +84,18 @@ class Info(commands.Cog):
 
             bot_latency = round((end_time - start_time) * 1000, 2)
             websocket_latency = round(self.bot.latency * 1000, 2)
+
+            # Log latency metrics
+            async with self.db.transaction():
+                await self.db.execute("""
+                    INSERT INTO guild_metrics (
+                        guild_id, member_count, bot_latency
+                    ) VALUES (?, ?, ?)
+                """, (
+                    interaction.guild_id,
+                    interaction.guild.member_count,
+                    bot_latency
+                ))
 
             embed = discord.Embed(
                 title="🏓 Pong!",
@@ -106,6 +122,7 @@ class Info(commands.Cog):
     async def uptime(self, interaction: discord.Interaction):
         """Returns bot uptime and system statistics"""
         try:
+            await interaction.response.defer()
             uptime_seconds = round(time.time() - self.start_time)
             hours = uptime_seconds // 3600
             minutes = (uptime_seconds % 3600) // 60
@@ -114,6 +131,21 @@ class Info(commands.Cog):
             process = psutil.Process()
             memory_usage = process.memory_info().rss
             cpu_percent = process.cpu_percent(interval=0.1)
+
+            # Log system metrics
+            async with self.db.transaction():
+                await self.db.execute("""
+                    INSERT INTO guild_metrics (
+                        guild_id, member_count, bot_latency,
+                        message_count, active_users
+                    ) VALUES (?, ?, ?, ?, ?)
+                """, (
+                    interaction.guild_id,
+                    interaction.guild.member_count,
+                    self.bot.latency * 1000,
+                    0,  # message_count placeholder
+                    len([m for m in interaction.guild.members if str(m.status) == "online"])
+                ))
 
             embed = discord.Embed(
                 title="⏳ Bot Status",
@@ -141,35 +173,40 @@ class Info(commands.Cog):
                 inline=False
             )
 
-            await interaction.response.send_message(embed=embed)
+            # Database stats
+            db_size = await self.db.get_database_size()
+            db_stats = await self.db.get_connection_stats()
+            
+            db_info = (
+                f"Size: {db_size / 1024 / 1024:.2f}MB\n"
+                f"Mode: {db_stats.get('journal_mode', 'unknown')}\n"
+                f"Cache: {db_stats.get('cache_size', 'unknown')}"
+            )
+            embed.add_field(
+                name="💾 Database",
+                value=f"```{db_info}```",
+                inline=False
+            )
+
+            await interaction.followup.send(embed=embed)
             logger.info(f"Uptime command used by {interaction.user}")
         except Exception as e:
             logger.error(f"Error in uptime command: {e}")
-            await interaction.response.send_message("❌ An error occurred while fetching uptime.", ephemeral=True)
+            await interaction.followup.send("❌ An error occurred while fetching uptime.", ephemeral=True)
 
     @app_commands.command(name="serverinfo", description="Get details about this server")
     async def serverinfo(self, interaction: discord.Interaction):
         """Displays comprehensive server information"""
         try:
             guild = interaction.guild
-            if not guild:
-                await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
-                return
-
-            # Collect role statistics
-            roles = guild.roles[1:]  # Exclude @everyone
+            total_members = len(guild.members)
             bot_count = len([m for m in guild.members if m.bot])
-            channel_categories = {
-                "Text": len([c for c in guild.channels if isinstance(c, discord.TextChannel)]),
-                "Voice": len([c for c in guild.channels if isinstance(c, discord.VoiceChannel)]),
-                "Forum": len([c for c in guild.channels if isinstance(c, discord.ForumChannel)]),
-                "Stage": len([c for c in guild.channels if isinstance(c, discord.StageChannel)]),
-            }
-
-            embed = discord.Embed(
-                title=f"🏠 Server Info: {guild.name}",
-                description=guild.description or "No description set",
-                color=discord.Color.blue()
+            human_count = total_members - bot_count
+            
+            embed = self.ui.info_embed(
+                f"{guild.name} Information",
+                f"Server ID: {guild.id}",
+                "Info"
             )
 
             if guild.icon:
@@ -177,162 +214,158 @@ class Info(commands.Cog):
 
             # General Info
             general_info = (
-                f"Owner: {guild.owner.name}\n"  # Changed to show username instead of mention
-                f"Created: {format_relative_time(guild.created_at)}\n"  # Using relative time
-                f"Server ID: {guild.id}\n"
-                f"Region: {str(guild.preferred_locale)}"
+                f"Owner: {guild.owner.mention}\n"
+                f"Created: <t:{int(guild.created_at.timestamp())}:R>\n"
+                f"Verification: {guild.verification_level.name}"
             )
-            embed.add_field(
-                name="📌 General",
-                value=f"```{general_info}```",
-                inline=False
+            self.ui.add_field_if_exists(
+                embed,
+                "📌 General",
+                general_info,
+                True
             )
 
             # Member Stats
-            member_info = (
-                f"Total: {guild.member_count:,}\n"
-                f"Humans: {guild.member_count - bot_count:,}\n"
-                f"Bots: {bot_count:,}\n"
-                f"Online: {len([m for m in guild.members if m.status != discord.Status.offline]):,}"
+            member_stats = (
+                f"Total: {total_members:,}\n"
+                f"Humans: {human_count:,}\n"
+                f"Bots: {bot_count:,}"
             )
-            embed.add_field(
-                name="👥 Members",
-                value=f"```{member_info}```",
-                inline=True
+            self.ui.add_field_if_exists(
+                embed,
+                "👥 Members",
+                member_stats,
+                True
             )
 
             # Channel Stats
-            channel_info = "\n".join(f"{k}: {v:,}" for k, v in channel_categories.items() if v > 0)
-            embed.add_field(
-                name="📢 Channels",
-                value=f"```{channel_info}```",
-                inline=True
+            channel_stats = (
+                f"Categories: {len(guild.categories):,}\n"
+                f"Text: {len(guild.text_channels):,}\n"
+                f"Voice: {len(guild.voice_channels):,}"
+            )
+            self.ui.add_field_if_exists(
+                embed,
+                "📂 Channels",
+                channel_stats,
+                True
             )
 
-            # Features and Boost Status
-            if guild.features:
-                features_str = ", ".join(f.replace('_', ' ').title() for f in guild.features)
-                embed.add_field(
-                    name="✨ Features",
-                    value=f"```{features_str}```",
-                    inline=False
-                )
+            # Role Info
+            roles = guild.roles[1:]  # Exclude @everyone
+            role_stats = (
+                f"Count: {len(roles):,}\n"
+                f"Highest: {guild.roles[-1].mention if roles else 'None'}"
+            )
+            self.ui.add_field_if_exists(
+                embed,
+                "🎭 Roles",
+                role_stats,
+                True
+            )
 
-            if guild.premium_subscription_count > 0:
-                boost_info = (
-                    f"Level: {guild.premium_tier}\n"
-                    f"Boosts: {guild.premium_subscription_count:,}"
-                )
-                embed.add_field(
-                    name="📈 Boost Status",
-                    value=f"```{boost_info}```",
-                    inline=False
+            # Boost Status
+            boost_stats = (
+                f"Level: {guild.premium_tier}\n"
+                f"Boosts: {guild.premium_subscription_count or 0}\n"
+                f"Boosters: {len(guild.premium_subscribers):,}"
+            )
+            self.ui.add_field_if_exists(
+                embed,
+                "⭐ Server Boost",
+                boost_stats,
+                True
+            )
+
+            # Features
+            if guild.features:
+                features_str = "\n".join(f"• {feature.replace('_', ' ').title()}" 
+                                       for feature in guild.features)
+                self.ui.add_field_if_exists(
+                    embed,
+                    "✨ Features",
+                    features_str,
+                    False
                 )
 
             await interaction.response.send_message(embed=embed)
-            logger.info(f"Server info command used by {interaction.user}")
+            logger.info(f"Server info viewed in {guild.name}")
         except Exception as e:
-            logger.error(f"Error in serverinfo command: {e}")
-            await interaction.response.send_message("❌ An error occurred while fetching server info.", ephemeral=True)
+            logger.error(f"Error showing server info: {e}")
+            await interaction.response.send_message(
+                embed=self.ui.error_embed(
+                    "Error",
+                    "An error occurred while fetching server information.",
+                    "Info"
+                ),
+                ephemeral=True
+            )
 
     @app_commands.command(name="userinfo", description="Get details about a user")
-    async def userinfo(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
+    async def userinfo(self, interaction: discord.Interaction, member: Optional[discord.Member] = None):
         """Displays detailed user information"""
         try:
-            user = user or interaction.user
-            roles = [role for role in user.roles if role.name != "@everyone"]
+            member = member or interaction.user
             
-            embed = discord.Embed(
-                title=f"👤 User Info: {user.name}",
-                color=user.color if user.color != discord.Color.default() else discord.Color.blue()
+            embed = self.ui.info_embed(
+                f"{member.display_name}'s Information",
+                f"User ID: {member.id}",
+                "Info"
             )
-            embed.set_thumbnail(url=user.display_avatar.url)
 
-            # User Details with relative time
+            if member.avatar:
+                embed.set_thumbnail(url=member.avatar.url)
+
+            # Account Info
             user_info = (
-                f"ID: {user.id}\n"
-                f"Created: {format_relative_time(user.created_at)}\n"
-                f"Joined: {format_relative_time(user.joined_at) if hasattr(user, 'joined_at') else 'N/A'}\n"
-                f"Bot: {'Yes' if user.bot else 'No'}"
+                f"Created: <t:{int(member.created_at.timestamp())}:R>\n"
+                f"Joined: <t:{int(member.joined_at.timestamp())}:R>\n"
+                f"Bot: {'Yes' if member.bot else 'No'}"
             )
-            embed.add_field(
-                name="📋 Details",
-                value=f"```{user_info}```",
-                inline=False
-            )
-
-            # Status and Activity with improved formatting
-            status_emoji = {
-                discord.Status.online: "🟢 Online",
-                discord.Status.idle: "🟡 Idle",
-                discord.Status.dnd: "🔴 Do Not Disturb",
-                discord.Status.offline: "⚫ Offline"
-            }
-
-            # Get all active activities
-            activities = []
-            for activity in user.activities:
-                if activity.type == discord.ActivityType.playing:
-                    activities.append(f"Playing {activity.name}")
-                elif activity.type == discord.ActivityType.streaming:
-                    activities.append(f"Streaming {activity.name}")
-                elif activity.type == discord.ActivityType.listening and isinstance(activity, discord.Spotify):
-                    activities.append(f"Listening to {activity.title} by {activity.artist}")
-                elif activity.type == discord.ActivityType.watching:
-                    activities.append(f"Watching {activity.name}")
-                elif activity.type == discord.ActivityType.competing:
-                    activities.append(f"Competing in {activity.name}")
-                elif activity.type == discord.ActivityType.custom:
-                    if activity.emoji and activity.name:
-                        activities.append(f"{activity.emoji} {activity.name}")
-                    elif activity.emoji:
-                        activities.append(f"{activity.emoji}")
-                    elif activity.name:
-                        activities.append(activity.name)
-
-            status_info = (
-                f"Status: {status_emoji.get(user.status, '⚫ Offline')}\n"
-                f"Mobile: {'Yes' if user.is_on_mobile() else 'No'}\n"
-                f"Activity: {' | '.join(activities) if activities else 'None'}"
-            )
-            embed.add_field(
-                name="🎮 Presence",
-                value=f"```{status_info}```",
-                inline=True
+            self.ui.add_field_if_exists(
+                embed,
+                "👤 User Info",
+                user_info,
+                False
             )
 
             # Roles
+            roles = member.roles[1:]  # Exclude @everyone
             if roles:
-                role_info = (
-                    f"Count: {len(roles)}\n"
-                    f"Highest: {user.top_role.name}\n"
-                    f"Color: {str(user.color) if user.color != discord.Color.default() else 'None'}"
-                )
-                embed.add_field(
-                    name="🎭 Roles",
-                    value=f"```{role_info}```",
-                    inline=True
+                role_list = " ".join([role.mention for role in reversed(roles)])
+                self.ui.add_field_if_exists(
+                    embed,
+                    f"🎭 Roles [{len(roles)}]",
+                    role_list or "None",
+                    False
                 )
 
             # Permissions
-            if user.guild_permissions:
-                key_perms = []
-                if user.guild_permissions.administrator:
-                    key_perms.append("Administrator")
-                else:
-                    if user.guild_permissions.manage_guild: key_perms.append("Manage Server")
-                    if user.guild_permissions.manage_roles: key_perms.append("Manage Roles")
-                    if user.guild_permissions.manage_channels: key_perms.append("Manage Channels")
-                    if user.guild_permissions.manage_messages: key_perms.append("Manage Messages")
-                    if user.guild_permissions.kick_members: key_perms.append("Kick Members")
-                    if user.guild_permissions.ban_members: key_perms.append("Ban Members")
+            key_perms = []
+            if member.guild_permissions.administrator:
+                key_perms.append("Administrator")
+            else:
+                perm_map = {
+                    "manage_guild": "Manage Server",
+                    "ban_members": "Ban Members",
+                    "kick_members": "Kick Members",
+                    "manage_channels": "Manage Channels",
+                    "manage_messages": "Manage Messages",
+                    "manage_roles": "Manage Roles",
+                    "manage_webhooks": "Manage Webhooks",
+                    "mention_everyone": "Mention Everyone"
+                }
+                for perm, name in perm_map.items():
+                    if getattr(member.guild_permissions, perm):
+                        key_perms.append(name)
 
-                if key_perms:
-                    embed.add_field(
-                        name="🔑 Key Permissions",
-                        value=f"```{', '.join(key_perms)}```",
-                        inline=False
-                    )
+            if key_perms:
+                self.ui.add_field_if_exists(
+                    embed,
+                    "🔑 Key Permissions",
+                    "\n".join(f"• {perm}" for perm in key_perms),
+                    False
+                )
 
             await interaction.response.send_message(embed=embed)
             logger.info(f"User info command used by {interaction.user}")
@@ -519,48 +552,33 @@ class Info(commands.Cog):
             days_map = {"day": 1, "week": 7, "month": 30}
             days = days_map[timeframe]
 
-            # Get guild metrics
-            async with self.db.cursor() as cur:
-                await cur.execute("""
+            async with self.db.transaction():
+                # Get guild metrics with improved query efficiency
+                metrics = await self.db.fetchone("""
                     SELECT 
                         ROUND(AVG(CAST(member_count AS FLOAT)), 0) as avg_members,
                         SUM(message_count) as total_messages,
                         COUNT(DISTINCT metric_id) as data_points,
-                        ROUND(AVG(CAST(active_users AS FLOAT)), 0) as avg_active
+                        ROUND(AVG(CAST(active_users AS FLOAT)), 0) as avg_active,
+                        AVG(bot_latency) as avg_latency
                     FROM guild_metrics
                     WHERE guild_id = ? 
                     AND timestamp >= datetime('now', ?)
                 """, (interaction.guild_id, f'-{days} days'))
-                metrics = await cur.fetchone()
 
-            embed = discord.Embed(
-                title=f"📊 Server Statistics ({timeframe})",
-                description=f"Statistics for {interaction.guild.name}",
-                color=discord.Color.blue()
+            embed = self.ui.info_embed(
+                f"Server Statistics ({timeframe})",
+                f"Statistics for {interaction.guild.name}",
+                "Info"
             )
 
             # Activity metrics
-            avg_members = int(metrics[0] or 0)
-            total_messages = int(metrics[1] or 0)
-            data_points = int(metrics[2] or 0)
-            avg_active = int(metrics[3] or 0)
-
-            # Get command usage count
-            async with self.db.cursor() as cur:
-                await cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM command_stats
-                    WHERE guild_id = ? 
-                    AND used_at >= datetime('now', ?)
-                """, (interaction.guild_id, f'-{days} days'))
-                total_commands = (await cur.fetchone())[0] or 0
-
             stats_text = (
-                f"Average Members: {avg_members:,}\n"
-                f"Total Messages: {total_messages:,}\n"
-                f"Commands Used: {total_commands:,}\n"
-                f"Active Users (avg): {avg_active:,}\n"
-                f"Data Points: {data_points:,}"
+                f"Average Members: {int(metrics['avg_members']):,}\n"
+                f"Total Messages: {int(metrics['total_messages']):,}\n"
+                f"Active Users (avg): {int(metrics['avg_active']):,}\n"
+                f"Data Points: {int(metrics['data_points']):,}\n"
+                f"Avg Latency: {metrics['avg_latency']:.1f}ms"
             )
             embed.add_field(
                 name="📈 Activity Metrics",
@@ -569,16 +587,13 @@ class Info(commands.Cog):
             )
 
             await interaction.followup.send(embed=embed)
-            logger.info(f"Guild stats command used by {interaction.user}")
+            logger.info(f"Guild stats viewed by {interaction.user}")
         except Exception as e:
             logger.error(f"Error in guildstats command: {e}")
-            try:
-                await interaction.followup.send(
-                    "❌ An error occurred while fetching guild stats.", 
-                    ephemeral=True
-                )
-            except:
-                pass
+            await interaction.followup.send(
+                "❌ An error occurred while fetching guild stats.", 
+                ephemeral=True
+            )
 
 async def setup(bot):
     await bot.add_cog(Info(bot))

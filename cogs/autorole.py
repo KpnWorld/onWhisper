@@ -1,8 +1,12 @@
+from datetime import datetime
 import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
+from cogs.info import format_relative_time
 from utils.db_manager import DatabaseManager
+from utils.ui_manager import UIManager
+import asyncio
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -18,291 +22,429 @@ class AutoRole(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
+        self.ui = UIManager()
+        self._role_queue = asyncio.Queue()
+        self._role_task = bot.loop.create_task(self._process_role_queue())
         bot.loop.create_task(self._init_db())
         logger.info("AutoRole cog initialized")
 
+    def cog_unload(self):
+        """Cleanup when cog is unloaded"""
+        if self._role_task:
+            self._role_task.cancel()
+
     async def _init_db(self):
-        """Initialize database and ensure guild settings exist"""
+        """Initialize database tables and indexes"""
         try:
-            async with self.db.cursor() as cur:
-                # Create autorole table if it doesn't exist
-                await cur.execute("""
-                    CREATE TABLE IF NOT EXISTS autorole (
-                        guild_id INTEGER,
-                        role_id INTEGER,
-                        type TEXT,
+            async with self.db.transaction():
+                await self.db.execute_script("""
+                    CREATE TABLE IF NOT EXISTS autorole_settings (
+                        guild_id INTEGER PRIMARY KEY,
+                        role_ids TEXT,
                         enabled BOOLEAN DEFAULT 1,
-                        PRIMARY KEY (guild_id, type),
+                        delay INTEGER DEFAULT 0,
+                        require_verification BOOLEAN DEFAULT 0,
+                        exclude_bots BOOLEAN DEFAULT 1,
+                        temporary_duration INTEGER,
+                        log_channel_id INTEGER,
                         FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
-                    )
+                    );
+
+                    CREATE TABLE IF NOT EXISTS autorole_logs (
+                        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        guild_id INTEGER,
+                        user_id INTEGER,
+                        role_id INTEGER,
+                        success BOOLEAN,
+                        error TEXT,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_autorole_logs_guild 
+                    ON autorole_logs(guild_id);
+                    
+                    CREATE INDEX IF NOT EXISTS idx_autorole_logs_time 
+                    ON autorole_logs(timestamp);
                 """)
-                await cur.execute("CREATE INDEX IF NOT EXISTS idx_autorole_guild ON autorole(guild_id)")
 
             # Initialize settings for all guilds
             for guild in self.bot.guilds:
                 await self.db.ensure_guild_exists(guild.id)
-            logger.info("Autorole database initialized")
+                await self.db.execute("""
+                    INSERT OR IGNORE INTO autorole_settings (guild_id)
+                    VALUES (?)
+                """, (guild.id,))
+
+            logger.info("AutoRole database initialized")
         except Exception as e:
             logger.error(f"Failed to initialize autorole database: {e}")
 
-    async def get_autorole(self, guild_id: int, type: str) -> int:
-        """Get autorole with proper async context management"""
-        async with self.db._lock:
-            conn = await self.db.get_connection()
-            cursor = await conn.execute("""
-                SELECT role_id 
-                FROM autorole 
-                WHERE guild_id = ? AND type = ? AND enabled = 1
-            """, (guild_id, type))
-            result = await cursor.fetchone()
-            await cursor.close()
-            return result[0] if result else None
+    async def _process_role_queue(self):
+        """Process queued role assignments with retries and error handling"""
+        while True:
+            try:
+                if self._role_queue.empty():
+                    await asyncio.sleep(1)
+                    continue
 
-    @commands.Cog.listener()
-    async def on_guild_join(self, guild):
-        """Initialize settings when bot joins a new guild"""
+                guild_id, user_id, role_id, delay = await self._role_queue.get()
+                
+                if delay > 0:
+                    await asyncio.sleep(delay)
+
+                guild = self.bot.get_guild(guild_id)
+                if not guild:
+                    continue
+
+                member = guild.get_member(user_id)
+                if not member:
+                    continue
+
+                role = guild.get_role(role_id)
+                if not role:
+                    continue
+
+                try:
+                    await member.add_roles(role, reason="AutoRole Assignment")
+                    
+                    # Log successful role assignment
+                    async with self.db.transaction():
+                        await self.db.execute("""
+                            INSERT INTO autorole_logs 
+                            (guild_id, user_id, role_id, success)
+                            VALUES (?, ?, ?, 1)
+                        """, (guild_id, user_id, role_id))
+                        
+                        # Get log channel
+                        result = await self.db.fetchone("""
+                            SELECT log_channel_id 
+                            FROM autorole_settings 
+                            WHERE guild_id = ?
+                        """, (guild_id,))
+                        
+                        if result and result['log_channel_id']:
+                            log_channel = guild.get_channel(result['log_channel_id'])
+                            if log_channel:
+                                embed = self.ui.success_embed(
+                                    "AutoRole Assigned",
+                                    f"Role {role.mention} assigned to {member.mention}",
+                                    "AutoRole"
+                                )
+                                await log_channel.send(embed=embed)
+
+                except discord.Forbidden:
+                    logger.error(f"Missing permissions to assign role in {guild.name}")
+                    await self._log_error(guild_id, user_id, role_id, "Missing permissions")
+                except Exception as e:
+                    logger.error(f"Error assigning role: {e}")
+                    await self._log_error(guild_id, user_id, role_id, str(e))
+                finally:
+                    self._role_queue.task_done()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in role queue processor: {e}")
+                await asyncio.sleep(5)
+
+    async def _log_error(self, guild_id: int, user_id: int, role_id: int, error: str):
+        """Log role assignment errors to database"""
         try:
-            await self.db.ensure_guild_exists(guild.id)
-            logger.info(f"Initialized settings for new guild: {guild.name}")
+            async with self.db.transaction():
+                await self.db.execute("""
+                    INSERT INTO autorole_logs 
+                    (guild_id, user_id, role_id, success, error)
+                    VALUES (?, ?, ?, 0, ?)
+                """, (guild_id, user_id, role_id, error))
         except Exception as e:
-            logger.error(f"Failed to initialize settings for guild {guild.name}: {e}")
+            logger.error(f"Error logging autorole failure: {e}")
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        """Automatically assign role based on member type"""
+        """Handle role assignment when a member joins"""
+        if member.bot:
+            return
+
         try:
-            role_type = "bot" if member.bot else "member"
-            result = await self.db.fetchone("""
-                SELECT role_id 
-                FROM autorole 
-                WHERE guild_id = ? AND type = ? AND enabled = 1
-            """, (member.guild.id, role_type))
-            
-            if result and 'role_id' in result:
-                role = member.guild.get_role(result['role_id'])
-                if role and not role.managed and role.position < member.guild.me.top_role.position:
-                    await member.add_roles(role, reason=f"Autorole: {role_type}")
-                    logger.info(f"Assigned autorole to {member} in {member.guild}")
+            settings = await self.db.fetchone("""
+                SELECT * FROM autorole_settings 
+                WHERE guild_id = ? AND enabled = 1
+            """, (member.guild.id,))
+
+            if not settings or not settings['role_ids']:
+                return
+
+            role_ids = [int(id) for id in settings['role_ids'].split(',')]
+            delay = settings.get('delay', 0)
+            exclude_bots = settings.get('exclude_bots', True)
+            require_verification = settings.get('require_verification', False)
+
+            if exclude_bots and member.bot:
+                return
+
+            if require_verification:
+                # Check verification status if required
+                verified = await self.db.fetchone("""
+                    SELECT verified FROM verification_data 
+                    WHERE guild_id = ? AND user_id = ?
+                """, (member.guild.id, member.id))
+                
+                if not verified or not verified['verified']:
+                    return
+
+            for role_id in role_ids:
+                await self._role_queue.put((
+                    member.guild.id,
+                    member.id,
+                    role_id,
+                    delay
+                ))
+
         except Exception as e:
-            logger.error(f"Error in autorole assignment: {e}")
+            logger.error(f"Error in autorole member join handler: {e}")
 
-    @app_commands.command(name="setautorole", description="Set the automatic role for new members or bots")
-    @app_commands.default_permissions(manage_roles=True)
-    @app_commands.describe(
-        type="Choose whether this role is for members or bots",
-        role="The role to automatically assign"
-    )
-    @app_commands.choices(type=[
-        app_commands.Choice(name="Member", value="member"),
-        app_commands.Choice(name="Bot", value="bot")
-    ])
-    async def setautorole(self, interaction: discord.Interaction, type: app_commands.Choice[str], role: discord.Role):
-        """Set the autorole for members or bots"""
+    @app_commands.command(name="setautorole")
+    @app_commands.default_permissions(administrator=True)
+    async def setautorole(self, interaction: discord.Interaction, role: discord.Role):
+        """Set up automatic role assignment"""
         try:
-            # Verify role still exists
-            if not interaction.guild.get_role(role.id):
+            if role >= interaction.guild.me.top_role:
                 await interaction.response.send_message(
-                    "❌ That role no longer exists!",
+                    embed=self.ui.error_embed(
+                        "Permission Error",
+                        "I cannot assign roles that are higher than my highest role!",
+                        "AutoRole"
+                    ),
                     ephemeral=True
                 )
                 return
 
-            # Check role hierarchy
-            if role.position >= interaction.guild.me.top_role.position:
-                await interaction.response.send_message(
-                    "❌ I cannot assign roles that are higher than my highest role!",
-                    ephemeral=True
-                )
-                return
+            async with self.db.transaction():
+                # Get existing roles
+                result = await self.db.fetchone("""
+                    SELECT role_ids FROM autorole_settings 
+                    WHERE guild_id = ?
+                """, (interaction.guild_id,))
 
-            # Check if role is managed by integration
-            if role.managed:
-                await interaction.response.send_message(
-                    "❌ Cannot use roles managed by integrations!",
-                    ephemeral=True
-                )
-                return
+                existing_roles = []
+                if result and result['role_ids']:
+                    existing_roles = result['role_ids'].split(',')
 
-            # Verify bot has required permissions
-            if not interaction.guild.me.guild_permissions.manage_roles:
-                await interaction.response.send_message(
-                    "❌ I need the Manage Roles permission to set up autoroles!",
-                    ephemeral=True
-                )
-                return
+                # Add new role if not already present
+                if str(role.id) not in existing_roles:
+                    existing_roles.append(str(role.id))
 
-            async with self.db._lock:
-                conn = await self.db.get_connection()
-                await conn.execute("""
-                    INSERT OR REPLACE INTO autorole (guild_id, role_id, type, enabled)
-                    VALUES (?, ?, ?, 1)
-                """, (interaction.guild_id, role.id, type.value))
-                await conn.commit()
+                # Update settings
+                await self.db.execute("""
+                    INSERT OR REPLACE INTO autorole_settings 
+                    (guild_id, role_ids, enabled) 
+                    VALUES (?, ?, 1)
+                """, (interaction.guild_id, ','.join(existing_roles)))
 
-            embed = discord.Embed(
-                title="⚙️ AutoRole Configuration",
-                description="Automatic role assignment has been configured.",
-                color=discord.Color.blue()
+            embed = self.ui.success_embed(
+                "AutoRole Updated",
+                f"{role.mention} will now be automatically assigned to new members",
+                "AutoRole"
             )
-            embed.add_field(
-                name="Settings",
-                value=f"Type: `{type.value}`\nRole: {role.mention}",
-                inline=False
-            )
-            embed.add_field(
-                name="Status",
-                value="✅ Configuration saved successfully",
-                inline=False
-            )
-            embed.set_footer(text="Administrative Command • AutoRole System")
-            
+
             await interaction.response.send_message(embed=embed)
-            logger.info(f"Autorole set in {interaction.guild}: {role.name} for {type.value}s")
+            logger.info(f"AutoRole set in {interaction.guild.name}: {role.name}")
         except Exception as e:
             logger.error(f"Error setting autorole: {e}")
-            error_embed = discord.Embed(
-                title="⚙️ Configuration Error",
-                description="❌ Failed to set autorole configuration.",
-                color=discord.Color.red()
+            await interaction.response.send_message(
+                embed=self.ui.error_embed(
+                    "Setup Error",
+                    "An error occurred while setting up autorole.",
+                    "AutoRole"
+                ),
+                ephemeral=True
             )
-            error_embed.set_footer(text="Administrative Command • Error")
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @app_commands.command(name="removeautorole", description="Remove the automatic role assignment")
-    @app_commands.default_permissions(manage_roles=True)
-    @app_commands.describe(type="Choose which autorole type to remove")
-    @app_commands.choices(type=ROLE_TYPES)  # Include all options including 'all'
-    async def removeautorole(self, interaction: discord.Interaction, type: app_commands.Choice[str]):
-        """Remove autorole settings"""
+    @app_commands.command(name="removeautorole")
+    @app_commands.default_permissions(administrator=True)
+    async def removeautorole(self, interaction: discord.Interaction, role: discord.Role):
+        """Remove a role from automatic assignment"""
         try:
-            async with self.db._lock:
-                conn = await self.db.get_connection()
-                if type.value == "all":
-                    await conn.execute("""
-                        DELETE FROM autorole 
+            async with self.db.transaction():
+                # Get existing roles
+                result = await self.db.fetchone("""
+                    SELECT role_ids FROM autorole_settings 
+                    WHERE guild_id = ?
+                """, (interaction.guild_id,))
+
+                if not result or not result['role_ids']:
+                    await interaction.response.send_message(
+                        embed=self.ui.error_embed(
+                            "Not Found",
+                            "No autoroles are currently set up.",
+                            "AutoRole"
+                        ),
+                        ephemeral=True
+                    )
+                    return
+
+                existing_roles = result['role_ids'].split(',')
+                if str(role.id) not in existing_roles:
+                    await interaction.response.send_message(
+                        embed=self.ui.error_embed(
+                            "Not Found",
+                            f"{role.mention} is not set as an autorole.",
+                            "AutoRole"
+                        ),
+                        ephemeral=True
+                    )
+                    return
+
+                # Remove role
+                existing_roles.remove(str(role.id))
+                
+                # Update settings
+                if existing_roles:
+                    await self.db.execute("""
+                        UPDATE autorole_settings 
+                        SET role_ids = ? 
+                        WHERE guild_id = ?
+                    """, (','.join(existing_roles), interaction.guild_id))
+                else:
+                    await self.db.execute("""
+                        UPDATE autorole_settings 
+                        SET role_ids = NULL, enabled = 0 
                         WHERE guild_id = ?
                     """, (interaction.guild_id,))
-                else:
-                    await conn.execute("""
-                        DELETE FROM autorole 
-                        WHERE guild_id = ? AND type = ?
-                    """, (interaction.guild_id, type.value))
-                await conn.commit()
 
-            embed = discord.Embed(
-                title="⚙️ AutoRole Configuration",
-                description="Automatic role assignment has been updated.",
-                color=discord.Color.blue()
+            embed = self.ui.success_embed(
+                "AutoRole Removed",
+                f"{role.mention} will no longer be automatically assigned",
+                "AutoRole"
             )
-            embed.add_field(
-                name="Action",
-                value=f"Removed configuration for: `{type.value}`",
-                inline=False
-            )
-            embed.set_footer(text="Administrative Command • AutoRole System")
-            
+
             await interaction.response.send_message(embed=embed)
-            logger.info(f"Autorole removed in {interaction.guild}: {type.value}")
+            logger.info(f"AutoRole removed in {interaction.guild.name}: {role.name}")
         except Exception as e:
             logger.error(f"Error removing autorole: {e}")
-            error_embed = discord.Embed(
-                title="⚙️ Configuration Error",
-                description="❌ Failed to remove autorole configuration.",
-                color=discord.Color.red()
+            await interaction.response.send_message(
+                embed=self.ui.error_embed(
+                    "Removal Error",
+                    "An error occurred while removing the autorole.",
+                    "AutoRole"
+                ),
+                ephemeral=True
             )
-            error_embed.set_footer(text="Administrative Command • Error")
-            await interaction.response.send_message(embed=error_embed)
 
-    @app_commands.command(name="massrole", description="Assign a role to all server members")
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(role="The role to assign to all members")
-    async def massrole(self, interaction: discord.Interaction, role: discord.Role):
-        """Assign a role to all members in the server"""
+    @app_commands.command(name="listautoroles")
+    async def listautoroles(self, interaction: discord.Interaction):
+        """List all automatic role assignments"""
         try:
-            if not interaction.guild.me.guild_permissions.manage_roles:
-                await interaction.response.send_message("❌ I don't have permission to manage roles!")
-                return
+            async with self.db.transaction():
+                result = await self.db.fetchone("""
+                    SELECT role_ids, enabled, delay, exclude_bots, require_verification 
+                    FROM autorole_settings 
+                    WHERE guild_id = ?
+                """, (interaction.guild_id,))
 
-            if role.position >= interaction.guild.me.top_role.position:
-                await interaction.response.send_message("❌ I can't assign roles higher than my highest role!")
-                return
-
-            await interaction.response.defer(thinking=True)
-            
-            embed = discord.Embed(
-                title="⚙️ Mass Role Assignment",
-                description="Starting role assignment process...",
-                color=discord.Color.blue()
-            )
-            embed.add_field(
-                name="Role",
-                value=f"{role.mention}",
-                inline=False
-            )
-            progress_msg = await interaction.followup.send(embed=embed)
-            
-            success_count = 0
-            fail_count = 0
-            error_users = []
-            total_members = len(interaction.guild.members)
-            
-            for member in interaction.guild.members:
-                if role in member.roles:
-                    continue
-                    
-                try:
-                    if member.top_role >= interaction.guild.me.top_role:
-                        error_users.append(f"👑 {member.name} (Higher role)")
-                        fail_count += 1
-                        continue
-                        
-                    await member.add_roles(role)
-                    success_count += 1
-                    if success_count % 5 == 0:
-                        embed.description = f"Processing: {success_count + fail_count}/{total_members} members..."
-                        await progress_msg.edit(embed=embed)
-                except Exception as e:
-                    fail_count += 1
-                    error_users.append(f"❌ {member.name} ({str(e)})")
-
-            final_embed = discord.Embed(
-                title="⚙️ Mass Role Assignment",
-                description="Role assignment process completed.",
-                color=discord.Color.blue()
-            )
-            
-            final_embed.add_field(
-                name="📊 Results",
-                value=f"```\nSuccess: {success_count} members\nFailed: {fail_count} members\nTotal: {total_members} members\n```",
-                inline=False
-            )
-            
-            if error_users and fail_count < 10:
-                final_embed.add_field(
-                    name="⚠️ Failed Assignments",
-                    value="\n".join(error_users[:10]),
-                    inline=False
+            if not result or not result['role_ids']:
+                await interaction.response.send_message(
+                    embed=self.ui.info_embed(
+                        "No AutoRoles",
+                        "No automatic role assignments are set up.",
+                        "AutoRole"
+                    ),
+                    ephemeral=True
                 )
+                return
 
-            final_embed.add_field(
-                name="Role",
-                value=f"{role.mention}",
+            role_ids = result['role_ids'].split(',')
+            roles = []
+            for role_id in role_ids:
+                role = interaction.guild.get_role(int(role_id))
+                if role:
+                    roles.append(role)
+
+            if not roles:
+                await interaction.response.send_message(
+                    embed=self.ui.info_embed(
+                        "No Valid Roles",
+                        "No valid automatic role assignments found.",
+                        "AutoRole"
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            embed = self.ui.info_embed(
+                "AutoRole Configuration",
+                "Current automatic role assignments",
+                "AutoRole"
+            )
+
+            # Role list
+            roles_text = "\n".join(f"• {role.mention}" for role in roles)
+            embed.add_field(
+                name="🎭 Roles",
+                value=roles_text,
                 inline=False
             )
-            
-            final_embed.set_footer(text="Administrative Command • Role Management")
 
-            await progress_msg.edit(embed=final_embed)
-            logger.info(f"Mass role assignment completed in {interaction.guild}: {role.name}")
-        except Exception as e:
-            logger.error(f"Error in mass role assignment: {e}")
-            error_embed = discord.Embed(
-                title="⚙️ Configuration Error",
-                description="❌ Failed to complete mass role assignment.",
-                color=discord.Color.red()
+            # Settings
+            settings = []
+            settings.append(f"Status: {'Enabled' if result['enabled'] else 'Disabled'}")
+            if result['delay']:
+                settings.append(f"Delay: {result['delay']} seconds")
+            if result['exclude_bots']:
+                settings.append("Bots: Excluded")
+            if result['require_verification']:
+                settings.append("Requires Verification: Yes")
+
+            embed.add_field(
+                name="⚙️ Settings",
+                value="```" + "\n".join(settings) + "```",
+                inline=False
             )
-            error_embed.set_footer(text="Administrative Command • Error")
-            await interaction.followup.send(embed=error_embed, ephemeral=True)
+
+            # Recent logs
+            async with self.db.transaction():
+                logs = await self.db.fetchall("""
+                    SELECT user_id, role_id, success, error, timestamp
+                    FROM autorole_logs
+                    WHERE guild_id = ?
+                    ORDER BY timestamp DESC
+                    LIMIT 5
+                """, (interaction.guild_id,))
+
+            if logs:
+                log_text = []
+                for log in logs:
+                    member = interaction.guild.get_member(log['user_id'])
+                    role = interaction.guild.get_role(log['role_id'])
+                    if member and role:
+                        status = "✅" if log['success'] else "❌"
+                        error = f" ({log['error']})" if not log['success'] and log['error'] else ""
+                        timestamp = datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00'))
+                        log_text.append(
+                            f"{status} {member.display_name} → {role.name}{error} "
+                            f"({format_relative_time(timestamp)})"
+                        )
+
+                if log_text:
+                    embed.add_field(
+                        name="📋 Recent Activity",
+                        value="\n".join(log_text),
+                        inline=False
+                    )
+
+            await interaction.response.send_message(embed=embed)
+            logger.info(f"AutoRole list viewed in {interaction.guild.name}")
+        except Exception as e:
+            logger.error(f"Error listing autoroles: {e}")
+            await interaction.response.send_message(
+                embed=self.ui.error_embed(
+                    "Error",
+                    "An error occurred while fetching autorole settings.",
+                    "AutoRole"
+                ),
+                ephemeral=True
+            )
 
 async def setup(bot):
     await bot.add_cog(AutoRole(bot))

@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import logging
 from typing import Optional
+from utils.ui_manager import UIManager
 
 logger = logging.getLogger(__name__)
 
@@ -10,8 +11,9 @@ class ReactionRoles(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
+        self.ui = UIManager()
         bot.loop.create_task(self._init_db())
-        logger.info("Reaction Roles cog initialized")
+        logger.info("Reaction roles cog initialized")
 
     async def _init_db(self):
         """Initialize database and ensure guild settings exist"""
@@ -41,16 +43,14 @@ class ReactionRoles(commands.Cog):
 
     async def get_reaction_role(self, guild_id: int, message_id: int, emoji: str):
         """Get reaction role data with proper async context management"""
-        async with self.db._lock:
-            conn = await self.db.get_connection()
-            cursor = await conn.execute("""
+        async with self.db.cursor() as cur:
+            await cur.execute("""
                 SELECT role_id, description
                 FROM reaction_roles
                 WHERE guild_id = ? AND message_id = ? AND emoji = ?
             """, (guild_id, message_id, emoji))
-            result = await cursor.fetchone()
-            await cursor.close()
-            return result
+            result = await cur.fetchone()
+            return result if result else None
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
@@ -122,12 +122,12 @@ class ReactionRoles(commands.Cog):
             await message.add_reaction(emoji)
 
             # Save to database using proper async context
-            result = await self.db.fetchrow("""
-                INSERT INTO reaction_roles 
-                (guild_id, channel_id, message_id, emoji, role_id, description)
-                VALUES (?, ?, ?, ?, ?, ?)
-                RETURNING *
-            """, (interaction.guild_id, target_channel.id, message.id, emoji, role.id, description))
+            async with self.db.cursor() as cur:
+                await cur.execute("""
+                    INSERT INTO reaction_roles 
+                    (guild_id, channel_id, message_id, emoji, role_id, description)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (interaction.guild_id, target_channel.id, message.id, emoji, role.id, description))
 
             # Success message with consistent style
             success_embed = discord.Embed(
@@ -160,15 +160,14 @@ class ReactionRoles(commands.Cog):
     @app_commands.default_permissions(manage_roles=True)
     async def removereactrole(self, interaction: discord.Interaction, message_id: str):
         try:
-            async with self.db._lock:
-                conn = await self.db.get_connection()
-                cursor = await conn.execute("""
+            # Use proper async context management
+            async with self.db.cursor() as cur:
+                await cur.execute("""
                     SELECT channel_id 
                     FROM reaction_roles 
                     WHERE guild_id = ? AND message_id = ?
                 """, (interaction.guild_id, int(message_id)))
-                result = await cursor.fetchone()
-                await cursor.close()
+                result = await cur.fetchone()
 
                 if not result:
                     error_embed = discord.Embed(
@@ -189,11 +188,10 @@ class ReactionRoles(commands.Cog):
                     except discord.NotFound:
                         pass  # Message already deleted
 
-                await conn.execute("""
+                await cur.execute("""
                     DELETE FROM reaction_roles 
                     WHERE guild_id = ? AND message_id = ?
                 """, (interaction.guild_id, int(message_id)))
-                await conn.commit()
 
             success_embed = discord.Embed(
                 title="✅ Reaction Role Removed",
