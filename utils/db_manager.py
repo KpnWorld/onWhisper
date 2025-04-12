@@ -77,6 +77,7 @@ class DatabaseManager:
         self._init_task = None
         self._initialized = False
         self._lock = asyncio.Lock()
+        self._transaction_lock = asyncio.Lock()  # Add transaction lock
         self._closing = False
         self._pool = []
         self._max_connections = 5
