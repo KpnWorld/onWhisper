@@ -78,6 +78,9 @@ class DatabaseManager:
         self._initialized = False
         self._lock = asyncio.Lock()
         self._closing = False
+        self._pool = []
+        self._max_connections = 5
+        self._last_connection_check = time.time()  # Initialize the last connection check time
 
     async def initialize(self):
         """Initialize the database connection"""
