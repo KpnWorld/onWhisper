@@ -72,9 +72,8 @@ class AsyncCursorContextManager:
 class DatabaseManager:
     def __init__(self, db_name: str):
         self.db_name = db_name
-        self.db_path = os.path.join('db', f'{db_name}.db')
+        self.db_path = f"db/{db_name}.db"
         self._connection = None
-        self._init_task = None
         self._initialized = False
         self._lock = asyncio.Lock()
         self._transaction_lock = asyncio.Lock()
@@ -82,8 +81,13 @@ class DatabaseManager:
         self._pool = []
         self._max_connections = 5
         self._last_connection_check = time.time()
-        # Start initialization immediately
-        asyncio.create_task(self.initialize())
+        # Remove immediate initialization
+
+    async def ensure_initialized(self):
+        """Ensure the database is initialized before use"""
+        if not self._initialized:
+            await self.initialize()
+        return self._initialized
 
     async def initialize(self):
         """Initialize the database connection"""
@@ -91,8 +95,7 @@ class DatabaseManager:
             try:
                 if not os.path.exists('db'):
                     os.makedirs('db')
-                self._init_task = asyncio.create_task(self._initialize())
-                await self._init_task
+                await self._initialize()
                 self._initialized = True
                 logger.info("Database manager initialized successfully")
             except Exception as e:
@@ -123,7 +126,7 @@ class DatabaseManager:
     async def _ensure_initialized(self):
         """Ensure database is initialized before operations"""
         if not self._initialized:
-            await self.initialize()
+            await self.ensure_initialized()
         return self._initialized
 
     async def _create_connection(self) -> aiosqlite.Connection:
@@ -139,7 +142,7 @@ class DatabaseManager:
 
     async def get_connection(self) -> aiosqlite.Connection:
         """Get or create database connection with proper error handling"""
-        await self._ensure_initialized()
+        await self.ensure_initialized()
         if self._closing:
             raise RuntimeError("Database manager is closing")
             
@@ -173,8 +176,9 @@ class DatabaseManager:
         """Cleanup on context manager exit"""
         await self.close()
 
-    def cursor(self):
+    async def cursor(self):
         """Get a database cursor as an async context manager"""
+        await self.ensure_initialized()
         return AsyncCursorContextManager(self)
 
     async def commit(self):
