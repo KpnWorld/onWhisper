@@ -73,17 +73,16 @@ class DatabaseManager:
     def __init__(self, db_name: str):
         self.db_name = db_name
         self.db_path = os.path.join('db', f'{db_name}.db')
-        os.makedirs('db', exist_ok=True)
         self._connection = None
-        self._lock = asyncio.Lock()
-        self._closing = False
-        self._transaction_lock = asyncio.Lock()
-        self._connection_lock = asyncio.Lock()
-        self._init_task = asyncio.create_task(self._initialize())
-        self._pool = []
-        self._max_connections = 5
-        self._connection_timeout = 30
-        self._last_connection_check = 0
+        self._init_task = None
+        self._initialized = False
+
+    async def initialize(self):
+        """Initialize the database connection"""
+        if not self._initialized:
+            self._init_task = asyncio.create_task(self._initialize())
+            await self._init_task
+            self._initialized = True
 
     async def _initialize(self):
         """Initialize the database connection with optimized settings"""

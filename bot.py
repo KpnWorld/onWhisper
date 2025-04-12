@@ -175,6 +175,7 @@ class Bot(commands.Bot):
         try:
             await self.db.setup_database()
             await self.db.initialize_indexes()
+            await self.db.initialize()
             logger.info("Database initialized successfully")
         except Exception as e:
             logger.critical(f"Failed to initialize database: {e}")
