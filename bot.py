@@ -29,6 +29,10 @@ INITIAL_EXTENSIONS = [
 # Initialize colorama for Windows
 colorama.init()
 
+# Force flush stdout for Repl.it compatibility
+if 'REPL_ID' in os.environ:
+    sys.stdout.reconfigure(line_buffering=True)
+
 def check_dependencies():
     """Check and warn about missing optional dependencies"""
     try:
@@ -95,7 +99,7 @@ os.makedirs('cogs', exist_ok=True)
 os.makedirs('db', exist_ok=True)  # Add database directory
 
 # Configure handlers
-console_handler = logging.StreamHandler()
+console_handler = logging.StreamHandler(sys.stdout)  # Explicitly use stdout
 console_handler.setFormatter(ColoredFormatter())
 
 log_file = setup_logging_directory()
