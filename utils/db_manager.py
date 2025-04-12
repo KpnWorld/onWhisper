@@ -76,6 +76,8 @@ class DatabaseManager:
         self._connection = None
         self._init_task = None
         self._initialized = False
+        self._lock = asyncio.Lock()
+        self._closing = False
 
     async def initialize(self):
         """Initialize the database connection"""
