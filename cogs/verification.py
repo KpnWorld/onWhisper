@@ -75,16 +75,10 @@ class Verification(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
-        self.ui = UIManager()
-        self.verification_cache = {}
-        self._cleanup_task = bot.loop.create_task(self._cleanup_verification_cache())
-        bot.loop.create_task(self._init_db())
-        logger.info("Verification cog initialized")
 
-    def cog_unload(self):
-        """Cleanup when cog is unloaded"""
-        if self._cleanup_task:
-            self._cleanup_task.cancel()
+    async def cog_load(self):
+        """Ensure database is initialized when cog loads"""
+        await self.db._ensure_initialized()
 
     async def _init_db(self):
         """Initialize database tables and indexes"""

@@ -151,230 +151,31 @@ sqlite3.register_converter("timestamp", convert_datetime)
 
 class Bot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.all()
-        super().__init__(command_prefix='!', intents=intents)
-        self.start_time = time.time()
+        super().__init__(
+            command_prefix=commands.when_mentioned,
+            intents=discord.Intents.all(),
+            help_command=None
+        )
         self.db = DatabaseManager('bot')
-        self.ui = UIManager()
-        self._metrics_task = None
-        self._last_metrics = {}
-        self._metric_buffer = []
-        self._buffer_lock = asyncio.Lock()
-        self._last_flush = datetime.now()
         self._rate_limit_retries = 0
-        self._reconnect_attempts = 0
-        self._max_reconnect_attempts = 5
         self._session_valid = True
-        self._maintenance_task = None
-        self._db_cleanup_task = None
-        self._db_optimize_task = None
-
+        
     async def setup_hook(self) -> None:
-        """Initialize bot hooks and database"""
-        # Initialize database
-        try:
-            await self.db.setup_database()
-            await self.db.initialize_indexes()
-            await self.db.initialize()
-            logger.info("Database initialized successfully")
-        except Exception as e:
-            logger.critical(f"Failed to initialize database: {e}")
-            await self.close()
-            return
-
-        # Start background tasks
-        self._metrics_task = self.loop.create_task(self._collect_metrics())
-        self._maintenance_task = self.loop.create_task(self._database_maintenance())
-        self.loop.create_task(self._flush_metrics())
-        self.loop.create_task(self._session_monitor())
-        self._db_cleanup_task = self.loop.create_task(self._periodic_db_cleanup())
-        self._db_optimize_task = self.loop.create_task(self._periodic_db_optimize())
-
-        # Load extensions
-        for cog in INITIAL_EXTENSIONS:
-            try:
-                await self.load_extension(cog)
-            except Exception as e:
-                logger.error(f'Failed to load extension {cog}: {e}')
-
-    async def close(self) -> None:
-        """Cleanup and close the bot properly"""
-        try:
-            # Cancel background tasks
-            for task in [self._metrics_task, self._maintenance_task, self._db_cleanup_task, self._db_optimize_task]:
-                if task:
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-
-            # Final metrics flush
-            if self._metric_buffer:
-                try:
-                    await self._flush_metrics_buffer()
-                except Exception as e:
-                    logger.error(f"Error in final metrics flush: {e}")
-
-            # Close database connection
-            if self.db:
-                try:
-                    await self.db.close()
-                except Exception as e:
-                    logger.error(f"Error closing database: {e}")
-
-            # Call parent close
-            await super().close()
-        except Exception as e:
-            logger.error(f"Error during bot shutdown: {e}")
-            raise
-
-    async def _collect_metrics(self):
-        """Collect guild metrics with improved error handling"""
-        while not self.is_closed():
-            try:
-                current_time = datetime.now()
-                
-                for guild in self.guilds:
-                    try:
-                        last_collection = self._last_metrics.get(guild.id, datetime.min)
-                        if (current_time - last_collection).total_seconds() >= 300:  # 5 minutes
-                            active_users = len([
-                                m for m in guild.members 
-                                if str(m.status) == "online" and not m.bot
-                            ])
-                            
-                            async with self._buffer_lock:
-                                self._metric_buffer.append({
-                                    'guild_id': guild.id,
-                                    'member_count': guild.member_count,
-                                    'active_users': active_users,
-                                    'timestamp': current_time
-                                })
-                            self._last_metrics[guild.id] = current_time
-                    except Exception as e:
-                        logger.error(f"Error collecting metrics for guild {guild.id}: {e}")
-                        continue
-
-                await asyncio.sleep(60)  # Check every minute
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logger.error(f"Error in metrics collection: {e}")
-                await asyncio.sleep(60)  # Wait before retrying
-
-    async def _flush_metrics(self):
-        """Periodically flush metrics with improved error handling"""
-        while not self.is_closed():
-            try:
-                current_time = datetime.now()
-                if (current_time - self._last_flush).total_seconds() >= 300 or len(self._metric_buffer) >= 100:
-                    await self._flush_metrics_buffer()
-                await asyncio.sleep(10)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logger.error(f"Error in metrics flush loop: {e}")
-                await asyncio.sleep(30)  # Wait before retrying
-
-    async def _flush_metrics_buffer(self):
-        """Flush metrics buffer to database asynchronously"""
-        async with self._buffer_lock:
-            if not self._metric_buffer:
-                return
-            
-            try:
-                chunk_size = 50
-                for i in range(0, len(self._metric_buffer), chunk_size):
-                    chunk = self._metric_buffer[i:i + chunk_size]
-                    await self.db.batch_update_metrics(chunk)
-                
-                self._metric_buffer.clear()
-                self._last_flush = datetime.now()
-            except Exception as e:
-                logger.error(f"Error flushing metrics: {e}")
-
-    async def _database_maintenance(self):
-        """Periodic database maintenance task"""
-        try:
-            while not self.is_closed():
-                # Run maintenance every 24 hours
-                await asyncio.sleep(24 * 60 * 60)  
-                
-                try:
-                    # Check database integrity
-                    if not await self.db.check_database_integrity():
-                        logger.error("Database integrity check failed")
-                        continue
-
-                    # Clean up old data (keep last 30 days)
-                    await self.db.cleanup_old_data(days=30)
-                    
-                    # Optimize database
-                    await self.db.optimize_database()
-                    
-                    # Create backup
-                    backup_path = await self.db.backup_database()
-                    if backup_path:
-                        logger.info(f"Database backup created at {backup_path}")
-                    
-                    # Log database stats
-                    size = await self.db.get_database_size()
-                    table_sizes = await self.db.get_table_sizes()
-                    conn_stats = await self.db.get_connection_stats()
-                    
-                    logger.info(
-                        f"Database maintenance completed:\n"
-                        f"Size: {size / 1024 / 1024:.2f} MB\n"
-                        f"Tables: {table_sizes}\n"
-                        f"Connection: {conn_stats}"
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"Error during database maintenance: {e}")
-                    
-        except asyncio.CancelledError:
-            logger.info("Database maintenance task cancelled")
-        except Exception as e:
-            logger.error(f"Fatal error in database maintenance task: {e}")
-
-    async def _session_monitor(self):
-        """Monitor session status and handle reconnections"""
-        try:
-            while not self.is_closed():
-                if not self._session_valid:
-                    if self._reconnect_attempts < self._max_reconnect_attempts:
-                        self._reconnect_attempts += 1
-                        backoff = min(1800, 30 * (2 ** self._reconnect_attempts))  # Max 30 minute backoff
-                        logger.warning(f"Session invalidated. Attempting reconnect in {backoff} seconds... (Attempt {self._reconnect_attempts})")
-                        await asyncio.sleep(backoff)
-                        try:
-                            await self.close()
-                            await self.start(TOKEN)
-                            self._session_valid = True
-                            self._reconnect_attempts = 0
-                            logger.info("Successfully reconnected")
-                        except Exception as e:
-                            logger.error(f"Reconnection failed: {e}")
-                    else:
-                        logger.error("Max reconnection attempts reached. Manual restart required.")
-                        await self.close()
-                        break
-                await asyncio.sleep(5)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Error in session monitor: {e}")
-
-    async def load_cogs(self):
-        """Load all cogs from the cogs directory."""
+        # Ensure database is initialized first
+        await self.db.initialize()
+        
+        # Now load all cogs
         for filename in os.listdir('./cogs'):
             if filename.endswith('.py'):
                 try:
                     await self.load_extension(f'cogs.{filename[:-3]}')
-                    logger.info(f'Loaded cog: {filename[:-3]}')
+                    logger.info(f"{filename[:-3]} cog initialized")
                 except Exception as e:
-                    logger.error(f'Failed to load cog {filename[:-3]}: {str(e)}')
+                    logger.error(f"Failed to load extension {filename}: {e}")
+
+    async def close(self):
+        await self.db.close()
+        await super().close()
 
     async def on_ready(self):
         """Called when the bot is ready and connected to Discord."""

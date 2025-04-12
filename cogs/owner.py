@@ -18,6 +18,10 @@ class Owner(commands.Cog):
         bot.loop.create_task(self._init_db())
         logger.info("Owner cog initialized")
 
+    async def cog_load(self):
+        """Ensure database is initialized when cog loads"""
+        await self.db._ensure_initialized()  # Wait for initialization
+
     async def _init_db(self):
         """Initialize database and ensure guild settings exist"""
         try:

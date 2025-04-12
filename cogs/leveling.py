@@ -27,6 +27,10 @@ class Leveling(commands.Cog):
         bot.loop.create_task(self._flush_xp_buffer())
         logger.info("Leveling cog initialized")
 
+    async def cog_load(self):
+        """Ensure database is initialized when cog loads"""
+        await self.db._ensure_initialized()
+
     def cog_unload(self):
         """Cleanup when cog is unloaded"""
         if self._cleanup_task:

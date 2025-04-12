@@ -77,18 +77,27 @@ class DatabaseManager:
         self._init_task = None
         self._initialized = False
         self._lock = asyncio.Lock()
-        self._transaction_lock = asyncio.Lock()  # Add transaction lock
+        self._transaction_lock = asyncio.Lock()
         self._closing = False
         self._pool = []
         self._max_connections = 5
-        self._last_connection_check = time.time()  # Initialize the last connection check time
+        self._last_connection_check = time.time()
+        # Start initialization immediately
+        asyncio.create_task(self.initialize())
 
     async def initialize(self):
         """Initialize the database connection"""
         if not self._initialized:
-            self._init_task = asyncio.create_task(self._initialize())
-            await self._init_task
-            self._initialized = True
+            try:
+                if not os.path.exists('db'):
+                    os.makedirs('db')
+                self._init_task = asyncio.create_task(self._initialize())
+                await self._init_task
+                self._initialized = True
+                logger.info("Database manager initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize database: {e}")
+                raise
 
     async def _initialize(self):
         """Initialize the database connection with optimized settings"""
@@ -111,6 +120,12 @@ class DatabaseManager:
         
         await self.setup_database()
 
+    async def _ensure_initialized(self):
+        """Ensure database is initialized before operations"""
+        if not self._initialized:
+            await self.initialize()
+        return self._initialized
+
     async def _create_connection(self) -> aiosqlite.Connection:
         """Create a new database connection"""
         conn = await aiosqlite.connect(
@@ -124,6 +139,7 @@ class DatabaseManager:
 
     async def get_connection(self) -> aiosqlite.Connection:
         """Get or create database connection with proper error handling"""
+        await self._ensure_initialized()
         if self._closing:
             raise RuntimeError("Database manager is closing")
             
@@ -628,9 +644,10 @@ class DatabaseManager:
     @asynccontextmanager
     async def transaction(self):
         """Context manager for database transactions with proper locking"""
+        await self._ensure_initialized()
         async with self._transaction_lock:
             if not self._connection:
-                await self._init_task
+                await self._ensure_initialized()
             try:
                 await self._connection.execute("BEGIN TRANSACTION")
                 yield
@@ -640,7 +657,7 @@ class DatabaseManager:
                 logger.error(f"Transaction failed, rolling back: {e}")
                 raise
             finally:
-                if self._connection.in_transaction:
+                if self._connection and self._connection.in_transaction:
                     await self._connection.rollback()
 
     async def batch_insert(self, table: str, columns: List[str], values: List[tuple]) -> None:
@@ -1001,6 +1018,7 @@ class DatabaseManager:
 
     async def get_connection(self):
         """Get a connection from the pool or create a new one"""
+        await self._ensure_initialized()
         # Check connections health periodically
         current_time = time.time()
         if current_time - self._last_connection_check > 60:  # Check every minute
