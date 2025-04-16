@@ -60,11 +60,8 @@ class ColoredFormatter(logging.Formatter):
         
         # Special handling for discord.client and discord.gateway logs
         if record.name in ('discord.client', 'discord.gateway', 'discord.http'):
-            # Convert these logs to our format
+            # Convert these logs to our format but don't filter them
             clean_msg = msg_str
-            for filter_msg in ('logging in using static token', 'has connected to Gateway'):
-                if filter_msg in msg_str:
-                    return ''  # Filter out these messages completely
             return f"{self.COLORS['INFO']}INFO{Style.RESET_ALL} | {clean_msg}"
                 
         # Clean up bot status message
@@ -96,12 +93,12 @@ def setup_logging_directory():
 # Create required directories
 os.makedirs('logs', exist_ok=True)
 os.makedirs('cogs', exist_ok=True)
-os.makedirs('db', exist_ok=True)  # Add database directory
+os.makedirs('db', exist_ok=True)
 
 # Configure handlers
-console_handler = logging.StreamHandler()  # Using default sys.stderr
+console_handler = logging.StreamHandler(sys.stdout)  # Explicitly use stdout instead of stderr
 console_handler.setFormatter(ColoredFormatter())
-console_handler.setLevel(logging.INFO)  # Ensure console handler level is set
+console_handler.setLevel(logging.DEBUG)  # Lower console level to catch more messages
 
 log_file = setup_logging_directory()
 file_handler = logging.FileHandler(log_file, encoding='utf-8')
@@ -113,17 +110,16 @@ logging.getLogger().handlers.clear()
 
 # Configure root logger
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
+root_logger.setLevel(logging.DEBUG)  # Set to DEBUG to catch all messages
 root_logger.addHandler(console_handler)
 root_logger.addHandler(file_handler)
 
 # Configure discord loggers
 for logger_name in ('discord', 'discord.client', 'discord.gateway', 'discord.http'):
     logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.INFO)
-    # Allow propagation to root logger for console output
-    logger.propagate = True
-    logger.handlers.clear()  # Clear any existing handlers
+    logger.setLevel(logging.DEBUG)  # Set discord loggers to DEBUG level
+    logger.addHandler(console_handler)  # Add console handler directly
+    logger.propagate = False  # Prevent double logging
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
