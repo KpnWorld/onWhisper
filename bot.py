@@ -61,8 +61,7 @@ class ColoredFormatter(logging.Formatter):
         # Special handling for discord.client and discord.gateway logs
         if record.name in ('discord.client', 'discord.gateway', 'discord.http'):
             # Convert these logs to our format but don't filter them
-            clean_msg = msg_str
-            return f"{self.COLORS['INFO']}INFO{Style.RESET_ALL} | {clean_msg}"
+            return f"{self.COLORS['INFO']}INFO{Style.RESET_ALL} | {msg_str}"
                 
         # Clean up bot status message
         if "Bot is in" in msg_str:
@@ -98,7 +97,7 @@ os.makedirs('db', exist_ok=True)
 # Configure handlers
 console_handler = logging.StreamHandler(sys.stdout)  # Explicitly use stdout instead of stderr
 console_handler.setFormatter(ColoredFormatter())
-console_handler.setLevel(logging.DEBUG)  # Lower console level to catch more messages
+console_handler.setLevel(logging.INFO)  # Change console level to INFO to reduce spam
 
 log_file = setup_logging_directory()
 file_handler = logging.FileHandler(log_file, encoding='utf-8')
@@ -110,16 +109,14 @@ logging.getLogger().handlers.clear()
 
 # Configure root logger
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.DEBUG)  # Set to DEBUG to catch all messages
+root_logger.setLevel(logging.DEBUG)  # Keep root logger at DEBUG for comprehensive file logging
 root_logger.addHandler(console_handler)
 root_logger.addHandler(file_handler)
 
 # Configure discord loggers
 for logger_name in ('discord', 'discord.client', 'discord.gateway', 'discord.http'):
     logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.DEBUG)  # Set discord loggers to DEBUG level
-    logger.addHandler(console_handler)  # Add console handler directly
-    logger.propagate = False  # Prevent double logging
+    logger.setLevel(logging.INFO)  # Set discord loggers to INFO level instead of DEBUG
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
