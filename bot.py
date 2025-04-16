@@ -99,18 +99,17 @@ os.makedirs('cogs', exist_ok=True)
 os.makedirs('db', exist_ok=True)  # Add database directory
 
 # Configure handlers
-console_handler = logging.StreamHandler(sys.stdout)  # Explicitly use stdout
+console_handler = logging.StreamHandler()  # Using default sys.stderr
 console_handler.setFormatter(ColoredFormatter())
+console_handler.setLevel(logging.INFO)  # Ensure console handler level is set
 
 log_file = setup_logging_directory()
 file_handler = logging.FileHandler(log_file, encoding='utf-8')
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+file_handler.setLevel(logging.INFO)
 
-# Clear any existing handlers from all loggers
+# Clear any existing handlers
 logging.getLogger().handlers.clear()
-logging.getLogger('discord').handlers.clear()
-logging.getLogger('discord.http').handlers.clear()
-logging.getLogger('discord.gateway').handlers.clear()
 
 # Configure root logger
 root_logger = logging.getLogger()
@@ -118,22 +117,13 @@ root_logger.setLevel(logging.INFO)
 root_logger.addHandler(console_handler)
 root_logger.addHandler(file_handler)
 
-# Configure discord loggers with our formatting
+# Configure discord loggers
 for logger_name in ('discord', 'discord.client', 'discord.gateway', 'discord.http'):
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.INFO)
-    logger.propagate = False
-    logger.handlers = []  # Clear any existing handlers
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
-
-# Configure our bot logger
-logger = logging.getLogger('onWhisper')
-logger.setLevel(logging.INFO)
-logger.propagate = False
-logger.handlers = []  # Clear any existing handlers
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
+    # Allow propagation to root logger for console output
+    logger.propagate = True
+    logger.handlers.clear()  # Clear any existing handlers
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
