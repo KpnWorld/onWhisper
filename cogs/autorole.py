@@ -131,5 +131,5 @@ class AutoRole(commands.Cog):
             command_type="User"
         )
 
-def setup(bot):
-    bot.add_cog(AutoRole(bot))
+async def setup(bot):
+    await bot.add_cog(AutoRole(bot))

@@ -271,3 +271,40 @@ class DBManager:
                 SELECT * FROM guild_stats WHERE guild_id = ? ORDER BY timestamp DESC LIMIT 1;
             ''', (guild_id, ))
             return await cursor.fetchone()
+
+    async def execute(self, query: str, params: tuple = None):
+        """Execute a raw SQL query with optional parameters."""
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            if params:
+                await cursor.execute(query, params)
+            else:
+                await cursor.execute(query)
+            await conn.commit()
+            return cursor
+
+    async def ensure_guild_exists(self, guild_id: int, guild_name: str):
+        """Ensure guild exists in all necessary tables with default settings."""
+        async with (await self.connect()).cursor() as cursor:
+            # Add guild to verification settings if not exists
+            await cursor.execute('''
+                INSERT OR IGNORE INTO verification_settings 
+                (guild_id, verification_message, enabled)
+                VALUES (?, 'Please verify to access the server.', 1)
+            ''', (guild_id,))
+
+            # Add guild to auto role if not exists
+            await cursor.execute('''
+                INSERT OR IGNORE INTO auto_role 
+                (guild_id, enabled)
+                VALUES (?, 1)
+            ''', (guild_id,))
+
+            # Initialize guild stats
+            await cursor.execute('''
+                INSERT OR IGNORE INTO guild_stats 
+                (guild_id, timestamp)
+                VALUES (?, CURRENT_TIMESTAMP)
+            ''', (guild_id,))
+
+            await cursor.connection.commit()

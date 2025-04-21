@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 from datetime import datetime, timedelta
 from utils.db_manager import DBManager
 from utils.ui_manager import UIManager
@@ -41,8 +42,8 @@ class Verification(commands.Cog):
 
         return image
 
-    @commands.slash_command(name="set-verification", description="Admin: Set verification role, channel, expiry, and method")
-    @discord.app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(name="set-verification", description="Admin: Set verification role, channel, expiry, and method")
+    @app_commands.checks.has_permissions(administrator=True)
     async def set_verification(self, interaction: discord.Interaction, role: discord.Role, channel: discord.TextChannel, expiry_days: int = 7, verification_method: str = 'button', message_text: str = "Click the button to verify"):
         """Admin: Set verification role, channel, expiry, and method."""
         # Update verification settings in the database
@@ -109,7 +110,7 @@ class Verification(commands.Cog):
         if not is_verified:
             await channel.send(f"The CAPTCHA verification has expired. Please try again, {channel.guild.name} members.")
 
-    @commands.slash_command(name="verify", description="User: Verify yourself")
+    @app_commands.command(name="verify", description="User: Verify yourself")
     async def verify(self, interaction: discord.Interaction):
         """User: Verify themselves."""
         settings = await self.db_manager.get_verification_settings(interaction.guild.id)
@@ -186,6 +187,6 @@ class Verification(commands.Cog):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-def setup(bot):
-    bot.add_cog(Verification(bot))
+async def setup(bot):
+    await bot.add_cog(Verification(bot))
 
