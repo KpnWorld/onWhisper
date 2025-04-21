@@ -4,14 +4,26 @@ from discord import app_commands
 from utils.db_manager import DBManager
 from utils.ui_manager import UIManager
 
-
 class Reactions(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_manager = DBManager()
         self.ui_manager = UIManager(bot)
 
+    # =========================
+    # 🎯 Setup & Initialization
+    # =========================
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        try:
+            await self.ensure_tables()
+            print("Reaction roles system ready")
+        except Exception as e:
+            print(f"Error setting up reaction roles: {e}")
+
     async def ensure_tables(self):
+        """Initialize required database tables"""
         await self.db_manager.execute(
             """
             CREATE TABLE IF NOT EXISTS reaction_roles (
@@ -30,81 +42,22 @@ class Reactions(commands.Cog):
                 user_id INTEGER,
                 guild_id INTEGER,
                 message_id INTEGER,
-                emoji TEXT
+                emoji TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
 
-    @commands.Cog.listener()
-    async def on_ready(self):
-        await self.ensure_tables()
-
     # =========================
-    # 🎉 Reaction Role Logic
+    # 🔧 Admin Commands
     # =========================
 
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
-        if payload.guild_id is None or payload.user_id == self.bot.user.id:
-            return
-
-        guild = self.bot.get_guild(payload.guild_id)
-        member = guild.get_member(payload.user_id)
-        emoji = str(payload.emoji)
-
-        # Handle reaction role
-        role_row = await self.db_manager.fetchone(
-            """
-            SELECT role_id FROM reaction_roles
-            WHERE guild_id = ? AND message_id = ? AND emoji = ?
-            """,
-            (payload.guild_id, payload.message_id, emoji)
-        )
-
-        if role_row:
-            role = guild.get_role(role_row["role_id"])
-            if role and role not in member.roles:
-                try:
-                    await member.add_roles(role, reason="Reaction role given")
-                except discord.Forbidden:
-                    pass
-
-        # Log the reaction
-        await self.db_manager.execute(
-            "INSERT INTO reactions (user_id, guild_id, message_id, emoji) VALUES (?, ?, ?, ?)",
-            (member.id, guild.id, payload.message_id, emoji)
-        )
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
-        if payload.guild_id is None:
-            return
-
-        guild = self.bot.get_guild(payload.guild_id)
-        member = guild.get_member(payload.user_id)
-        emoji = str(payload.emoji)
-
-        role_row = await self.db_manager.fetchone(
-            """
-            SELECT role_id FROM reaction_roles
-            WHERE guild_id = ? AND message_id = ? AND emoji = ?
-            """,
-            (payload.guild_id, payload.message_id, emoji)
-        )
-
-        if role_row and member:
-            role = guild.get_role(role_row["role_id"])
-            if role and role in member.roles:
-                try:
-                    await member.remove_roles(role, reason="Reaction role removed")
-                except discord.Forbidden:
-                    pass
-
-    # =========================
-    # 🔧 Admin Slash Commands
-    # =========================
-
-    @app_commands.command(name="bind_reaction_role", description="Admin: Bind a reaction to a role")
+    @app_commands.command(name="bind_reaction_role", description="Bind a role to a reaction on a message")
+    @app_commands.describe(
+        message_id="The ID of the message to bind to",
+        emoji="The emoji to react with",
+        role="The role to give when reacted"
+    )
     @app_commands.checks.has_permissions(manage_roles=True)
     async def bind_reaction_role(
         self,
@@ -113,56 +66,173 @@ class Reactions(commands.Cog):
         emoji: str,
         role: discord.Role
     ):
-        """Bind an emoji reaction to a role on a specific message"""
         try:
             message_id = int(message_id)
-        except ValueError:
-            return await self.ui_manager.send_error(interaction, "Invalid message ID.", command_type="Administrator")
+            
+            # Verify message exists
+            try:
+                message = await interaction.channel.fetch_message(message_id)
+            except discord.NotFound:
+                raise ValueError("Message not found in this channel")
 
-        await self.db_manager.execute(
-            """
-            INSERT OR REPLACE INTO reaction_roles (guild_id, message_id, emoji, role_id)
-            VALUES (?, ?, ?, ?)
-            """,
-            (interaction.guild.id, message_id, emoji, role.id)
-        )
+            # Add reaction role binding
+            await self.db_manager.execute(
+                """
+                INSERT OR REPLACE INTO reaction_roles (guild_id, message_id, emoji, role_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                (interaction.guild.id, message_id, emoji, role.id)
+            )
 
-        await self.ui_manager.send_embed(
-            interaction,
-            title="Reaction Role Bound",
-            description=f"{emoji} will now assign the role {role.mention} on message `{message_id}`.",
-            command_type="Administrator"
-        )
+            # Add the initial reaction
+            await message.add_reaction(emoji)
 
-    @bind_reaction_role.error
-    async def bind_reaction_role_error(self, interaction: discord.Interaction, error):
-        if isinstance(error, app_commands.errors.MissingPermissions):
-            await self.ui_manager.send_error(interaction, "You need `Manage Roles` permission to use this.", command_type="Administrator")
+            await self.ui_manager.send_embed(
+                interaction,
+                title="Reaction Role Added",
+                description=f"Reaction {emoji} on [this message]({message.jump_url}) will now grant the {role.mention} role",
+                command_type="Administrator"
+            )
+
+        except ValueError as e:
+            await self.ui_manager.error_embed(
+                interaction,
+                title="Invalid Input",
+                description=str(e),
+                command_type="Administrator"
+            )
+        except Exception as e:
+            await self.ui_manager.error_embed(
+                interaction,
+                title="Error",
+                description=f"Failed to bind reaction role: {str(e)}",
+                command_type="Administrator"
+            )
 
     # =========================
-    # 👤 User Slash Command - Reaction Stats
+    # 📝 Event Listeners
     # =========================
 
-    @app_commands.command(name="reaction_stats", description="Check how many reactions you've added")
-    async def reaction_stats(self, interaction: discord.Interaction):
-        """Show how many reactions a user has added in this server"""
-        row = await self.db_manager.fetchone(
-            """
-            SELECT COUNT(*) as total FROM reactions
-            WHERE user_id = ? AND guild_id = ?
-            """,
-            (interaction.user.id, interaction.guild.id)
-        )
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        """Handle reaction role assignment"""
+        if payload.guild_id is None or payload.user_id == self.bot.user.id:
+            return
 
-        total = row["total"] if row else 0
+        try:
+            guild = self.bot.get_guild(payload.guild_id)
+            member = guild.get_member(payload.user_id)
+            emoji = str(payload.emoji)
 
-        await self.ui_manager.send_embed(
-            interaction,
-            title="Your Reaction Stats",
-            description=f"You've added **{total}** reaction(s) in this server.",
-            command_type="User"
-        )
+            # Handle reaction role
+            role_row = await self.db_manager.fetchone(
+                """
+                SELECT role_id FROM reaction_roles
+                WHERE guild_id = ? AND message_id = ? AND emoji = ?
+                """,
+                (payload.guild_id, payload.message_id, emoji)
+            )
 
+            if role_row:
+                role = guild.get_role(role_row["role_id"])
+                if role and role not in member.roles:
+                    try:
+                        await member.add_roles(role, reason="Reaction role given")
+                    except discord.Forbidden:
+                        pass
+
+            # Log the reaction
+            await self.db_manager.execute(
+                "INSERT INTO reactions (user_id, guild_id, message_id, emoji) VALUES (?, ?, ?, ?)",
+                (member.id, guild.id, payload.message_id, emoji)
+            )
+
+        except discord.Forbidden:
+            print(f"Missing permissions to assign role in guild {payload.guild_id}")
+        except Exception as e:
+            print(f"Error handling reaction add: {e}")
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+        """Handle reaction role removal"""
+        if payload.guild_id is None:
+            return
+
+        try:
+            guild = self.bot.get_guild(payload.guild_id)
+            member = guild.get_member(payload.user_id)
+            emoji = str(payload.emoji)
+
+            role_row = await self.db_manager.fetchone(
+                """
+                SELECT role_id FROM reaction_roles
+                WHERE guild_id = ? AND message_id = ? AND emoji = ?
+                """,
+                (payload.guild_id, payload.message_id, emoji)
+            )
+
+            if role_row and member:
+                role = guild.get_role(role_row["role_id"])
+                if role and role in member.roles:
+                    try:
+                        await member.remove_roles(role, reason="Reaction role removed")
+                    except discord.Forbidden:
+                        pass
+
+        except discord.Forbidden:
+            print(f"Missing permissions to remove role in guild {payload.guild_id}")
+        except Exception as e:
+            print(f"Error handling reaction remove: {e}")
+
+    # =========================
+    # 👤 User Commands
+    # =========================
+
+    @app_commands.command(name="reaction_stats", description="View your reaction statistics")
+    @app_commands.describe(user="The user to check stats for (optional)")
+    async def reaction_stats(self, interaction: discord.Interaction, user: discord.User = None):
+        """Show reaction statistics for a user"""
+        try:
+            target = user or interaction.user
+            
+            # Get reaction counts
+            row = await self.db_manager.fetchone(
+                """
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(DISTINCT message_id) as messages,
+                    COUNT(DISTINCT emoji) as unique_emojis
+                FROM reactions
+                WHERE user_id = ? AND guild_id = ?
+                """,
+                (target.id, interaction.guild.id)
+            )
+
+            if not row or row["total"] == 0:
+                await self.ui_manager.send_embed(
+                    interaction,
+                    title="No Reactions",
+                    description=f"{'You haven\'t' if target == interaction.user else f'{target.name} hasn\'t'} added any reactions yet!",
+                    command_type="User"
+                )
+                return
+
+            await self.ui_manager.send_embed(
+                interaction,
+                title=f"Reaction Stats for {target.name}",
+                description=f"**Total Reactions:** {row['total']}\n"
+                           f"**Messages Reacted To:** {row['messages']}\n"
+                           f"**Unique Emojis Used:** {row['unique_emojis']}",
+                command_type="User"
+            )
+
+        except Exception as e:
+            await self.ui_manager.error_embed(
+                interaction,
+                title="Error",
+                description=f"Failed to get reaction stats: {str(e)}",
+                command_type="User"
+            )
 
 async def setup(bot):
     await bot.add_cog(Reactions(bot))

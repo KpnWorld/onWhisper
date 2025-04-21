@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 from datetime import datetime, timedelta
 from utils.db_manager import DBManager
 from utils.ui_manager import UIManager
@@ -12,6 +13,10 @@ class Leveling(commands.Cog):
         self.xp_rate = 10  # Default XP per message
         self.xp_cooldown = 10  # Cooldown in seconds
         self.level_roles = {}  # level: role_name
+
+    # =========================
+    # 🎮 Core Leveling Logic
+    # =========================
 
     def calculate_level(self, xp: int) -> int:
         return int(xp ** 0.5)
@@ -30,113 +35,124 @@ class Leveling(commands.Cog):
                 if role in user.roles:
                     await user.remove_roles(role)
 
+    # =========================
+    # 📝 Event Listeners
+    # =========================
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
 
-        user_id = str(message.author.id)
-        now = datetime.utcnow()
+        try:
+            user_id = message.author.id
+            guild_id = message.guild.id
+            now = datetime.utcnow()
 
-        async with self.db_manager.db.execute(
-            "SELECT xp, level, last_xp_gain FROM leveling WHERE user_id = ?", (user_id,)
-        ) as cursor:
-            result = await cursor.fetchone()
+            # Get current XP data
+            result = await self.db_manager.get_user_leveling(user_id, guild_id)
+            if not result:
+                await self.db_manager.add_user_leveling(user_id, guild_id, 1, 0)
+                return
 
-        if result is None:
-            await self.db_manager.db.execute(
-                "INSERT INTO leveling (user_id, xp, level, last_xp_gain) VALUES (?, ?, ?, ?)",
-                (user_id, 0, 1, now.strftime("%Y-%m-%d %H:%M:%S")),
-            )
-            await self.db_manager.db.commit()
-            return
-
-        xp, level, last_gain = result
-        last_gain = datetime.strptime(last_gain, "%Y-%m-%d %H:%M:%S")
-
-        if now - last_gain < timedelta(seconds=self.xp_cooldown):
-            return  # Still on cooldown
-
-        xp += self.xp_rate
-        new_level = self.calculate_level(xp)
-
-        await self.db_manager.db.execute(
-            "UPDATE leveling SET xp = ?, level = ?, last_xp_gain = ? WHERE user_id = ?",
-            (xp, new_level, now.strftime("%Y-%m-%d %H:%M:%S"), user_id),
-        )
-        await self.db_manager.db.commit()
-
-        await self.check_role_assignment(message.author, new_level)
-        await self.ui_manager.send_xp_update(message.author, xp, new_level, message.channel)
-
-    # =========================
-    # 🔧 Admin Commands
-    # =========================
-
-    @commands.command()
-    @commands.has_permissions(administrator=True)
-    async def set_xp_rate(self, ctx, rate: int):
-        """Admin: Set how much XP a message gives"""
-        self.xp_rate = rate
-        await self.ui_manager.send_embed(
-            ctx,
-            title="XP Rate Updated",
-            description=f"XP per message is now set to **{rate}**.",
-            command_type="Administrator"
-        )
-
-    @commands.command()
-    @commands.has_permissions(administrator=True)
-    async def set_xp_cooldown(self, ctx, seconds: int):
-        """Admin: Set cooldown in seconds between XP gains"""
-        self.xp_cooldown = seconds
-        await self.ui_manager.send_embed(
-            ctx,
-            title="XP Cooldown Updated",
-            description=f"Users can now gain XP every **{seconds} seconds**.",
-            command_type="Administrator"
-        )
-
-    @commands.command()
-    @commands.has_permissions(administrator=True)
-    async def set_level_role(self, ctx, level: int, role: discord.Role):
-        """Admin: Set a role to be given at a certain level"""
-        self.level_roles[level] = role.name
-        await self.ui_manager.send_embed(
-            ctx,
-            title="Level Role Set",
-            description=f"Role **{role.name}** will be given at **Level {level}**.",
-            command_type="Administrator"
-        )
-
-    # =========================
-    # 👤 User Command - Level Check
-    # =========================
-
-    @commands.command()
-    async def level(self, ctx, user: discord.User = None):
-        """Check your or another user's level + XP"""
-        user = user or ctx.author
-        user_id = str(user.id)
-
-        async with self.db_manager.db.execute(
-            "SELECT xp, level FROM leveling WHERE user_id = ?", (user_id,)
-        ) as cursor:
-            result = await cursor.fetchone()
-
-        if result:
             xp, level = result
+            # Check cooldown
+            if now - datetime.fromisoformat(str(result[2])) < timedelta(seconds=self.xp_cooldown):
+                return
+
+            # Add XP and check level up
+            xp += self.xp_rate
+            new_level = self.calculate_level(xp)
+            await self.db_manager.add_user_leveling(user_id, guild_id, new_level, xp)
+
+            # Handle level up
+            if new_level > level:
+                await self.check_role_assignment(message.author, new_level)
+                await message.channel.send(
+                    f"🎉 Congratulations {message.author.mention}! You've reached level {new_level}!"
+                )
+        except Exception as e:
+            print(f"Error in leveling: {e}")
+
+    # =========================
+    # ⚙️ Admin Commands
+    # =========================
+
+    @app_commands.command(name="set-xp-rate", description="Set how much XP users earn per message")
+    @app_commands.describe(rate="The amount of XP to award per message")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_xp_rate(self, interaction: discord.Interaction, rate: int):
+        try:
+            self.xp_rate = max(1, min(rate, 100))  # Clamp between 1-100
             await self.ui_manager.send_embed(
-                ctx,
-                title=f"{user.name}'s Level Info",
-                description=f"**Level:** {level}\n**XP:** {xp}",
+                interaction,
+                title="XP Rate Updated",
+                description=f"XP per message is now set to **{self.xp_rate}**",
+                command_type="Administrator"
+            )
+        except Exception as e:
+            await self.ui_manager.send_embed(
+                interaction,
+                title="Error",
+                description=f"Failed to update XP rate: {str(e)}",
+                command_type="Administrator"
+            )
+
+    @app_commands.command(name="set-xp-cooldown", description="Set the cooldown between XP gains")
+    @app_commands.describe(seconds="The cooldown in seconds between XP gains")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_xp_cooldown(self, interaction: discord.Interaction, seconds: int):
+        try:
+            self.xp_cooldown = max(1, min(seconds, 3600))  # Clamp between 1-3600
+            await self.ui_manager.send_embed(
+                interaction,
+                title="XP Cooldown Updated",
+                description=f"Users can now gain XP every **{self.xp_cooldown}** seconds",
+                command_type="Administrator"
+            )
+        except Exception as e:
+            await self.ui_manager.send_embed(
+                interaction,
+                title="Error",
+                description=f"Failed to update cooldown: {str(e)}",
+                command_type="Administrator"
+            )
+
+    # =========================
+    # 👤 User Commands
+    # =========================
+
+    @app_commands.command(name="level", description="Check your or another user's level")
+    @app_commands.describe(user="The user to check (optional)")
+    async def level(self, interaction: discord.Interaction, user: discord.User = None):
+        try:
+            target = user or interaction.user
+            result = await self.db_manager.get_user_leveling(target.id, interaction.guild.id)
+            
+            if not result:
+                await self.ui_manager.send_embed(
+                    interaction,
+                    title="No Level Data",
+                    description=f"{target.name} hasn't earned any XP yet!",
+                    command_type="User"
+                )
+                return
+
+            level, xp = result
+            next_level_xp = (level + 1) ** 2
+            progress = f"{xp}/{next_level_xp}"
+
+            await self.ui_manager.send_embed(
+                interaction,
+                title=f"{target.name}'s Level Stats",
+                description=f"**Level:** {level}\n**XP:** {progress}\n**Total XP:** {xp}",
                 command_type="User"
             )
-        else:
+        except Exception as e:
             await self.ui_manager.send_embed(
-                ctx,
-                title="No XP Yet",
-                description=f"{user.name} hasn't earned any XP yet. Get chatting!",
+                interaction,
+                title="Error",
+                description=f"Failed to get level info: {str(e)}",
                 command_type="User"
             )
 

@@ -1,6 +1,7 @@
 from sys import platform
 import time
 import discord
+from discord import app_commands
 from discord.ext import commands
 from datetime import datetime, timedelta
 import psutil
@@ -34,31 +35,31 @@ class Info(commands.Cog):
     # 📊 Information Commands
     # =========================
 
-    @commands.command()
-    async def ping(self, ctx):
+    @app_commands.command(name="ping", description="Check bot latency")
+    async def ping(self, interaction: discord.Interaction):
         """Check bot latency"""
         latency = round(self.bot.latency * 1000)
         await self.ui_manager.send_embed(
-            ctx,
+            interaction,
             title="🏓 Pong!",
             description=f"Latency is `{latency}ms`.",
             command_type="User"
         )
 
-    @commands.command()
-    async def uptime(self, ctx):
+    @app_commands.command(name="uptime", description="Check bot uptime")
+    async def uptime(self, interaction: discord.Interaction):
         """Check bot uptime"""
         uptime = datetime.utcnow() - datetime.fromtimestamp(self.bot.uptime)
         uptime_str = str(timedelta(seconds=int(uptime.total_seconds())))
         await self.ui_manager.send_embed(
-            ctx,
+            interaction,
             title="⏱️ Bot Uptime",
             description=f"The bot has been online for `{uptime_str}`.",
             command_type="User"
         )
 
-    @commands.command()
-    async def botinfo(self, ctx):
+    @app_commands.command(name="botinfo", description="Display bot information")
+    async def botinfo(self, interaction: discord.Interaction):
         """Display bot information"""
         try:
             memory_usage = round(psutil.Process().memory_info().rss / (1024 ** 2), 2)
@@ -73,28 +74,21 @@ class Info(commands.Cog):
             embed.add_field(name="Python Version", value=platform.python_version(), inline=False)
             embed.add_field(name="Discord.py Version", value=discord.__version__, inline=False)
 
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
         except Exception as e:
             await self.ui_manager.send_embed(
-                ctx,
+                interaction,
                 title="❌ Error",
                 description=f"An error occurred: {e}",
                 command_type="User"
             )
 
-    @commands.command()
-    async def serverinfo(self, ctx):
+    @app_commands.command(name="serverinfo", description="Show server information")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def serverinfo(self, interaction: discord.Interaction):
         """Show server information (Admins only)"""
         try:
-            if not ctx.author.guild_permissions.administrator:
-                return await self.ui_manager.send_embed(
-                    ctx,
-                    title="❌ Permission Denied",
-                    description="You need administrator permissions to use this command.",
-                    command_type="User"
-                )
-
-            guild = ctx.guild
+            guild = interaction.guild
             member_count = guild.member_count
             online_members = sum(1 for member in guild.members if member.status != discord.Status.offline)
             text_channels = len(guild.text_channels)
@@ -111,21 +105,20 @@ class Info(commands.Cog):
             embed.add_field(name="Text Channels", value=text_channels, inline=True)
             embed.add_field(name="Voice Channels", value=voice_channels, inline=True)
             embed.add_field(name="Total Roles", value=role_count, inline=True)
-            embed.add_field(name="Server Region", value=guild.region, inline=True)
 
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
         except Exception as e:
             await self.ui_manager.send_embed(
-                ctx,
+                interaction,
                 title="❌ Error",
                 description=f"An error occurred: {e}",
                 command_type="User"
             )
 
-    @commands.command()
-    async def userinfo(self, ctx, user: discord.User = None):
+    @app_commands.command(name="userinfo", description="Display user information")
+    async def userinfo(self, interaction: discord.Interaction, user: discord.User = None):
         """Display user information"""
-        user = user or ctx.author
+        user = user or interaction.user
         embed = self.ui_manager.create_embed(
             title=f"👤 {user.name}'s Information",
             description=f"Here are the details for {user.name}:",
@@ -136,10 +129,10 @@ class Info(commands.Cog):
         embed.add_field(name="Joined Server", value=user.joined_at.strftime('%Y-%m-%d %H:%M:%S') if hasattr(user, 'joined_at') else "N/A", inline=False)
         embed.add_field(name="Status", value=str(user.status), inline=False)
 
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
 
-    @commands.command()
-    async def roleinfo(self, ctx, role: discord.Role):
+    @app_commands.command(name="roleinfo", description="Show information about a specific role")
+    async def roleinfo(self, interaction: discord.Interaction, role: discord.Role):
         """Show information about a specific role"""
         embed = self.ui_manager.create_embed(
             title=f"🔹 Role Information: {role.name}",
@@ -154,21 +147,17 @@ class Info(commands.Cog):
         embed.add_field(name="Created At", value=role.created_at.strftime('%Y-%m-%d %H:%M:%S'), inline=True)
         embed.add_field(name="Member Count", value=str(len(role.members)), inline=True)
 
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
 
-    # =========================
-    # 🏆 Leaderboard Command
-    # =========================
-
-    @commands.command()
-    async def leaderboard(self, ctx):
+    @app_commands.command(name="leaderboard", description="Show the server XP leaderboard")
+    async def leaderboard(self, interaction: discord.Interaction):
         """Show the server leaderboard of top XP earners"""
         try:
-            leaderboard_data = await self.db_manager.get_leaderboard(ctx.guild.id)
+            leaderboard_data = await self.db_manager.get_leaderboard(interaction.guild.id)
 
             if not leaderboard_data:
                 await self.ui_manager.send_embed(
-                    ctx,
+                    interaction,
                     title="No XP Data Yet",
                     description="There are no users with XP data yet. Chat more to get on the leaderboard!",
                     command_type="User"
@@ -180,18 +169,86 @@ class Info(commands.Cog):
             )
 
             await self.ui_manager.send_embed(
-                ctx,
+                interaction,
                 title="🏆 Server Leaderboard",
                 description=f"**Top 10 Users by XP:**\n{leaderboard}",
                 command_type="User"
             )
         except Exception as e:
             await self.ui_manager.send_embed(
-                ctx,
+                interaction,
                 title="❌ Error",
                 description=f"An error occurred: {e}",
                 command_type="User"
             )
+
+    # =========================
+    # 📚 Help Commands
+    # =========================
+
+    @app_commands.command(name="help", description="Shows the list of available commands")
+    async def help(self, interaction: discord.Interaction, command: str = None):
+        """Get help about commands"""
+        
+        if command:
+            # Show detailed help for specific command
+            cmd = self.bot.tree.get_command(command)
+            if not cmd:
+                return await self.ui_manager.send_embed(
+                    interaction,
+                    title="Command Not Found",
+                    description=f"Command `{command}` does not exist.",
+                    command_type="User"
+                )
+            
+            embed = discord.Embed(
+                title=f"Help: /{cmd.name}",
+                description=cmd.description or "No description available.",
+                color=discord.Color.blue()
+            )
+            
+            if isinstance(cmd, app_commands.Command):
+                params = []
+                for param in cmd.parameters:
+                    required = "Required" if param.required else "Optional"
+                    params.append(f"• `{param.name}`: {param.description} ({required})")
+                if params:
+                    embed.add_field(name="Parameters", value="\n".join(params), inline=False)
+            
+            await interaction.response.send_message(embed=embed)
+            return
+
+        # Show general help with command categories
+        categories = {
+            "🎮 General": ["help", "ping", "uptime", "botinfo"],
+            "📊 Leveling": ["level", "leaderboard"],
+            "🔰 Verification": ["verify"],
+            "⚙️ Admin": ["set-xp-rate", "set-xp-cooldown", "set-level-role", "setautorole"],
+        }
+
+        embed = discord.Embed(
+            title="Bot Help",
+            description="Here are all available commands. Use `/help <command>` for detailed information about a specific command.",
+            color=discord.Color.blue()
+        )
+
+        for category, commands in categories.items():
+            valid_commands = []
+            for cmd_name in commands:
+                cmd = self.bot.tree.get_command(cmd_name)
+                if cmd:
+                    valid_commands.append(f"`/{cmd_name}`")
+            if valid_commands:
+                embed.add_field(
+                    name=category,
+                    value=" • ".join(valid_commands),
+                    inline=False
+                )
+
+        # Add bot info and support footer
+        embed.set_footer(text="Use /help <command> for more details about a specific command")
+
+        await interaction.response.send_message(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(Info(bot))
