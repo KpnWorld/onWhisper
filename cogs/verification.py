@@ -1,8 +1,8 @@
 import discord
 from discord.ext import commands
 from datetime import datetime, timedelta
-from utils.DBManager import DBManager
-from utils.UIManager import UIManager
+from utils.db_manager import DBManager
+from utils.ui_manager import UIManager
 import random
 import string
 from PIL import Image, ImageDraw, ImageFont

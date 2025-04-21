@@ -1,6 +1,9 @@
+from sys import platform
+import time
 import discord
 from discord.ext import commands
 from datetime import datetime, timedelta
+import psutil
 from utils.db_manager import DBManager
 from utils.ui_manager import UIManager
 
