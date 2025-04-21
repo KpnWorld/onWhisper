@@ -1,594 +1,191 @@
-from collections import defaultdict
-from datetime import datetime, timezone
-import time
 import discord
 from discord.ext import commands
-from discord import app_commands
-import logging
+from datetime import datetime, timedelta
+from utils.DBManager import DBManager
+from utils.UIManager import UIManager
 import random
 import string
-import asyncio
-from typing import Optional
-from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
-import aiohttp
-from utils.ui_manager import UIManager
-
-logger = logging.getLogger(__name__)
-
-class VerifyModal(discord.ui.Modal, title="Verification"):
-    code = discord.ui.TextInput(
-        label="Enter Verification Code",
-        placeholder="Enter the code from the image above",
-        min_length=6,
-        max_length=6,
-        required=True
-    )
-
-    def __init__(self, expected_code: str, role: discord.Role):
-        super().__init__()
-        self.expected_code = expected_code
-        self.role = role
-
-    async def on_submit(self, interaction: discord.Interaction):
-        if self.code.value.upper() == self.expected_code:
-            try:
-                await interaction.user.add_roles(self.role)
-                await interaction.response.send_message(
-                    embed=interaction.client.get_cog("Verification").ui.success_embed(
-                        "Verification Complete",
-                        "You have been successfully verified!",
-                        "Verification"
-                    ),
-                    ephemeral=True
-                )
-                logger.info(f"User {interaction.user} verified in {interaction.guild.name}")
-            except discord.Forbidden:
-                await interaction.response.send_message(
-                    embed=interaction.client.get_cog("Verification").ui.error_embed(
-                        "Permission Error",
-                        "Failed to assign verification role.",
-                        "Verification"
-                    ),
-                    ephemeral=True
-                )
-        else:
-            await interaction.response.send_message(
-                embed=interaction.client.get_cog("Verification").ui.error_embed(
-                    "Verification Failed",
-                    "Incorrect code. Please try again.",
-                    "Verification"
-                ),
-                ephemeral=True
-            )
-
-class VerifyButton(discord.ui.View):
-    def __init__(self, modal: VerifyModal):
-        super().__init__(timeout=None)
-        self.modal = modal
-
-    @discord.ui.button(label="Verify", style=discord.ButtonStyle.primary, emoji="✅")
-    async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(self.modal)
+import io
+import asyncio
 
 class Verification(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = bot.db
+        self.db_manager = DBManager()
+        self.ui_manager = UIManager(bot)
 
-    async def cog_load(self):
-        """Ensure database is initialized when cog loads"""
-        await self.db._ensure_initialized()
+    def generate_captcha_text(self):
+        """Generate random text for CAPTCHA."""
+        return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-    async def _init_db(self):
-        """Initialize database tables and indexes"""
-        try:
-            async with self.db.transaction():
-                await self.db.execute_script("""
-                    CREATE TABLE IF NOT EXISTS verification_settings (
-                        guild_id INTEGER PRIMARY KEY,
-                        enabled BOOLEAN DEFAULT 0,
-                        role_id INTEGER,
-                        channel_id INTEGER,
-                        message TEXT DEFAULT 'Please complete verification to access the server.',
-                        timeout INTEGER DEFAULT 300,
-                        log_channel_id INTEGER,
-                        custom_questions TEXT,
-                        min_account_age INTEGER DEFAULT 0,
-                        captcha_required BOOLEAN DEFAULT 1,
-                        dm_welcome BOOLEAN DEFAULT 0,
-                        welcome_message TEXT,
-                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
-                    );
+    def generate_captcha_image(self, captcha_text):
+        """Generate an image with the CAPTCHA text."""
+        font = ImageFont.load_default()  # You can replace this with any font you want
+        image = Image.new('RGB', (200, 80), color=(255, 255, 255))
+        draw = ImageDraw.Draw(image)
 
-                    CREATE TABLE IF NOT EXISTS verification_data (
-                        user_id INTEGER,
-                        guild_id INTEGER,
-                        verified BOOLEAN DEFAULT 0,
-                        verified_at TIMESTAMP,
-                        verification_method TEXT,
-                        failed_attempts INTEGER DEFAULT 0,
-                        last_attempt TIMESTAMP,
-                        PRIMARY KEY (user_id, guild_id),
-                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
-                    );
+        # Add noise: random dots or squiggly lines
+        for _ in range(random.randint(5, 10)):
+            x1, y1 = random.randint(0, 200), random.randint(0, 80)
+            x2, y2 = random.randint(0, 200), random.randint(0, 80)
+            draw.line([x1, y1, x2, y2], fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)), width=2)
 
-                    CREATE TABLE IF NOT EXISTS verification_logs (
-                        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        guild_id INTEGER,
-                        user_id INTEGER,
-                        action TEXT,
-                        success BOOLEAN,
-                        details TEXT,
-                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
-                    );
+        # Add random dots
+        for _ in range(random.randint(10, 20)):
+            x, y = random.randint(0, 200), random.randint(0, 80)
+            draw.ellipse((x, y, x+3, y+3), fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
 
-                    CREATE INDEX IF NOT EXISTS idx_verification_logs_guild 
-                    ON verification_logs(guild_id);
-                    
-                    CREATE INDEX IF NOT EXISTS idx_verification_logs_time 
-                    ON verification_logs(timestamp);
-                """)
+        # Draw the CAPTCHA text
+        draw.text((50, 20), captcha_text, font=font, fill=(0, 0, 0))
 
-            # Initialize settings for all guilds
-            for guild in self.bot.guilds:
-                await self.db.ensure_guild_exists(guild.id)
-                await self.db.execute("""
-                    INSERT OR IGNORE INTO verification_settings (guild_id)
-                    VALUES (?)
-                """, (guild.id,))
+        return image
 
-            logger.info("Verification database initialized")
-        except Exception as e:
-            logger.error(f"Failed to initialize verification database: {e}")
+    @commands.slash_command(name="set-verification", description="Admin: Set verification role, channel, expiry, and method")
+    @discord.app_commands.checks.has_permissions(administrator=True)
+    async def set_verification(self, interaction: discord.Interaction, role: discord.Role, channel: discord.TextChannel, expiry_days: int = 7, verification_method: str = 'button', message_text: str = "Click the button to verify"):
+        """Admin: Set verification role, channel, expiry, and method."""
+        # Update verification settings in the database
+        await self.db_manager.set_verification_settings(interaction.guild.id, role.id, channel.id, expiry_days, verification_method, message_text)
 
-    async def _cleanup_verification_cache(self):
-        """Periodically clean up expired verification attempts"""
-        while True:
-            try:
-                current_time = time.time()
-                expired = []
-                for key, data in self.verification_cache.items():
-                    if current_time - data['timestamp'] > data['timeout']:
-                        expired.append(key)
-                
-                for key in expired:
-                    del self.verification_cache[key]
+        # Send confirmation message
+        embed = self.ui_manager.create_embed(
+            title="Verification Settings Updated",
+            description=f"Verification role set to {role.mention}.\nVerification channel set to {channel.mention}.\nVerification method set to {verification_method}.",
+            footer="Administrative Command • Success"
+        )
+        await interaction.response.send_message(embed=embed)
 
-                await asyncio.sleep(60)  # Clean up every minute
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in verification cache cleanup: {e}")
+        # Send the verification message with the button or instructions
+        await self.send_verification_message(channel, message_text)
 
-    async def log_verification_action(self, guild_id: int, user_id: int, 
-                                    action: str, success: bool, details: str = None):
-        """Log verification actions with proper error handling"""
-        try:
-            async with self.db.transaction():
-                # Insert log entry
-                await self.db.execute("""
-                    INSERT INTO verification_logs 
-                    (guild_id, user_id, action, success, details)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (guild_id, user_id, action, success, details))
+    async def send_verification_message(self, channel, message_text):
+        """Send the verification message based on the method."""
+        settings = await self.db_manager.get_verification_settings(channel.guild.id)
+        method = settings['verification_method']
 
-                # Get log channel
-                result = await self.db.fetchone("""
-                    SELECT log_channel_id 
-                    FROM verification_settings 
-                    WHERE guild_id = ?
-                """, (guild_id,))
+        if method == 'button':
+            verify_button = discord.ui.Button(label="Click to Verify", custom_id="verify_button")
+            view = discord.ui.View()
+            view.add_item(verify_button)
+            await channel.send(embed=self.ui_manager.create_embed(
+                title="Verification",
+                description=message_text,
+                footer="User Command • Verification"
+            ), view=view)
+        elif method == 'captcha':
+            await self.send_captcha(channel)
+        else:
+            await channel.send("Invalid verification method set.")
 
-                if result and result['log_channel_id']:
-                    guild = self.bot.get_guild(guild_id)
-                    if guild:
-                        log_channel = guild.get_channel(result['log_channel_id'])
-                        if log_channel:
-                            user = guild.get_member(user_id)
-                            embed = (
-                                self.ui.success_embed if success 
-                                else self.ui.error_embed
-                            )(
-                                f"Verification {action}",
-                                f"User: {user.mention if user else user_id}\n"
-                                f"Details: {details or 'No additional details'}",
-                                "Verification"
-                            )
-                            await log_channel.send(embed=embed)
+    async def send_captcha(self, channel):
+        """Generate and send CAPTCHA."""
+        captcha_text = self.generate_captcha_text()
+        captcha_image = self.generate_captcha_image(captcha_text)
 
-        except Exception as e:
-            logger.error(f"Error logging verification action: {e}")
+        # Save the CAPTCHA image in memory
+        image_bytes = io.BytesIO()
+        captcha_image.save(image_bytes, format="PNG")
+        image_bytes.seek(0)
 
-    async def check_verification_requirements(self, member: discord.Member) -> tuple[bool, str]:
-        """Check if a member meets verification requirements"""
-        try:
-            settings = await self.db.fetchone("""
-                SELECT min_account_age FROM verification_settings 
-                WHERE guild_id = ?
-            """, (member.guild.id,))
+        # Send CAPTCHA image to the channel
+        await channel.send(
+            embed=self.ui_manager.create_embed(
+                title="CAPTCHA Verification",
+                description="Please solve the CAPTCHA below to verify yourself.",
+                footer="User Command • Verification"
+            ),
+            file=discord.File(image_bytes, filename="captcha.png")
+        )
 
-            if not settings:
-                return True, None
+        # Store the CAPTCHA text in the database to validate user responses
+        await self.db_manager.set_captcha_text(channel.guild.id, captcha_text)
 
-            if settings['min_account_age']:
-                account_age = (datetime.now(timezone.utc) - member.created_at).days
-                if account_age < settings['min_account_age']:
-                    return False, f"Account too new (requires {settings['min_account_age']} days)"
+        # Start a timeout mechanism (e.g., 5 minutes)
+        await asyncio.sleep(300)  # 5 minutes timeout
 
-            return True, None
-        except Exception as e:
-            logger.error(f"Error checking verification requirements: {e}")
-            return False, "Internal error checking requirements"
+        # Check if the CAPTCHA text is still active (not verified)
+        is_verified = await self.db_manager.get_captcha_verified(channel.guild.id)
+        if not is_verified:
+            await channel.send(f"The CAPTCHA verification has expired. Please try again, {channel.guild.name} members.")
 
-    @app_commands.command(name="setupverification")
-    @app_commands.default_permissions(administrator=True)
-    async def setupverification(self, interaction: discord.Interaction, 
-                              role: discord.Role, channel: discord.TextChannel):
-        """Set up the verification system"""
-        try:
-            # Check bot permissions
-            if role >= interaction.guild.me.top_role:
-                await interaction.response.send_message(
-                    embed=self.ui.error_embed(
-                        "Permission Error",
-                        "I cannot manage roles that are higher than my highest role!",
-                        "Verification"
-                    ),
-                    ephemeral=True
-                )
-                return
+    @commands.slash_command(name="verify", description="User: Verify yourself")
+    async def verify(self, interaction: discord.Interaction):
+        """User: Verify themselves."""
+        settings = await self.db_manager.get_verification_settings(interaction.guild.id)
+        if not settings:
+            return await interaction.response.send_message("Verification settings not configured yet.", ephemeral=True)
 
-            if not channel.permissions_for(interaction.guild.me).send_messages:
-                await interaction.response.send_message(
-                    embed=self.ui.error_embed(
-                        "Permission Error",
-                        "I don't have permission to send messages in that channel!",
-                        "Verification"
-                    ),
-                    ephemeral=True
-                )
-                return
+        # Check if the verification period has expired
+        join_time = interaction.user.joined_at
+        expiration_date = join_time + timedelta(days=settings['expiry_days'])
+        if datetime.now() > expiration_date:
+            return await interaction.response.send_message("You missed the verification window. Please contact an admin for a new verification message.", ephemeral=True)
 
-            async with self.db.transaction():
-                # Update verification settings
-                await self.db.execute("""
-                    INSERT OR REPLACE INTO verification_settings 
-                    (guild_id, enabled, role_id, channel_id)
-                    VALUES (?, 1, ?, ?)
-                """, (interaction.guild_id, role.id, channel.id))
+        # Check if the user already has the verification role
+        role = interaction.guild.get_role(settings['role_id'])
+        if role in interaction.user.roles:
+            return await interaction.response.send_message("You're already verified!", ephemeral=True)
 
-                # Send verification message
-                embed = self.ui.info_embed(
-                    "Server Verification",
-                    "Click the button below to start the verification process.",
-                    "Verification"
-                )
-                verify_button = discord.ui.Button(
-                    label="Verify",
-                    style=discord.ButtonStyle.primary,
-                    custom_id="verify_start"
-                )
-                view = discord.ui.View()
-                view.add_item(verify_button)
-                await channel.send(embed=embed, view=view)
+        # Send CAPTCHA if the method is 'captcha'
+        if settings['verification_method'] == 'captcha':
+            await self.send_captcha(interaction.channel)
 
-            success_embed = self.ui.success_embed(
-                "Verification Setup Complete",
-                f"Verification channel: {channel.mention}\n"
-                f"Verified role: {role.mention}",
-                "Verification"
-            )
-            await interaction.response.send_message(embed=success_embed)
-            
-            # Log setup
-            await self.log_verification_action(
-                interaction.guild_id,
-                interaction.user.id,
-                "Setup",
-                True,
-                f"Channel: {channel.id}, Role: {role.id}"
-            )
-            logger.info(f"Verification setup in {interaction.guild.name}")
-        except Exception as e:
-            logger.error(f"Error setting up verification: {e}")
-            await interaction.response.send_message(
-                embed=self.ui.error_embed(
-                    "Setup Error",
-                    "An error occurred while setting up verification.",
-                    "Verification"
-                ),
-                ephemeral=True
-            )
+        await interaction.response.send_message("Verification button or CAPTCHA sent!", ephemeral=True)
 
-    @app_commands.command(name="disableverification")
-    @app_commands.default_permissions(administrator=True)
-    async def disableverification(self, interaction: discord.Interaction):
-        """Disable the verification system"""
-        try:
-            async with self.db.transaction():
-                # Check if verification is enabled
-                result = await self.db.fetchone("""
-                    SELECT enabled FROM verification_settings 
-                    WHERE guild_id = ?
-                """, (interaction.guild_id,))
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Handle CAPTCHA response."""
+        if message.author.bot:
+            return
 
-                if not result or not result['enabled']:
-                    await interaction.response.send_message(
-                        embed=self.ui.error_embed(
-                            "Not Enabled",
-                            "Verification is not enabled in this server.",
-                            "Verification"
-                        ),
-                        ephemeral=True
-                    )
-                    return
+        # Check if the message is the CAPTCHA response
+        settings = await self.db_manager.get_verification_settings(message.guild.id)
+        if not settings or settings['verification_method'] != 'captcha':
+            return
 
-                # Disable verification
-                await self.db.execute("""
-                    UPDATE verification_settings 
-                    SET enabled = 0 
-                    WHERE guild_id = ?
-                """, (interaction.guild_id,))
+        # Get the correct CAPTCHA text from DB
+        correct_captcha = await self.db_manager.get_captcha_text(message.guild.id)
 
-            embed = self.ui.success_embed(
-                "Verification Disabled",
-                "The verification system has been disabled.",
-                "Verification"
-            )
-            await interaction.response.send_message(embed=embed)
-            
-            # Log disable
-            await self.log_verification_action(
-                interaction.guild_id,
-                interaction.user.id,
-                "Disable",
-                True
-            )
-            logger.info(f"Verification disabled in {interaction.guild.name}")
-        except Exception as e:
-            logger.error(f"Error disabling verification: {e}")
-            await interaction.response.send_message(
-                embed=self.ui.error_embed(
-                    "Error",
-                    "An error occurred while disabling verification.",
-                    "Verification"
-                ),
-                ephemeral=True
-            )
+        # Validate the CAPTCHA response (case-insensitive)
+        if message.content.strip().upper() == correct_captcha:
+            role = message.guild.get_role(settings['role_id'])
+            await message.author.add_roles(role)
+            await message.channel.send(f"Congratulations {message.author.mention}, you've been verified!", delete_after=5)
 
-    @app_commands.command(name="verificationstats")
-    @app_commands.default_permissions(administrator=True)
-    async def verificationstats(self, interaction: discord.Interaction):
-        """View verification system statistics"""
-        try:
-            async with self.db.transaction():
-                # Get settings
-                settings = await self.db.fetchone("""
-                    SELECT * FROM verification_settings 
-                    WHERE guild_id = ?
-                """, (interaction.guild_id,))
-
-                if not settings:
-                    await interaction.response.send_message(
-                        embed=self.ui.error_embed(
-                            "Not Setup",
-                            "Verification has not been set up in this server.",
-                            "Verification"
-                        ),
-                        ephemeral=True
-                    )
-                    return
-
-                # Get verification stats
-                stats = await self.db.fetchone("""
-                    SELECT 
-                        COUNT(*) as total,
-                        SUM(CASE WHEN verified = 1 THEN 1 ELSE 0 END) as verified,
-                        AVG(failed_attempts) as avg_attempts
-                    FROM verification_data
-                    WHERE guild_id = ?
-                """, (interaction.guild_id,))
-
-                # Get recent logs
-                logs = await self.db.fetchall("""
-                    SELECT action, success, timestamp
-                    FROM verification_logs
-                    WHERE guild_id = ?
-                    AND timestamp >= datetime('now', '-7 days')
-                    ORDER BY timestamp DESC
-                """, (interaction.guild_id,))
-
-            embed = self.ui.info_embed(
-                "Verification Statistics",
-                f"Statistics for {interaction.guild.name}",
-                "Verification"
-            )
-
-            # System Status
-            status_text = (
-                f"Status: {'Enabled' if settings['enabled'] else 'Disabled'}\n"
-                f"Role: <@&{settings['role_id']}>\n"
-                f"Channel: <#{settings['channel_id']}>"
-            )
-            embed.add_field(
-                name="⚙️ System Status",
-                value=status_text,
-                inline=False
-            )
-
-            # Verification Stats
-            stats_text = (
-                f"Total Attempts: {stats['total']:,}\n"
-                f"Verified Users: {stats['verified']:,}\n"
-                f"Success Rate: {(stats['verified'] / stats['total'] * 100):.1f}%\n"
-                f"Avg Attempts: {stats['avg_attempts']:.1f}"
-            )
-            embed.add_field(
-                name="📊 Statistics",
-                value=f"```{stats_text}```",
-                inline=False
-            )
-
-            # Recent Activity
-            if logs:
-                recent = defaultdict(int)
-                for log in logs:
-                    key = f"{log['action']}_{log['success']}"
-                    recent[key] += 1
-
-                activity_text = []
-                for action in ['Verify', 'Setup', 'Disable']:
-                    successes = recent.get(f"{action}_1", 0)
-                    failures = recent.get(f"{action}_0", 0)
-                    if successes or failures:
-                        activity_text.append(
-                            f"{action}: {successes} ✅ {failures} ❌"
-                        )
-
-                if activity_text:
-                    embed.add_field(
-                        name="📈 Recent Activity (7 days)",
-                        value="```" + "\n".join(activity_text) + "```",
-                        inline=False
-                    )
-
-            await interaction.response.send_message(embed=embed)
-            logger.info(f"Verification stats viewed in {interaction.guild.name}")
-        except Exception as e:
-            logger.error(f"Error showing verification stats: {e}")
-            await interaction.response.send_message(
-                embed=self.ui.error_embed(
-                    "Error",
-                    "An error occurred while fetching verification statistics.",
-                    "Verification"
-                ),
-                ephemeral=True
-            )
+            # Mark the user as verified
+            await self.db_manager.set_captcha_verified(message.guild.id, message.author.id)
+            # Clear the CAPTCHA text after successful verification
+            await self.db_manager.clear_captcha_text(message.guild.id)
+        else:
+            await message.channel.send(f"Incorrect CAPTCHA, {message.author.mention}. Please try again!", delete_after=5)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
-        """Handle verification button interactions"""
-        if not interaction.type == discord.InteractionType.component:
+        """Handle button click to verify the user."""
+        if interaction.data['custom_id'] != "verify_button":
             return
 
-        if interaction.custom_id != "verify_start":
-            return
+        settings = await self.db_manager.get_verification_settings(interaction.guild.id)
+        if not settings:
+            return await interaction.response.send_message("Verification settings not configured.", ephemeral=True)
 
-        try:
-            # Check if verification is enabled
-            settings = await self.db.fetchone("""
-                SELECT * FROM verification_settings 
-                WHERE guild_id = ? AND enabled = 1
-            """, (interaction.guild_id,))
+        # Check if user already has the verified role
+        role = interaction.guild.get_role(settings['role_id'])
+        if role in interaction.user.roles:
+            return await interaction.response.send_message("You're already verified!", ephemeral=True)
 
-            if not settings:
-                await interaction.response.send_message(
-                    embed=self.ui.error_embed(
-                        "Not Available",
-                        "Verification is not currently enabled.",
-                        "Verification"
-                    ),
-                    ephemeral=True
-                )
-                return
+        # Grant the role
+        await interaction.user.add_roles(role)
 
-            # Get verification role
-            role = interaction.guild.get_role(settings['role_id'])
-            if not role:
-                await interaction.response.send_message(
-                    embed=self.ui.error_embed(
-                        "Configuration Error",
-                        "Verification role not found. Please contact an administrator.",
-                        "Verification"
-                    ),
-                    ephemeral=True
-                )
-                return
+        # Send a confirmation message
+        embed = self.ui_manager.create_embed(
+            title="Verification Successful",
+            description=f"Congratulations {interaction.user.mention}, you've been verified!",
+            footer="User Command • Success"
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-            # Check if already verified
-            verified = await self.db.fetchone("""
-                SELECT verified FROM verification_data 
-                WHERE guild_id = ? AND user_id = ?
-            """, (interaction.guild_id, interaction.user.id))
+def setup(bot):
+    bot.add_cog(Verification(bot))
 
-            if verified and verified['verified']:
-                await interaction.response.send_message(
-                    embed=self.ui.error_embed(
-                        "Already Verified",
-                        "You are already verified in this server.",
-                        "Verification"
-                    ),
-                    ephemeral=True
-                )
-                return
-
-            # Check verification requirements
-            meets_requirements, error = await self.check_verification_requirements(interaction.user)
-            if not meets_requirements:
-                await interaction.response.send_message(
-                    embed=self.ui.error_embed(
-                        "Requirements Not Met",
-                        f"You cannot verify yet: {error}",
-                        "Verification"
-                    ),
-                    ephemeral=True
-                )
-                return
-
-            # Generate verification challenge
-            challenge = self._generate_challenge()
-            self.verification_cache[f"{interaction.guild_id}_{interaction.user.id}"] = {
-                'challenge': challenge,
-                'attempts': 0,
-                'timestamp': time.time(),
-                'timeout': settings['timeout']
-            }
-
-            embed = self.ui.info_embed(
-                "Verification Challenge",
-                "Please enter the code shown in the image below:",
-                "Verification"
-            )
-            embed.set_image(url=challenge['image_url'])
-
-            modal = VerifyModal(challenge['code'], role)
-            await interaction.response.send_modal(modal)
-
-            # Log verification start
-            await self.log_verification_action(
-                interaction.guild_id,
-                interaction.user.id,
-                "Start",
-                True
-            )
-
-        except Exception as e:
-            logger.error(f"Error starting verification: {e}")
-            await interaction.response.send_message(
-                embed=self.ui.error_embed(
-                    "Error",
-                    "An error occurred while starting verification.",
-                    "Verification"
-                ),
-                ephemeral=True
-            )
-
-    def _generate_challenge(self) -> dict:
-        """Generate a verification challenge"""
-        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        image = self._create_captcha_image(code)
-        return {
-            'code': code,
-            'image_url': image
-        }
-
-    def _create_captcha_image(self, text: str) -> str:
-        """Create a CAPTCHA image and return its URL"""
-        # Implementation would generate and store/upload image
-        # For now, return a placeholder
-        return "https://via.placeholder.com/300x100?text=CAPTCHA"
-
-async def setup(bot):
-    await bot.add_cog(Verification(bot))
