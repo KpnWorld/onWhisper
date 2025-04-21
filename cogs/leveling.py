@@ -140,35 +140,5 @@ class Leveling(commands.Cog):
                 command_type="User"
             )
 
-    # =========================
-    # 🏆 Leaderboard Command
-    # =========================
-
-    @commands.command()
-    async def leaderboard(self, ctx):
-        """Show the server leaderboard of top XP earners"""
-        async with self.db_manager.db.execute(
-            "SELECT user_id, xp, level FROM leveling ORDER BY xp DESC LIMIT 10"
-        ) as cursor:
-            result = await cursor.fetchall()
-
-        if result:
-            leaderboard = "\n".join(
-                [f"{rank + 1}. <@{row[0]}> - Level: {row[2]} | XP: {row[1]}" for rank, row in enumerate(result)]
-            )
-            await self.ui_manager.send_embed(
-                ctx,
-                title="🏆 Server Leaderboard",
-                description=f"**Top 10 Users by XP:**\n{leaderboard}",
-                command_type="User"
-            )
-        else:
-            await self.ui_manager.send_embed(
-                ctx,
-                title="No XP Data Yet",
-                description="There are no users with XP data yet. Chat more to get on the leaderboard!",
-                command_type="User"
-            )
-
 async def setup(bot):
     await bot.add_cog(Leveling(bot))

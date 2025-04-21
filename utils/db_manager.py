@@ -1,18 +1,22 @@
 import aiosqlite
 from datetime import datetime
-
+import threading
+import asyncio
 
 class DBManager:
-
     def __init__(self, db_path='bot.db'):
         self.db_path = db_path
-        self._db_connection = None  # Store the connection here
+        self._connections = {}
+        self._lock = asyncio.Lock()
 
     async def connect(self):
-        """Establish a new connection if one doesn't already exist."""
-        if self._db_connection is None:
-            self._db_connection = await aiosqlite.connect(self.db_path)
-        return self._db_connection
+        """Get a connection for the current thread or create a new one."""
+        thread_id = threading.get_ident()
+        if thread_id not in self._connections or self._connections[thread_id] is None:
+            async with self._lock:
+                if thread_id not in self._connections or self._connections[thread_id] is None:
+                    self._connections[thread_id] = await aiosqlite.connect(self.db_path)
+        return self._connections[thread_id]
 
     async def initialize(self):
         """Initialize the database, creating tables if they don't exist."""
@@ -117,9 +121,12 @@ class DBManager:
             await conn.commit()
 
     async def close(self):
-        """Close the connection when the bot shuts down."""
-        if self._db_connection:
-            await self._db_connection.close()
+        """Close all connections."""
+        async with self._lock:
+            for conn in self._connections.values():
+                if conn:
+                    await conn.close()
+            self._connections.clear()
 
     # ---- Leveling ----
     async def add_user_leveling(self, user_id, guild_id, level, xp):
@@ -285,7 +292,8 @@ class DBManager:
 
     async def ensure_guild_exists(self, guild_id: int, guild_name: str):
         """Ensure guild exists in all necessary tables with default settings."""
-        async with (await self.connect()).cursor() as cursor:
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
             # Add guild to verification settings if not exists
             await cursor.execute('''
                 INSERT OR IGNORE INTO verification_settings 
@@ -307,4 +315,30 @@ class DBManager:
                 VALUES (?, CURRENT_TIMESTAMP)
             ''', (guild_id,))
 
-            await cursor.connection.commit()
+            await conn.commit()
+
+    async def create_ticket(self, guild_id: int, channel_id: int, user_id: int):
+        """Create a new ticket record."""
+        query = """
+            INSERT INTO tickets (guild_id, channel_id, user_id, status)
+            VALUES ($1, $2, $3, 'open')
+        """
+        await self.pool.execute(query, guild_id, channel_id, user_id)
+
+    async def get_open_ticket(self, user_id: int, guild_id: int):
+        """Get user's open ticket if exists."""
+        query = """
+            SELECT channel_id FROM tickets
+            WHERE user_id = $1 AND guild_id = $2 AND status = 'open'
+        """
+        return await self.pool.fetchrow(query, user_id, guild_id)
+
+    async def get_ticket_by_channel(self, channel_id: int):
+        """Get ticket by channel ID."""
+        query = "SELECT * FROM tickets WHERE channel_id = $1 AND status = 'open'"
+        return await self.pool.fetchrow(query, channel_id)
+
+    async def close_ticket(self, channel_id: int):
+        """Close a ticket."""
+        query = "UPDATE tickets SET status = 'closed' WHERE channel_id = $1"
+        await self.pool.execute(query, channel_id)
