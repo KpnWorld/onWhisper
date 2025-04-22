@@ -209,10 +209,11 @@ class Reactions(commands.Cog):
             )
 
             if not row or row["total"] == 0:
+                no_reactions_msg = "You haven't" if target == interaction.user else f"{target.name} hasn't"
                 await self.ui_manager.send_embed(
                     interaction,
                     title="No Reactions",
-                    description=f"{'You haven\'t' if target == interaction.user else f'{target.name} hasn\'t'} added any reactions yet!",
+                    description=f"{no_reactions_msg} added any reactions yet!",
                     command_type="User"
                 )
                 return
