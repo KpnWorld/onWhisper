@@ -296,6 +296,26 @@ class Verification(commands.Cog):
                 ephemeral=True
             )
 
+    async def ensure_verification_table(self):
+        """Ensure verification table exists with proper schema"""
+        await self.db_manager.execute(
+            """
+            CREATE TABLE IF NOT EXISTS verification_settings (
+                guild_id INTEGER PRIMARY KEY,
+                role_id INTEGER,
+                channel_id INTEGER,
+                expiry_days INTEGER DEFAULT 7,
+                verification_method TEXT DEFAULT 'button',
+                verification_message TEXT,
+                enabled INTEGER DEFAULT 1
+            )
+            """
+        )
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        await self.ensure_verification_table()
+
 async def setup(bot):
     await bot.add_cog(Verification(bot))
 

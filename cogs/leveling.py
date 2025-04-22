@@ -21,6 +21,10 @@ class Leveling(commands.Cog):
     def calculate_level(self, xp: int) -> int:
         return int(xp ** 0.5)
 
+    def calculate_xp_for_level(self, level: int) -> int:
+        """Calculate XP required for a specific level"""
+        return level * level * 100
+
     async def check_role_assignment(self, user: discord.Member, level: int):
         if level in self.level_roles:
             role = discord.utils.get(user.guild.roles, name=self.level_roles[level])
@@ -116,6 +120,27 @@ class Leveling(commands.Cog):
                 title="Error",
                 description=f"Failed to update cooldown: {str(e)}",
                 command_type="Administrator"
+            )
+
+    @app_commands.command(name="set-level-role")
+    @app_commands.describe(level="Level to assign role at", role="Role to assign")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_level_role(self, interaction: discord.Interaction, level: int, role: discord.Role):
+        """Set a role to be given at a specific level"""
+        try:
+            self.level_roles[level] = role.name
+            await self.ui_manager.send_embed(
+                interaction,
+                title="Level Role Set",
+                description=f"Role {role.mention} will be given at level {level}",
+                command_type="Administrator"
+            )
+        except Exception as e:
+            await self.ui_manager.error_embed(
+                interaction,
+                title="Error",
+                description=f"Failed to set level role: {str(e)}",
+                command_type="Administrator" 
             )
 
     # =========================

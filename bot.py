@@ -87,65 +87,21 @@ class Bot(commands.Bot):
             print(f"Failed to initialize settings for guild {guild.name}: {e}")
 
     async def on_app_command_completion(self, interaction: discord.Interaction, command: app_commands.Command):
-        try:
-            if interaction.guild:
-                execution_time = (datetime.now() - interaction.created_at).total_seconds()
-                await self.db_manager.log_command(
-                    guild_id=interaction.guild_id,
-                    user_id=interaction.user.id,
-                    command_name=command.name,
-                    success=True,
-                    execution_time=execution_time
-                )
-        except Exception as e:
-            print(f"Error in command logging: {e}")
+        """Command completion handler without logging"""
+        pass
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        try:
-            if interaction.guild:
-                execution_time = (datetime.now() - interaction.created_at).total_seconds()
-                await self.db_manager.log_command(
-                    guild_id=interaction.guild_id,
-                    user_id=interaction.user.id,
-                    command_name=interaction.command.name if interaction.command else "unknown",
-                    success=False,
-                    error=str(error),
-                    execution_time=execution_time
-                )
-            print(f"Command error: {str(error)}")
-        except Exception as e:
-            print(f"Error in command error logging: {e}")
+        """Error handler that just prints to console"""
+        print(f"Command error: {str(error)}")
 
     async def on_command_completion(self, ctx):
-        try:
-            if ctx.guild:
-                execution_time = (datetime.now() - ctx.message.created_at).total_seconds()
-                await self.db_manager.log_command(
-                    guild_id=ctx.guild.id,
-                    user_id=ctx.author.id,
-                    command_name=ctx.command.name,
-                    success=True,
-                    execution_time=execution_time
-                )
-        except Exception as e:
-            print(f"Error in command completion logging: {e}")
+        """Legacy command completion handler without logging"""
+        pass
 
     async def on_command_error(self, ctx, error):
-        try:
-            if not isinstance(error, commands.CommandNotFound) and ctx.guild:
-                execution_time = (datetime.now() - ctx.message.created_at).total_seconds()
-                await self.db_manager.log_command(
-                    guild_id=ctx.guild.id,
-                    user_id=ctx.author.id,
-                    command_name=ctx.command.name if ctx.command else "unknown",
-                    success=False,
-                    error=str(error),
-                    execution_time=execution_time
-                )
-            if not isinstance(error, commands.CommandNotFound):
-                print(f"Command error: {str(error)}")
-        except Exception as e:
-            print(f"Error in command error logging: {e}")
+        """Legacy error handler that just prints to console"""
+        if not isinstance(error, commands.CommandNotFound):
+            print(f"Command error: {str(error)}")
 
     async def on_error(self, event_method: str, *args, **kwargs):
         try:

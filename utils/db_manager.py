@@ -342,3 +342,84 @@ class DBManager:
         """Close a ticket."""
         query = "UPDATE tickets SET status = 'closed' WHERE channel_id = $1"
         await self.pool.execute(query, channel_id)
+
+    # Add new database methods
+    async def fetch_all(self, query: str, params: tuple = None):
+        """Execute a query and fetch all results."""
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            if params:
+                await cursor.execute(query, params)
+            else:
+                await cursor.execute(query)
+            rows = await cursor.fetchall()
+            return rows
+
+    async def fetch_one(self, query: str, params: tuple = None):
+        """Execute a query and fetch one result."""
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            if params:
+                await cursor.execute(query, params)
+            else:
+                await cursor.execute(query)
+            row = await cursor.fetchone()
+            return row
+
+    async def get_leaderboard(self, guild_id: int, limit: int = 10):
+        """Get the XP leaderboard for a guild."""
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT user_id, level, xp
+                FROM leveling
+                WHERE guild_id = ?
+                ORDER BY xp DESC
+                LIMIT ?
+                """,
+                (guild_id, limit)
+            )
+            return await cursor.fetchall()
+
+    async def set_verification_settings(self, guild_id: int, role_id: int, channel_id: int, 
+                                     expiry_days: int, method: str, message: str):
+        """Set verification settings for a guild."""
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                INSERT OR REPLACE INTO verification_settings 
+                (guild_id, role_id, channel_id, expiry_days, verification_method, verification_message)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (guild_id, role_id, channel_id, expiry_days, method, message)
+            )
+            await conn.commit()
+
+    async def remove_auto_role(self, guild_id: int, role_id: int):
+        """Remove an auto role from a guild."""
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                DELETE FROM auto_role 
+                WHERE guild_id = ? AND role_id = ?
+                """,
+                (guild_id, role_id)
+            )
+            await conn.commit()
+
+    async def increment_stat(self, guild_id: int, stat_type: str):
+        """Increment a guild statistic."""
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                f"""
+                UPDATE guild_stats 
+                SET {stat_type} = {stat_type} + 1
+                WHERE guild_id = ?
+                """,
+                (guild_id,)
+            )
+            await conn.commit()
