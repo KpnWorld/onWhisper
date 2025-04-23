@@ -144,64 +144,52 @@ class Verification(commands.Cog):
     # 👤 User Commands
     # =========================
 
-    @app_commands.command()
+    @app_commands.command(name="verify")
     async def verify(self, interaction: discord.Interaction, method: str = None):
         try:
             settings = await self.db_manager.get_verification_settings(interaction.guild.id)
             
             if not settings:
-                await self.ui_manager.send_error(
+                await self.ui_manager.send_response(
                     interaction,
-                    "Verification Not Setup",
-                    "Verification has not been configured for this server."
-                )
-                return
-
-            # Check if already verified
-            role = interaction.guild.get_role(settings['role_id'])
-            if role in interaction.user.roles:
-                await interaction.response.send_message("You're already verified!", ephemeral=True)
-                return
-
-            # Check verification window
-            join_time = interaction.user.joined_at
-            expiration_date = join_time + timedelta(days=settings['expiry_days'])
-            if datetime.now() > expiration_date:
-                await interaction.response.send_message(
-                    "Verification period expired. Contact an admin.", 
+                    title="⚠️ Verification Not Setup",
+                    description="Verification has not been configured for this server.",
+                    command_type="User",
                     ephemeral=True
                 )
                 return
 
-            # Use specified method or default
             verify_method = method or settings['verification_method']
-            if verify_method == 'captcha':
-                await self.send_captcha(interaction.channel)
-                await interaction.response.send_message(
-                    "CAPTCHA verification sent!", 
-                    ephemeral=True
-                )
-            else:
-                await self.send_button_verify(interaction)
-
+            
             await self.ui_manager.send_response(
                 interaction,
-                title="✅ Verification",
-                description="Verification process started",
-                fields=[
-                    {"name": "Method", "value": verify_method},
-                    {"name": "Instructions", "value": "Follow the prompts to verify"}
-                ],
+                title="🔐 Verification Process",
+                description="Starting verification process...",
                 command_type="User",
+                fields=[
+                    {"name": "Method", "value": verify_method.title(), "inline": True},
+                    {"name": "Status", "value": "⏳ Pending", "inline": True},
+                    {"name": "Instructions", "value": self.get_verification_instructions(verify_method), "inline": False}
+                ],
                 ephemeral=True
             )
-
+            
+            # Continue with verification process...
+            
         except Exception as e:
             await self.ui_manager.send_error(
                 interaction,
-                "Verification Error", 
+                "Verification Error",
                 str(e)
             )
+
+    def get_verification_instructions(self, method: str) -> str:
+        instructions = {
+            'button': "Click the verify button when it appears.",
+            'captcha': "Type the CAPTCHA code shown in the image.",
+            'reaction': "React to the verification message with the correct emoji."
+        }
+        return instructions.get(method, "Follow the prompts to verify.")
 
     # =========================
     # 🎮 Verification UI

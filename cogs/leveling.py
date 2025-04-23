@@ -159,31 +159,47 @@ class Leveling(commands.Cog):
             result = await self.db_manager.get_user_leveling(target.id, interaction.guild.id)
             
             if not result:
-                await self.ui_manager.send_embed(
+                await self.ui_manager.send_response(
                     interaction,
-                    title="No Level Data",
-                    description=f"{target.name} hasn't earned any XP yet!",
-                    command_type="User"
+                    title="📊 Level Status",
+                    description=f"{target.mention} hasn't earned any XP yet!",
+                    command_type="User",
+                    ephemeral=True
                 )
                 return
 
             level, xp = result
-            next_level_xp = (level + 1) ** 2
-            progress = f"{xp}/{next_level_xp}"
+            next_level_xp = self.calculate_xp_for_level(level + 1)
+            progress = (xp / next_level_xp) * 100
 
-            await self.ui_manager.send_embed(
+            await self.ui_manager.send_response(
                 interaction,
-                title=f"{target.name}'s Level Stats",
-                description=f"**Level:** {level}\n**XP:** {progress}\n**Total XP:** {xp}",
-                command_type="User"
+                title=f"📈 Level Statistics",
+                description=f"Level information for {target.mention}",
+                command_type="User",
+                fields=[
+                    {"name": "Current Level", "value": f"`{level}`", "inline": True},
+                    {"name": "Total XP", "value": f"`{xp:,}`", "inline": True},
+                    {"name": "Rank", "value": f"`#{await self.get_user_rank(target.id, interaction.guild.id)}`", "inline": True},
+                    {"name": "Progress", "value": f"`{progress:.1f}%` to level {level + 1}", "inline": False},
+                    {"name": "Next Level", "value": f"`{xp:,}`/`{next_level_xp:,}` XP needed", "inline": False}
+                ],
+                thumbnail_url=target.display_avatar.url if target.display_avatar else None
             )
         except Exception as e:
-            await self.ui_manager.send_embed(
+            await self.ui_manager.send_error(
                 interaction,
-                title="Error",
-                description=f"Failed to get level info: {str(e)}",
-                command_type="User"
+                "Level Check Error",
+                str(e)
             )
+
+    def get_level_role_progress(self, current_level: int) -> str:
+        """Get formatted string of level roles and their unlock status"""
+        role_progress = []
+        for level, role_name in sorted(self.level_roles.items()):
+            status = "✅" if current_level >= level else "❌"
+            role_progress.append(f"{status} Level {level}: {role_name}")
+        return "\n".join(role_progress) if role_progress else "No level roles configured"
 
 async def setup(bot):
     await bot.add_cog(Leveling(bot))

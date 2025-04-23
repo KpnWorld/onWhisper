@@ -2,7 +2,6 @@ import discord
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-
 class UIManager:
     def __init__(self, bot):
         self.bot = bot
@@ -14,6 +13,19 @@ class UIManager:
         if value.startswith("```") and value.endswith("```"):
             return value
         return f"```{value}```"
+
+    def format_value(self, value: Any) -> str:
+        """Format a value for embed display"""
+        if isinstance(value, (int, float)):
+            return f"`{value:,}`"
+        elif isinstance(value, bool):
+            return "✅" if value else "❌"
+        elif isinstance(value, (discord.Member, discord.User)):
+            return value.mention
+        elif isinstance(value, discord.Role):
+            return value.mention
+        else:
+            return str(value)
 
     # ------------------- EMBED BUILDING -------------------
 
@@ -60,6 +72,56 @@ class UIManager:
             embed.set_thumbnail(url=thumbnail_url)
 
         return embed
+
+    def create_standard_embed(self,
+                            title: str,
+                            description: str,
+                            command_type: str,
+                            fields: List[Dict[str, Any]] = None,
+                            thumbnail_url: str = None,
+                            footer_text: str = None,
+                            timestamp: bool = True) -> discord.Embed:
+        """Create a standardized embed for command responses"""
+        # Add emoji to title if not present
+        if not any(c in title for c in ['📊', '⚙️', '✅', '❌', '⚠️', '🔧']):
+            title = f"📄 {title}"
+
+        embed = discord.Embed(
+            title=title,
+            description=description,
+            color=self.get_command_color(command_type),
+            timestamp=datetime.utcnow() if timestamp else None
+        )
+
+        if fields:
+            for field in fields:
+                name = field.get('name', '')
+                value = self.format_value(field.get('value', ''))
+                inline = field.get('inline', True)
+                if name and value:
+                    embed.add_field(name=name, value=value, inline=inline)
+
+        if thumbnail_url:
+            embed.set_thumbnail(url=thumbnail_url)
+
+        if footer_text:
+            embed.set_footer(text=footer_text)
+        else:
+            embed.set_footer(text=f"{command_type} Command • {self.bot.user.name}")
+
+        return embed
+
+    def get_command_color(self, command_type: str) -> discord.Color:
+        """Get standard color for command type"""
+        colors = {
+            "User": discord.Color.blue(),
+            "Administrator": discord.Color.green(),
+            "Owner": discord.Color.purple(),
+            "Error": discord.Color.red(),
+            "Warning": discord.Color.orange(),
+            "Success": discord.Color.green()
+        }
+        return colors.get(command_type, discord.Color.blurple())
 
     def success_embed(self, title: str, description: str,
                       command_name: Optional[str] = None,
@@ -114,6 +176,71 @@ class UIManager:
                          *,
                          ephemeral: bool = False):
         """Centralized embed sending"""
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+            else:
+                await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+        except discord.errors.NotFound:
+            # Handle case where interaction token has expired
+            pass
+        except Exception as e:
+            print(f"Error sending embed: {e}")
+
+    async def send_response(self,
+                          interaction: discord.Interaction,
+                          title: str,
+                          description: str,
+                          command_type: str = "User",
+                          fields: List[Dict[str, Any]] = None,
+                          thumbnail_url: str = None,
+                          ephemeral: bool = False):
+        """Send a standardized command response"""
+        embed = self.create_standard_embed(
+            title=title,
+            description=description,
+            command_type=command_type,
+            fields=fields,
+            thumbnail_url=thumbnail_url
+        )
+
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+        else:
+            await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+
+    async def send_error(self,
+                        interaction: discord.Interaction,
+                        title: str,
+                        error_message: str,
+                        command_type: str = "Error",
+                        ephemeral: bool = True):
+        """Send a standardized error message"""
+        embed = self.create_standard_embed(
+            title=f"❌ {title}",
+            description=error_message,
+            command_type=command_type,
+            fields=[{"name": "Error Details", "value": error_message, "inline": False}]
+        )
+        
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+        else:
+            await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+
+    async def send_confirmation(self,
+                              interaction: discord.Interaction,
+                              title: str,
+                              description: str,
+                              command_type: str = "Success",
+                              ephemeral: bool = True):
+        """Send a standardized confirmation message"""
+        embed = self.create_standard_embed(
+            title=f"✅ {title}",
+            description=description,
+            command_type=command_type
+        )
+        
         if not interaction.response.is_done():
             await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
         else:

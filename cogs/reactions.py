@@ -105,6 +105,33 @@ class Reactions(commands.Cog):
         except Exception as e:
             await self.ui_manager.send_error(interaction, "Error", f"Failed to bind reaction role: {str(e)}")
 
+    @app_commands.command(name="bind_reaction_role")
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def bind_reaction_role(self, interaction: discord.Interaction, message_id: str, emoji: str, role: discord.Role):
+        try:
+            message_id = int(message_id)
+            message = await interaction.channel.fetch_message(message_id)
+            
+            await self.db_manager.add_reaction_role(message_id, emoji, role.id)
+            await message.add_reaction(emoji)
+            
+            await self.ui_manager.send_response(
+                interaction,
+                title="🔗 Reaction Role Bound",
+                description="A new reaction role has been configured",
+                command_type="Administrator",
+                fields=[
+                    {"name": "Message", "value": f"[Jump to Message]({message.jump_url})", "inline": True},
+                    {"name": "Emoji", "value": emoji, "inline": True},
+                    {"name": "Role", "value": role.mention, "inline": True},
+                    {"name": "Setup By", "value": interaction.user.mention, "inline": False}
+                ]
+            )
+        except ValueError as e:
+            await self.ui_manager.send_error(interaction, "Invalid Input", str(e))
+        except Exception as e:
+            await self.ui_manager.send_error(interaction, "Reaction Role Error", str(e))
+
     # =========================
     # 📝 Event Listeners
     # =========================

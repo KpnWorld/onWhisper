@@ -182,23 +182,40 @@ class Info(commands.Cog):
 
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="roleinfo", description="Show information about a specific role")
+    @app_commands.command()
     async def roleinfo(self, interaction: discord.Interaction, role: discord.Role):
-        """Show information about a specific role"""
-        embed = self.ui_manager.create_embed(
-            title=f"🔹 Role Information: {role.name}",
-            description=f"Details for the role `{role.name}`:",
-            color=role.color if role.color.value else discord.Color.blurple()
-        )
-        embed.add_field(name="Role ID", value=role.id, inline=True)
-        embed.add_field(name="Mentionable", value=str(role.mentionable), inline=True)
-        embed.add_field(name="Hoisted", value=str(role.hoist), inline=True)
-        embed.add_field(name="Position", value=str(role.position), inline=True)
-        embed.add_field(name="Color", value=str(role.color), inline=True)
-        embed.add_field(name="Created At", value=role.created_at.strftime('%Y-%m-%d %H:%M:%S'), inline=True)
-        embed.add_field(name="Member Count", value=str(len(role.members)), inline=True)
+        try:
+            await interaction.response.defer()  # Defer the response first
+            
+            embed = self.ui_manager.create_embed(
+                title=f"🔹 Role Information: {role.name}",
+                description=f"Details for the role `{role.name}`:",
+                color=role.color if role.color.value else discord.Color.blurple()
+            )
+            
+            # Add fields
+            fields = [
+                {"name": "Role ID", "value": str(role.id), "inline": True},
+                {"name": "Mentionable", "value": str(role.mentionable), "inline": True},
+                {"name": "Hoisted", "value": str(role.hoist), "inline": True},
+                {"name": "Position", "value": str(role.position), "inline": True},
+                {"name": "Color", "value": str(role.color), "inline": True},
+                {"name": "Created At", "value": role.created_at.strftime('%Y-%m-%d %H:%M:%S'), "inline": True},
+                {"name": "Member Count", "value": str(len(role.members)), "inline": True}
+            ]
+            
+            for field in fields:
+                embed.add_field(**field)
 
-        await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            await self.ui_manager.send_error(
+                interaction,
+                "Role Info Error",
+                str(e),
+                ephemeral=True
+            )
 
     @app_commands.command(name="leaderboard", description="Show the server XP leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):

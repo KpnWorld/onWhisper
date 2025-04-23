@@ -23,19 +23,19 @@ class AutoRole(commands.Cog):
             
             await self.ui_manager.send_response(
                 interaction,
-                title="⚙️ Auto Role System",
-                description="Auto role configuration updated",
+                title="⚙️ Auto Role Configuration",
+                description="Auto role settings have been updated",
+                command_type="Administrator",
                 fields=[
                     {"name": "Role", "value": role.mention, "inline": True},
-                    {"name": "Status", "value": "Enabled" if enabled else "Disabled", "inline": True},
-                    {"name": "Effect", "value": "New members will automatically receive this role"}
-                ],
-                command_type="Administrator"
+                    {"name": "Status", "value": "✅ Enabled" if enabled else "❌ Disabled", "inline": True},
+                    {"name": "Members Affected", "value": f"`{len(interaction.guild.members)}`", "inline": True}
+                ]
             )
         except Exception as e:
             await self.ui_manager.send_error(
                 interaction, 
-                "Auto Role Error",
+                "Auto Role Configuration Error",
                 str(e)
             )
 
@@ -44,31 +44,43 @@ class AutoRole(commands.Cog):
     async def list_auto_roles(self, interaction: discord.Interaction):
         try:
             auto_roles = await self.db_manager.get_auto_role(interaction.guild.id)
-            if not auto_roles:
-                await self.ui_manager.send_embed(
+            if not auto_roles or not isinstance(auto_roles, tuple):
+                await self.ui_manager.send_response(
                     interaction,
-                    title="No Auto Roles",
-                    description="There are no auto roles set for this server.",
+                    title="📋 Auto Roles List",
+                    description="No auto roles are configured for this server.",
                     command_type="Administrator"
                 )
                 return
 
-            roles_list = "\n".join(
-                [f"<@&{role_id}> - {'🟢 Enabled' if enabled else '🔴 Disabled'}" 
-                 for role_id, enabled in auto_roles]
-            )
-            await self.ui_manager.send_embed(
+            role_id, enabled = auto_roles  # Unpack the tuple
+            role = interaction.guild.get_role(role_id)
+            
+            if not role:
+                await self.ui_manager.send_error(
+                    interaction,
+                    "Auto Role Error",
+                    "The configured role no longer exists."
+                )
+                return
+
+            await self.ui_manager.send_response(
                 interaction,
-                title="Server Auto Roles",
-                description=roles_list,
-                command_type="Administrator"
+                title="📋 Auto Roles List",
+                description="Currently configured auto roles:",
+                command_type="Administrator",
+                fields=[
+                    {"name": "Role", "value": role.mention, "inline": True},
+                    {"name": "Status", "value": "✅ Enabled" if enabled else "❌ Disabled", "inline": True},
+                    {"name": "Role ID", "value": f"`{role_id}`", "inline": True}
+                ]
             )
+
         except Exception as e:
-            await self.ui_manager.send_embed(
+            await self.ui_manager.send_error(
                 interaction,
-                title="❌ Error",
-                description=f"An error occurred: {str(e)}",
-                command_type="Administrator"
+                "Auto Role List Error",
+                f"Failed to fetch auto roles: {str(e)}"
             )
 
     @app_commands.command(name="removeautorole", description="Remove an auto role from the server")
@@ -77,18 +89,21 @@ class AutoRole(commands.Cog):
     async def remove_auto_role(self, interaction: discord.Interaction, role: discord.Role):
         try:
             await self.db_manager.remove_auto_role(interaction.guild.id, role.id)
-            await self.ui_manager.send_embed(
+            await self.ui_manager.send_response(
                 interaction,
-                title="Auto Role Removed",
-                description=f"Auto role **{role.name}** has been removed from this server.",
-                command_type="Administrator"
+                title="🗑️ Auto Role Removed",
+                description=f"The auto role has been removed successfully.",
+                command_type="Administrator",
+                fields=[
+                    {"name": "Removed Role", "value": role.mention, "inline": True},
+                    {"name": "Action By", "value": interaction.user.mention, "inline": True}
+                ]
             )
         except Exception as e:
-            await self.ui_manager.send_embed(
+            await self.ui_manager.send_error(
                 interaction,
-                title="❌ Error",
-                description=f"An error occurred: {str(e)}",
-                command_type="Administrator"
+                "Auto Role Removal Error",
+                str(e)
             )
 
     # =========================
