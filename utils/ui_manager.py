@@ -6,11 +6,14 @@ from datetime import datetime
 class UIManager:
     def __init__(self, bot):
         self.bot = bot
-        self.color_success = 0x2ecc71
-        self.color_error = 0xff0000
-        self.color_info = 0x3498db
-        self.color_warning = 0xf1c40f
+        self.color = discord.Color.blue()  # Standard color for all embeds
         self._last_interaction = {}
+
+    def _format_value(self, value: str) -> str:
+        """Format value inside a code block if not already"""
+        if value.startswith("```") and value.endswith("```"):
+            return value
+        return f"```{value}```"
 
     # ------------------- EMBED BUILDING -------------------
 
@@ -45,7 +48,7 @@ class UIManager:
         if fields:
             for field in fields:
                 name = str(field.get('name', ''))[:256]
-                value = str(field.get('value', ''))[:1024]
+                value = self._format_value(str(field.get('value', ''))[:1024])
                 inline = bool(field.get('inline', False))
                 if name and value:
                     embed.add_field(name=name, value=value, inline=inline)
@@ -64,7 +67,7 @@ class UIManager:
         return self.create_embed(
             title=title,
             description=description,
-            color=self.color_success,
+            color=self.color,
             footer=self._get_footer(command_name, is_admin, "Success")
         )
 
@@ -74,7 +77,7 @@ class UIManager:
         return self.create_embed(
             title=title,
             description=description,
-            color=self.color_error,
+            color=self.color,
             footer=self._get_footer(command_name, is_admin, "Error")
         )
 
@@ -87,7 +90,7 @@ class UIManager:
         return self.create_embed(
             title=title,
             description=description,
-            color=self.color_info,
+            color=self.color,
             fields=fields,
             thumbnail_url=thumbnail_url,
             footer=self._get_footer(command_name, is_admin, "Info")
@@ -99,7 +102,7 @@ class UIManager:
         return self.create_embed(
             title=title,
             description=description,
-            color=self.color_warning,
+            color=self.color,
             footer=self._get_footer(command_name, is_admin, "Warning")
         )
 

@@ -55,44 +55,39 @@ class Verification(commands.Cog):
         verification_method="Method of verification (button/captcha)",
         message_text="Custom verification message"
     )
-    async def set_verification(
-        self, 
-        interaction: discord.Interaction, 
-        role: discord.Role,
-        channel: discord.TextChannel,
-        expiry_days: app_commands.Range[int, 1, 30] = 7,
-        verification_method: str = 'button',
-        message_text: str = "Click the button to verify"
-    ):
+    async def set_verification(self, interaction: discord.Interaction, role: discord.Role, channel: discord.TextChannel,
+                             expiry_days: app_commands.Range[int, 1, 30] = 7, verification_method: str = 'button',
+                             message_text: str = "Click the button to verify"):
         try:
             if verification_method not in ['button', 'captcha']:
                 raise ValueError("Verification method must be 'button' or 'captcha'")
 
             await self.db_manager.set_verification_settings(
-                interaction.guild.id, 
-                role.id, 
-                channel.id, 
-                expiry_days, 
-                verification_method, 
-                message_text
+                interaction.guild.id, role.id, channel.id, 
+                expiry_days, verification_method, message_text
             )
 
-            embed = self.ui_manager.success_embed(
-                title="Verification Settings Updated",
-                description=f"✅ Role: {role.mention}\n📝 Channel: {channel.mention}\n⚙️ Method: {verification_method}",
+            await self.ui_manager.send_response(
+                interaction,
+                title="⚙️ Verification System Configured",
+                description="Verification settings have been updated.",
+                fields=[
+                    {"name": "Role", "value": role.mention, "inline": True},
+                    {"name": "Channel", "value": channel.mention, "inline": True},
+                    {"name": "Method", "value": verification_method.title(), "inline": True},
+                    {"name": "Expiry", "value": f"{expiry_days} days", "inline": True},
+                    {"name": "Message", "value": message_text, "inline": False}
+                ],
                 command_type="Administrator"
             )
-            await interaction.response.send_message(embed=embed)
-            
-            # Send verification message to channel
+
             await self.send_verification_message(channel, message_text)
 
         except Exception as e:
-            await self.ui_manager.error_embed(
+            await self.ui_manager.send_error(
                 interaction,
-                title="Error Setting Verification",
-                description=f"Failed to set verification: {str(e)}",
-                command_type="Administrator"
+                "Verification Setup Error",
+                str(e)
             )
 
     async def send_verification_message(self, channel, message_text):
@@ -149,13 +144,18 @@ class Verification(commands.Cog):
     # 👤 User Commands
     # =========================
 
-    @app_commands.command(name="verify", description="Verify yourself to access the server")
-    @app_commands.describe(method="Optional: Specify verification method (button/captcha)")
+    @app_commands.command()
     async def verify(self, interaction: discord.Interaction, method: str = None):
         try:
             settings = await self.db_manager.get_verification_settings(interaction.guild.id)
+            
             if not settings:
-                raise ValueError("Verification not configured for this server")
+                await self.ui_manager.send_error(
+                    interaction,
+                    "Verification Not Setup",
+                    "Verification has not been configured for this server."
+                )
+                return
 
             # Check if already verified
             role = interaction.guild.get_role(settings['role_id'])
@@ -184,12 +184,23 @@ class Verification(commands.Cog):
             else:
                 await self.send_button_verify(interaction)
 
-        except Exception as e:
-            await self.ui_manager.error_embed(
+            await self.ui_manager.send_response(
                 interaction,
-                title="Verification Error",
-                description=str(e),
-                command_type="User"
+                title="✅ Verification",
+                description="Verification process started",
+                fields=[
+                    {"name": "Method", "value": verify_method},
+                    {"name": "Instructions", "value": "Follow the prompts to verify"}
+                ],
+                command_type="User",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await self.ui_manager.send_error(
+                interaction,
+                "Verification Error", 
+                str(e)
             )
 
     # =========================

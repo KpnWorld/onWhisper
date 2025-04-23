@@ -7,6 +7,17 @@ from datetime import datetime, timedelta
 import psutil
 from utils.db_manager import DBManager
 from utils.ui_manager import UIManager
+import os
+import platform
+from typing import Union
+
+def get_size(bytes: int) -> str:
+    """Convert bytes to human readable string"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes < 1024:
+            return f"{bytes:.2f} {unit}"
+        bytes /= 1024
+    return f"{bytes:.2f} TB"
 
 class Info(commands.Cog):
     def __init__(self, bot):
@@ -38,13 +49,23 @@ class Info(commands.Cog):
     @app_commands.command(name="ping", description="Check bot latency")
     async def ping(self, interaction: discord.Interaction):
         """Check bot latency"""
-        latency = round(self.bot.latency * 1000)
-        await self.ui_manager.send_embed(
-            interaction,
-            title="🏓 Pong!",
-            description=f"Latency is `{latency}ms`.",
-            command_type="User"
-        )
+        try:
+            latency = round(self.bot.latency * 1000)
+            await self.ui_manager.send_response(
+                interaction,
+                title="🏓 Pong!",
+                description="Current Bot Status",
+                fields=[
+                    {"name": "Latency", "value": f"{latency}ms", "inline": True}
+                ],
+                command_type="User"
+            )
+        except Exception as e:
+            await self.ui_manager.send_error(
+                interaction,
+                "Ping Error",
+                f"Failed to get latency: {str(e)}"
+            )
 
     @app_commands.command(name="uptime", description="Check bot uptime")
     async def uptime(self, interaction: discord.Interaction):
@@ -58,21 +79,57 @@ class Info(commands.Cog):
             command_type="User"
         )
 
-    @app_commands.command(name="botinfo", description="Display bot information")
+    @app_commands.command(name="botinfo", description="Get details about the bot")
     async def botinfo(self, interaction: discord.Interaction):
-        """Display bot information"""
+        """Displays comprehensive bot information"""
         try:
-            memory_usage = round(psutil.Process().memory_info().rss / (1024 ** 2), 2)
-            embed = self.ui_manager.create_embed(
-                title="🤖 Bot Information",
-                description=f"Here are the stats for {self.bot.user.name}:",
+            embed = discord.Embed(
+                title=f"🤖 Bot Info: {self.bot.user.name}",
+                description="A versatile Discord bot with leveling, autorole, verification and reaction roles.",
                 color=discord.Color.blue()
             )
-            embed.add_field(name="Uptime", value=str(timedelta(seconds=int(time.time() - self.bot.start_time))), inline=False)
-            embed.add_field(name="Memory Usage", value=f"{memory_usage} MB", inline=False)
-            embed.add_field(name="Platform", value=platform.system(), inline=False)
-            embed.add_field(name="Python Version", value=platform.python_version(), inline=False)
-            embed.add_field(name="Discord.py Version", value=discord.__version__, inline=False)
+
+            if self.bot.user.avatar:
+                embed.set_thumbnail(url=self.bot.user.avatar.url)
+
+            # Version and General Info
+            version_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "version.txt")
+            try:
+                with open(version_path, "r") as f:
+                    version = f.read().strip()
+            except:
+                version = "1.0.0"  # Default version if file not found
+
+            general_info = (
+                f"Version: {version}\n"
+                f"Python: {platform.python_version()}\n"
+                f"Discord.py: {discord.__version__}\n"
+                f"Servers: {len(self.bot.guilds):,}"
+            )
+            embed.add_field(
+                name="📊 General",
+                value=f"```{general_info}```",
+                inline=False
+            )
+
+            # System Info
+            process = psutil.Process()
+            with process.oneshot():
+                memory_usage = process.memory_info().rss
+                cpu_percent = process.cpu_percent(interval=0.1)
+                thread_count = process.num_threads()
+
+            system_info = (
+                f"CPU Usage: {cpu_percent}%\n"
+                f"Memory: {get_size(memory_usage)}\n"
+                f"Threads: {thread_count}\n"
+                f"Platform: {platform.system()} {platform.release()}"
+            )
+            embed.add_field(
+                name="🖥️ System",
+                value=f"```{system_info}```",
+                inline=False
+            )
 
             await interaction.response.send_message(embed=embed)
         except Exception as e:
@@ -89,30 +146,24 @@ class Info(commands.Cog):
         """Show server information (Admins only)"""
         try:
             guild = interaction.guild
-            member_count = guild.member_count
-            online_members = sum(1 for member in guild.members if member.status != discord.Status.offline)
-            text_channels = len(guild.text_channels)
-            voice_channels = len(guild.voice_channels)
-            role_count = len(guild.roles)
-
-            embed = self.ui_manager.create_embed(
-                title=f"📊 Server Information: {guild.name}",
-                description=f"Information for the server {guild.name}",
-                color=discord.Color.green()
-            )
-            embed.add_field(name="Total Members", value=member_count, inline=True)
-            embed.add_field(name="Online Members", value=online_members, inline=True)
-            embed.add_field(name="Text Channels", value=text_channels, inline=True)
-            embed.add_field(name="Voice Channels", value=voice_channels, inline=True)
-            embed.add_field(name="Total Roles", value=role_count, inline=True)
-
-            await interaction.response.send_message(embed=embed)
-        except Exception as e:
-            await self.ui_manager.send_embed(
+            await self.ui_manager.send_response(
                 interaction,
-                title="❌ Error",
-                description=f"An error occurred: {e}",
-                command_type="User"
+                title=f"📊 Server Information: {guild.name}",
+                description=f"Statistics for {guild.name}",
+                fields=[
+                    {"name": "Members", "value": str(guild.member_count), "inline": True},
+                    {"name": "Online", "value": str(sum(1 for m in guild.members if m.status != discord.Status.offline)), "inline": True},
+                    {"name": "Text Channels", "value": str(len(guild.text_channels)), "inline": True},
+                    {"name": "Voice Channels", "value": str(len(guild.voice_channels)), "inline": True},
+                    {"name": "Roles", "value": str(len(guild.roles)), "inline": True}
+                ],
+                command_type="Administrator"
+            )
+        except Exception as e:
+            await self.ui_manager.send_error(
+                interaction,
+                "Server Info Error",
+                f"Failed to get server info: {str(e)}"
             )
 
     @app_commands.command(name="userinfo", description="Display user information")
@@ -186,69 +237,105 @@ class Info(commands.Cog):
     # 📚 Help Commands
     # =========================
 
-    @app_commands.command(name="help", description="Shows the list of available commands")
-    async def help(self, interaction: discord.Interaction, command: str = None):
-        """Get help about commands"""
-        
-        if command:
-            # Show detailed help for specific command
-            cmd = self.bot.tree.get_command(command)
-            if not cmd:
-                return await self.ui_manager.send_embed(
-                    interaction,
-                    title="Command Not Found",
-                    description=f"Command `{command}` does not exist.",
-                    command_type="User"
-                )
-            
+    @app_commands.command(name="help", description="Show all available commands")
+    async def help(self, interaction: discord.Interaction):
+        """Shows all available commands and their descriptions"""
+        try:
+            # Main help embed
             embed = discord.Embed(
-                title=f"Help: /{cmd.name}",
-                description=cmd.description or "No description available.",
+                title="📚 Bot Help Menu",
+                description=(
+                    "A versatile Discord bot with leveling, verification, and role management features.\n"
+                    "All commands use `/` slash command format."
+                ),
                 color=discord.Color.blue()
             )
-            
-            if isinstance(cmd, app_commands.Command):
-                params = []
-                for param in cmd.parameters:
-                    required = "Required" if param.required else "Optional"
-                    params.append(f"• `{param.name}`: {param.description} ({required})")
-                if params:
-                    embed.add_field(name="Parameters", value="\n".join(params), inline=False)
-            
+
+            # Info & Utility Commands
+            info_commands = (
+                "`/help` • Show this help menu\n"
+                "`/ping` • Check bot's latency\n"
+                "`/uptime` • Check bot's uptime\n"
+                "`/botinfo` • View bot information\n"
+                "`/serverinfo` • View server details (Admin)\n"
+                "`/userinfo [user]` • View user details\n"
+                "`/roleinfo [role]` • View role details"
+            )
+            embed.add_field(
+                name="ℹ️ Information",
+                value=info_commands,
+                inline=False
+            )
+
+            # Leveling System Commands
+            leveling_commands = (
+                "`/level [user]` • View level progress\n"
+                "`/leaderboard` • View XP rankings\n"
+                "`/set-xp-rate` • Set XP per message (Admin)\n"
+                "`/set-xp-cooldown` • Set XP cooldown (Admin)\n"
+                "`/set-level-role` • Set level role rewards (Admin)"
+            )
+            embed.add_field(
+                name="📊 Leveling System",
+                value=leveling_commands,
+                inline=False
+            )
+
+            # Role Management Commands
+            role_commands = (
+                "`/setautorole` • Set auto role (Admin)\n"
+                "`/listautoroles` • List auto roles (Admin)\n"
+                "`/removeautorole` • Remove auto role (Admin)\n"
+                "`/autorole` • View auto role status\n"
+                "`/bind_reaction_role` • Create reaction role (Admin)\n"
+                "`/reaction_stats` • View reaction statistics"
+            )
+            embed.add_field(
+                name="👥 Role Management",
+                value=role_commands,
+                inline=False
+            )
+
+            # Verification System Commands
+            verify_commands = (
+                "`/set-verification` • Configure verification (Admin)\n"
+                "`/verify [method]` • Start verification process"
+            )
+            embed.add_field(
+                name="✅ Verification System",
+                value=verify_commands,
+                inline=False
+            )
+
+            # Command Usage Notes
+            notes = (
+                "**Command Requirements:**\n"
+                "• (Admin) - Requires administrator permissions\n"
+                "• [optional] - Optional command parameters\n"
+                "\n"
+                "**Need Help?**\n"
+                "• Use `/help` for command list\n"
+                "• Required permission: Manage Server"
+            )
+            embed.add_field(
+                name="📝 Additional Information",
+                value=notes,
+                inline=False
+            )
+
+            if self.bot.user.avatar:
+                embed.set_thumbnail(url=self.bot.user.avatar.url)
+
             await interaction.response.send_message(embed=embed)
-            return
 
-        # Show general help with command categories
-        categories = {
-            "🎮 General": ["help", "ping", "uptime", "botinfo"],
-            "📊 Leveling": ["level", "leaderboard"],
-            "🔰 Verification": ["verify"],
-            "⚙️ Admin": ["set-xp-rate", "set-xp-cooldown", "set-level-role", "setautorole"],
-        }
-
-        embed = discord.Embed(
-            title="Bot Help",
-            description="Here are all available commands. Use `/help <command>` for detailed information about a specific command.",
-            color=discord.Color.blue()
-        )
-
-        for category, commands in categories.items():
-            valid_commands = []
-            for cmd_name in commands:
-                cmd = self.bot.tree.get_command(cmd_name)
-                if cmd:
-                    valid_commands.append(f"`/{cmd_name}`")
-            if valid_commands:
-                embed.add_field(
-                    name=category,
-                    value=" • ".join(valid_commands),
-                    inline=False
-                )
-
-        # Add bot info and support footer
-        embed.set_footer(text="Use /help <command> for more details about a specific command")
-
-        await interaction.response.send_message(embed=embed)
+        except Exception as e:
+            await self.ui_manager.send_embed(
+                interaction,
+                title="Error",
+                description=f"An error occurred while fetching help menu: {str(e)}",
+                command_type="User",
+                ephemeral=True
+            )
 
 async def setup(bot):
     await bot.add_cog(Info(bot))

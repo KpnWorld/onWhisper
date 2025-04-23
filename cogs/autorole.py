@@ -20,18 +20,23 @@ class AutoRole(commands.Cog):
     async def set_auto_role(self, interaction: discord.Interaction, role: discord.Role, enabled: bool = True):
         try:
             await self.db_manager.set_auto_role(interaction.guild.id, role.id, 1 if enabled else 0)
-            await self.ui_manager.send_embed(
+            
+            await self.ui_manager.send_response(
                 interaction,
-                title="Auto Role Set",
-                description=f"Auto role **{role.name}** has been {'enabled' if enabled else 'disabled'} for this server.",
+                title="⚙️ Auto Role System",
+                description="Auto role configuration updated",
+                fields=[
+                    {"name": "Role", "value": role.mention, "inline": True},
+                    {"name": "Status", "value": "Enabled" if enabled else "Disabled", "inline": True},
+                    {"name": "Effect", "value": "New members will automatically receive this role"}
+                ],
                 command_type="Administrator"
             )
         except Exception as e:
-            await self.ui_manager.send_embed(
-                interaction,
-                title="❌ Error",
-                description=f"An error occurred: {str(e)}",
-                command_type="Administrator"
+            await self.ui_manager.send_error(
+                interaction, 
+                "Auto Role Error",
+                str(e)
             )
 
     @app_commands.command(name="listautoroles", description="List all auto roles for the server")

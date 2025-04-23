@@ -43,35 +43,33 @@ class Owner(commands.Cog):
         """View contents of a database table"""
         try:
             rows = await self.db_manager.fetch_all(f"SELECT * FROM {table_name}")
+            
             if not rows:
-                return await self.ui_manager.send_embed(
+                await self.ui_manager.send_response(
                     interaction,
-                    title="Empty Table",
-                    description="That table is either empty or doesn't exist.",
+                    title="📄 Database Table",
+                    description="Table is empty or doesn't exist",
+                    fields=[{"name": "Table", "value": table_name}],
                     command_type="Owner",
                     ephemeral=True
                 )
+                return
 
-            fields = rows[0].keys()
-            content = ""
-            for row in rows:
-                content += "\n".join([f"**{k}:** {v}" for k, v in dict(row).items()]) + "\n\n"
-
-            pages = [content[i:i + 1900] for i in range(0, len(content), 1900)]
-            await self.ui_manager.send_paginated_embed(
+            content = "\n".join([f"Row {i+1}: {dict(row)}" for i, row in enumerate(rows)])
+            await self.ui_manager.send_response(
                 interaction,
-                pages,
-                title=f"📄 Table: `{table_name}`",
+                title="📄 Database Contents",
+                description=f"Contents of table: {table_name}",
+                fields=[{"name": "Data", "value": content}],
                 command_type="Owner",
                 ephemeral=True
             )
 
         except Exception as e:
-            await self.ui_manager.error_embed(
+            await self.ui_manager.send_error(
                 interaction,
-                title="Database Error",
-                description=f"Failed to read table: {str(e)}",
-                command_type="Owner"
+                "Database Error",
+                f"Failed to read table: {str(e)}"
             )
 
     # =========================

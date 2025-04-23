@@ -82,24 +82,25 @@ class Leveling(commands.Cog):
     # ⚙️ Admin Commands
     # =========================
 
-    @app_commands.command(name="set-xp-rate", description="Set how much XP users earn per message")
-    @app_commands.describe(rate="The amount of XP to award per message")
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command()
     async def set_xp_rate(self, interaction: discord.Interaction, rate: int):
         try:
-            self.xp_rate = max(1, min(rate, 100))  # Clamp between 1-100
-            await self.ui_manager.send_embed(
+            old_rate = self.xp_rate
+            self.xp_rate = max(1, min(rate, 100))
+
+            await self.ui_manager.send_config_update(
                 interaction,
-                title="XP Rate Updated",
-                description=f"XP per message is now set to **{self.xp_rate}**",
-                command_type="Administrator"
+                "XP System Configuration",
+                "XP rate has been updated",
+                f"XP Rate: {old_rate}",
+                f"XP Rate: {self.xp_rate}",
+                "This affects how much XP users earn per message"
             )
         except Exception as e:
-            await self.ui_manager.send_embed(
+            await self.ui_manager.send_error(
                 interaction,
-                title="Error",
-                description=f"Failed to update XP rate: {str(e)}",
-                command_type="Administrator"
+                "XP Config Error",
+                f"Failed to update XP rate: {str(e)}"
             )
 
     @app_commands.command(name="set-xp-cooldown", description="Set the cooldown between XP gains")
@@ -107,19 +108,22 @@ class Leveling(commands.Cog):
     @app_commands.checks.has_permissions(administrator=True)
     async def set_xp_cooldown(self, interaction: discord.Interaction, seconds: int):
         try:
-            self.xp_cooldown = max(1, min(seconds, 3600))  # Clamp between 1-3600
-            await self.ui_manager.send_embed(
+            old_cooldown = self.xp_cooldown
+            self.xp_cooldown = max(1, min(seconds, 3600))
+            
+            await self.ui_manager.send_config_update(
                 interaction,
-                title="XP Cooldown Updated",
-                description=f"Users can now gain XP every **{self.xp_cooldown}** seconds",
-                command_type="Administrator"
+                "XP System Configuration",
+                "Cooldown settings have been updated.",
+                f"Cooldown: {old_cooldown} seconds",
+                f"Cooldown: {self.xp_cooldown} seconds",
+                "This change affects how frequently users can gain XP from messages."
             )
         except Exception as e:
-            await self.ui_manager.send_embed(
+            await self.ui_manager.send_error(
                 interaction,
-                title="Error",
-                description=f"Failed to update cooldown: {str(e)}",
-                command_type="Administrator"
+                "XP Config Error",
+                f"Failed to update XP cooldown: {str(e)}"
             )
 
     @app_commands.command(name="set-level-role")

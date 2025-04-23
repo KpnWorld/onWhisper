@@ -87,27 +87,23 @@ class Reactions(commands.Cog):
             # Add the initial reaction
             await message.add_reaction(emoji)
 
-            await self.ui_manager.send_embed(
+            await self.ui_manager.send_response(
                 interaction,
-                title="Reaction Role Added",
-                description=f"Reaction {emoji} on [this message]({message.jump_url}) will now grant the {role.mention} role",
+                title="⚙️ Reaction Role Configured",
+                description="The reaction role has been set up successfully.",
+                fields=[
+                    {"name": "Message", "value": f"[Jump to Message]({message.jump_url})", "inline": True},
+                    {"name": "Emoji", "value": emoji, "inline": True},
+                    {"name": "Role", "value": role.mention, "inline": True},
+                    {"name": "Effect", "value": "Users who react with the specified emoji will receive this role.", "inline": False}
+                ],
                 command_type="Administrator"
             )
 
         except ValueError as e:
-            await self.ui_manager.error_embed(
-                interaction,
-                title="Invalid Input",
-                description=str(e),
-                command_type="Administrator"
-            )
+            await self.ui_manager.send_error(interaction, "Invalid Input", str(e))
         except Exception as e:
-            await self.ui_manager.error_embed(
-                interaction,
-                title="Error",
-                description=f"Failed to bind reaction role: {str(e)}",
-                command_type="Administrator"
-            )
+            await self.ui_manager.send_error(interaction, "Error", f"Failed to bind reaction role: {str(e)}")
 
     # =========================
     # 📝 Event Listeners
