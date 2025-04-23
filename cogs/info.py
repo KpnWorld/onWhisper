@@ -53,31 +53,54 @@ class Info(commands.Cog):
             latency = round(self.bot.latency * 1000)
             await self.ui_manager.send_response(
                 interaction,
-                title="🏓 Pong!",
-                description="Current Bot Status",
+                title="Ping Status",
+                description="Current bot network status",
+                command_type="ping",
                 fields=[
-                    {"name": "Latency", "value": f"{latency}ms", "inline": True}
-                ],
-                command_type="User"
+                    {"name": "Latency", "value": f"{latency}ms", "inline": True},
+                    {"name": "Status", "value": "Online", "inline": True}
+                ]
             )
         except Exception as e:
-            await self.ui_manager.send_error(
-                interaction,
-                "Ping Error",
-                f"Failed to get latency: {str(e)}"
-            )
+            await self.ui_manager.send_error(interaction, "Ping Check Failed", str(e))
 
     @app_commands.command(name="uptime", description="Check bot uptime")
     async def uptime(self, interaction: discord.Interaction):
         """Check bot uptime"""
-        uptime = datetime.utcnow() - datetime.fromtimestamp(self.bot.uptime)
-        uptime_str = str(timedelta(seconds=int(uptime.total_seconds())))
-        await self.ui_manager.send_embed(
-            interaction,
-            title="⏱️ Bot Uptime",
-            description=f"The bot has been online for `{uptime_str}`.",
-            command_type="User"
-        )
+        try:
+            uptime_delta = datetime.utcnow() - self.bot.start_time
+            days = uptime_delta.days
+            hours, remainder = divmod(uptime_delta.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            
+            uptime_parts = []
+            if days > 0:
+                uptime_parts.append(f"{days} days")
+            if hours > 0:
+                uptime_parts.append(f"{hours} hours")
+            if minutes > 0:
+                uptime_parts.append(f"{minutes} minutes")
+            if seconds > 0 or not uptime_parts:
+                uptime_parts.append(f"{seconds} seconds")
+                
+            uptime_str = ", ".join(uptime_parts)
+            
+            await self.ui_manager.send_response(
+                interaction,
+                title="Bot Uptime",
+                description="Current bot operation status",
+                command_type="uptime",
+                fields=[
+                    {"name": "Online Since", "value": f"<t:{int(self.bot.start_time.timestamp())}:F>", "inline": True},
+                    {"name": "Total Uptime", "value": uptime_str, "inline": True}
+                ]
+            )
+        except Exception as e:
+            await self.ui_manager.send_error(
+                interaction,
+                "Uptime Error",
+                str(e)
+            )
 
     @app_commands.command(name="botinfo", description="Get details about the bot")
     async def botinfo(self, interaction: discord.Interaction):
@@ -166,49 +189,61 @@ class Info(commands.Cog):
                 f"Failed to get server info: {str(e)}"
             )
 
-    @app_commands.command(name="userinfo", description="Display user information")
+    @app_commands.command(name="userinfo")
     async def userinfo(self, interaction: discord.Interaction, user: discord.User = None):
         """Display user information"""
-        user = user or interaction.user
-        embed = self.ui_manager.create_embed(
-            title=f"👤 {user.name}'s Information",
-            description=f"Here are the details for {user.name}:",
-            color=discord.Color.purple()
-        )
-        embed.add_field(name="User ID", value=user.id, inline=False)
-        embed.add_field(name="Joined Discord", value=user.created_at.strftime('%Y-%m-%d %H:%M:%S'), inline=False)
-        embed.add_field(name="Joined Server", value=user.joined_at.strftime('%Y-%m-%d %H:%M:%S') if hasattr(user, 'joined_at') else "N/A", inline=False)
-        embed.add_field(name="Status", value=str(user.status), inline=False)
+        try:
+            target = user or interaction.user
+            
+            user_info = {
+                "ID": target.id,
+                "Created": f"<t:{int(target.created_at.timestamp())}:F>",
+                "Joined": f"<t:{int(target.joined_at.timestamp())}:F>" if hasattr(target, 'joined_at') else "N/A",
+                "Status": str(target.status) if hasattr(target, 'status') else "Unknown"
+            }
 
-        await interaction.response.send_message(embed=embed)
+            await self.ui_manager.send_response(
+                interaction,
+                title=f"User Information: {target.name}",
+                description=f"Detailed information about {target.mention}",
+                command_type="user",
+                fields=[
+                    {"name": "Account Details", "value": user_info, "inline": False}
+                ],
+                thumbnail_url=target.display_avatar.url if target.display_avatar else None
+            )
+        except Exception as e:
+            await self.ui_manager.send_error(
+                interaction,
+                "User Info Error",
+                str(e)
+            )
 
     @app_commands.command()
     async def roleinfo(self, interaction: discord.Interaction, role: discord.Role):
         try:
-            await interaction.response.defer()  # Defer the response first
+            await interaction.response.defer()
             
-            embed = self.ui_manager.create_embed(
-                title=f"🔹 Role Information: {role.name}",
-                description=f"Details for the role `{role.name}`:",
-                color=role.color if role.color.value else discord.Color.blurple()
-            )
-            
-            # Add fields
-            fields = [
-                {"name": "Role ID", "value": str(role.id), "inline": True},
-                {"name": "Mentionable", "value": str(role.mentionable), "inline": True},
-                {"name": "Hoisted", "value": str(role.hoist), "inline": True},
-                {"name": "Position", "value": str(role.position), "inline": True},
-                {"name": "Color", "value": str(role.color), "inline": True},
-                {"name": "Created At", "value": role.created_at.strftime('%Y-%m-%d %H:%M:%S'), "inline": True},
-                {"name": "Member Count", "value": str(len(role.members)), "inline": True}
-            ]
-            
-            for field in fields:
-                embed.add_field(**field)
+            role_info = {
+                "ID": role.id,
+                "Created": f"<t:{int(role.created_at.timestamp())}:F>",
+                "Color": str(role.color),
+                "Position": role.position,
+                "Members": len(role.members),
+                "Mentionable": "Yes" if role.mentionable else "No",
+                "Hoisted": "Yes" if role.hoist else "No"
+            }
 
-            await interaction.followup.send(embed=embed)
-            
+            await self.ui_manager.send_response(
+                interaction,
+                title=f"Role Information: {role.name}",
+                description=f"Details about role {role.mention}",
+                command_type="roles",
+                fields=[
+                    {"name": "Role Details", "value": role_info, "inline": False}
+                ],
+                thumbnail_url=role.guild.icon.url if role.guild.icon else None
+            )
         except Exception as e:
             await self.ui_manager.send_error(
                 interaction,

@@ -50,6 +50,7 @@ class Bot(commands.Bot):
         self.ui_manager = UIManager(self)
         self._rate_limit_retries = 0
         self._session_valid = True
+        self.start_time = datetime.utcnow()  # Add this line to track start time
 
     async def setup_hook(self) -> None:
         await self.db_manager.initialize()

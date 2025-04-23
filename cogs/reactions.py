@@ -106,7 +106,6 @@ class Reactions(commands.Cog):
             await self.ui_manager.send_error(interaction, "Error", f"Failed to bind reaction role: {str(e)}")
 
     @app_commands.command(name="bind_reaction_role")
-    @app_commands.checks.has_permissions(manage_roles=True)
     async def bind_reaction_role(self, interaction: discord.Interaction, message_id: str, emoji: str, role: discord.Role):
         try:
             message_id = int(message_id)
@@ -115,22 +114,32 @@ class Reactions(commands.Cog):
             await self.db_manager.add_reaction_role(message_id, emoji, role.id)
             await message.add_reaction(emoji)
             
+            config_info = {
+                "Channel": message.channel.name,
+                "Message ID": message_id,
+                "Emoji": emoji,
+                "Role": role.mention
+            }
+            
             await self.ui_manager.send_response(
                 interaction,
-                title="🔗 Reaction Role Bound",
-                description="A new reaction role has been configured",
-                command_type="Administrator",
+                title="Reaction Role Configuration",
+                description="New reaction role has been configured",
+                command_type="reaction",
                 fields=[
-                    {"name": "Message", "value": f"[Jump to Message]({message.jump_url})", "inline": True},
-                    {"name": "Emoji", "value": emoji, "inline": True},
-                    {"name": "Role", "value": role.mention, "inline": True},
-                    {"name": "Setup By", "value": interaction.user.mention, "inline": False}
+                    {"name": "📋 Configuration", "value": config_info, "inline": False},
+                    {"name": "🔗 Message Link", "value": f"[Jump to Message]({message.jump_url})", "inline": False},
+                    {"name": "ℹ️ Instructions", "value": "Users who react with the specified emoji will receive this role", "inline": False}
                 ]
             )
         except ValueError as e:
             await self.ui_manager.send_error(interaction, "Invalid Input", str(e))
+        except discord.NotFound:
+            await self.ui_manager.send_error(interaction, "Message Not Found", "The specified message could not be found")
+        except discord.Forbidden:
+            await self.ui_manager.send_error(interaction, "Permission Error", "Missing permissions to add reaction or manage roles")
         except Exception as e:
-            await self.ui_manager.send_error(interaction, "Reaction Role Error", str(e))
+            await self.ui_manager.send_error(interaction, "Setup Error", str(e))
 
     # =========================
     # 📝 Event Listeners

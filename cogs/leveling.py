@@ -69,6 +69,13 @@ class Leveling(commands.Cog):
             new_level = self.calculate_level(xp)
             await self.db_manager.add_user_leveling(user_id, guild_id, new_level, xp)
 
+            # Update last message timestamp
+            timestamp = int(datetime.utcnow().timestamp())
+            await self.db_manager.execute(
+                "UPDATE leveling SET last_message = ? WHERE user_id = ? AND guild_id = ?",
+                (timestamp, user_id, guild_id)
+            )
+
             # Handle level up
             if new_level > level:
                 await self.check_role_assignment(message.author, new_level)
@@ -151,8 +158,7 @@ class Leveling(commands.Cog):
     # 👤 User Commands
     # =========================
 
-    @app_commands.command(name="level", description="Check your or another user's level")
-    @app_commands.describe(user="The user to check (optional)")
+    @app_commands.command(name="level")
     async def level(self, interaction: discord.Interaction, user: discord.User = None):
         try:
             target = user or interaction.user
@@ -161,37 +167,42 @@ class Leveling(commands.Cog):
             if not result:
                 await self.ui_manager.send_response(
                     interaction,
-                    title="📊 Level Status",
-                    description=f"{target.mention} hasn't earned any XP yet!",
-                    command_type="User",
-                    ephemeral=True
+                    title="Level Status",
+                    description=f"Leveling information for {target.mention}",
+                    command_type="leveling",
+                    fields=[{"name": "Status", "value": "No experience earned yet"}],
+                    thumbnail_url=target.display_avatar.url
                 )
                 return
 
             level, xp = result
-            next_level_xp = self.calculate_xp_for_level(level + 1)
+            next_level = level + 1
+            next_level_xp = self.calculate_xp_for_level(next_level)
             progress = (xp / next_level_xp) * 100
+
+            level_info = {
+                "Current Level": level,
+                "Total XP": f"{xp:,}",
+                "Required XP": f"{next_level_xp:,}",
+                "Progress": f"{progress:.1f}%"
+            }
+
+            roles_info = self.get_level_role_progress(level)
 
             await self.ui_manager.send_response(
                 interaction,
-                title=f"📈 Level Statistics",
-                description=f"Level information for {target.mention}",
-                command_type="User",
+                title="Level Statistics",
+                description=f"Level details for {target.mention}",
+                command_type="leveling",
                 fields=[
-                    {"name": "Current Level", "value": f"`{level}`", "inline": True},
-                    {"name": "Total XP", "value": f"`{xp:,}`", "inline": True},
-                    {"name": "Rank", "value": f"`#{await self.get_user_rank(target.id, interaction.guild.id)}`", "inline": True},
-                    {"name": "Progress", "value": f"`{progress:.1f}%` to level {level + 1}", "inline": False},
-                    {"name": "Next Level", "value": f"`{xp:,}`/`{next_level_xp:,}` XP needed", "inline": False}
+                    {"name": "📊 Level Info", "value": level_info, "inline": False},
+                    {"name": "🏆 Role Progress", "value": roles_info, "inline": False},
+                    {"name": "Next Level", "value": f"Level {next_level} - {next_level_xp - xp:,} XP remaining", "inline": False}
                 ],
-                thumbnail_url=target.display_avatar.url if target.display_avatar else None
+                thumbnail_url=target.display_avatar.url
             )
         except Exception as e:
-            await self.ui_manager.send_error(
-                interaction,
-                "Level Check Error",
-                str(e)
-            )
+            await self.ui_manager.send_error(interaction, "Level Check Failed", str(e))
 
     def get_level_role_progress(self, current_level: int) -> str:
         """Get formatted string of level roles and their unlock status"""

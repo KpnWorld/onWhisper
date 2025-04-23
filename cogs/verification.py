@@ -145,43 +145,47 @@ class Verification(commands.Cog):
     # =========================
 
     @app_commands.command(name="verify")
-    async def verify(self, interaction: discord.Interaction, method: str = None):
+    async def verify(self, interaction: discord.Interaction):
         try:
             settings = await self.db_manager.get_verification_settings(interaction.guild.id)
             
             if not settings:
                 await self.ui_manager.send_response(
                     interaction,
-                    title="⚠️ Verification Not Setup",
-                    description="Verification has not been configured for this server.",
-                    command_type="User",
+                    title="Verification Status",
+                    description="Server verification system status",
+                    command_type="verification",
+                    fields=[{"name": "Status", "value": "Verification not configured"}],
                     ephemeral=True
                 )
                 return
 
-            verify_method = method or settings['verification_method']
-            
+            verified_time = int(datetime.utcnow().timestamp())
+            expiry_time = verified_time + (settings['expiry_days'] * 86400)
+
+            verify_info = {
+                "Method": settings['verification_method'].title(),
+                "Channel": f"<#{settings['channel_id']}>",
+                "Role": f"<@&{settings['role_id']}>",
+                "Expires": self.ui_manager.format_timestamp(expiry_time, "R")
+            }
+
+            instructions = self.get_verification_instructions(settings['verification_method'])
+
             await self.ui_manager.send_response(
                 interaction,
-                title="🔐 Verification Process",
-                description="Starting verification process...",
-                command_type="User",
+                title="Verification Process",
+                description="Follow these steps to verify",
+                command_type="verification",
                 fields=[
-                    {"name": "Method", "value": verify_method.title(), "inline": True},
-                    {"name": "Status", "value": "⏳ Pending", "inline": True},
-                    {"name": "Instructions", "value": self.get_verification_instructions(verify_method), "inline": False}
+                    {"name": "📋 Verification Details", "value": verify_info, "inline": False},
+                    {"name": "📝 Instructions", "value": instructions, "inline": False}
                 ],
                 ephemeral=True
             )
-            
-            # Continue with verification process...
-            
+
         except Exception as e:
-            await self.ui_manager.send_error(
-                interaction,
-                "Verification Error",
-                str(e)
-            )
+            await self.ui_manager.send_error(interaction, "Verification Error", str(e))
 
     def get_verification_instructions(self, method: str) -> str:
         instructions = {

@@ -47,35 +47,33 @@ class Owner(commands.Cog):
             if not rows:
                 await self.ui_manager.send_response(
                     interaction,
-                    title="📊 Database Table",
-                    description=f"No data found in table: `{table_name}`",
-                    command_type="Owner",
+                    title="Database View",
+                    description=f"Table contents for: `{table_name}`",
+                    command_type="database",
                     fields=[
-                        {"name": "Table Name", "value": f"`{table_name}`", "inline": True},
-                        {"name": "Status", "value": "❌ Empty", "inline": True}
+                        {"name": "Status", "value": "Empty Table", "inline": True},
+                        {"name": "Table Name", "value": table_name, "inline": True}
                     ],
                     ephemeral=True
                 )
                 return
 
-            # Format rows in a more readable way
-            formatted_rows = []
-            for i, row in enumerate(rows[:10]):  # Limit to first 10 rows
-                row_data = dict(row)
-                formatted_row = "\n".join([f"{k}: `{v}`" for k, v in row_data.items()])
-                formatted_rows.append(f"**Row {i+1}:**\n{formatted_row}")
-
-            total_rows = len(rows)
-            shown_rows = min(10, total_rows)
+            formatted_data = {}
+            for i, row in enumerate(rows[:10], 1):
+                formatted_data[f"Row {i}"] = dict(row)
 
             await self.ui_manager.send_response(
                 interaction,
-                title="📊 Database Contents",
-                description=f"Showing {shown_rows} of {total_rows} rows from table: `{table_name}`",
-                command_type="Owner",
+                title="Database Contents",
+                description=f"Showing data from table: `{table_name}`",
+                command_type="database",
                 fields=[
-                    {"name": "Table Info", "value": f"Total Rows: `{total_rows}`", "inline": False},
-                    {"name": "Data", "value": "\n\n".join(formatted_rows), "inline": False}
+                    {"name": "Overview", "value": {
+                        "Total Rows": len(rows),
+                        "Shown Rows": min(10, len(rows)),
+                        "Table": table_name
+                    }, "inline": False},
+                    {"name": "Data", "value": formatted_data, "inline": False}
                 ],
                 ephemeral=True
             )
@@ -83,9 +81,9 @@ class Owner(commands.Cog):
         except Exception as e:
             await self.ui_manager.send_error(
                 interaction,
-                "Database Error",
-                f"Failed to read table: {str(e)}",
-                command_type="Owner"
+                "Database View Failed",
+                str(e),
+                command_type="database"
             )
 
     # =========================
@@ -97,51 +95,56 @@ class Owner(commands.Cog):
     async def user_stats(self, interaction: discord.Interaction, user: discord.User):
         """View comprehensive stats for a user"""
         try:
-            # Get leveling stats
-            level_stats = await self.db_manager.fetch_one(
-                """
-                SELECT xp, level, last_message, messages_sent 
-                FROM leveling 
-                WHERE user_id = ? AND guild_id = ?
-                """,
+            stats = await self.db_manager.fetch_one(
+                """SELECT * FROM leveling WHERE user_id = ? AND guild_id = ?""",
                 (user.id, interaction.guild_id)
             )
-
-            if not level_stats:
+            
+            if not stats:
                 await self.ui_manager.send_response(
                     interaction,
-                    title="👤 User Statistics",
-                    description=f"No data found for {user.mention}",
-                    command_type="Owner",
+                    title="User Statistics",
+                    description=f"Statistics for {user.mention}",
+                    command_type="stats",
                     fields=[
-                        {"name": "User ID", "value": f"`{user.id}`", "inline": True},
-                        {"name": "Status", "value": "❌ No Data", "inline": True}
+                        {"name": "Status", "value": "No Data Found", "inline": True},
+                        {"name": "User ID", "value": user.id, "inline": True}
                     ],
-                    ephemeral=True
+                    thumbnail_url=user.display_avatar.url if user.display_avatar else None
                 )
                 return
 
+            user_data = {
+                "Level": stats['level'],
+                "XP": f"{stats['xp']:,}",
+                "Messages": f"{stats['messages_sent']:,}",
+                "Last Active": f"<t:{int(stats['last_message'])}:R>" if stats['last_message'] else "Never"
+            }
+
+            account_info = {
+                "Created": f"<t:{int(user.created_at.timestamp())}:F>",
+                "Joined": f"<t:{int(user.joined_at.timestamp())}:F>",
+                "ID": user.id
+            }
+
             await self.ui_manager.send_response(
                 interaction,
-                title=f"👤 Stats for {user.name}",
-                description="Comprehensive user statistics and information",
-                command_type="Owner",
+                title=f"User Statistics: {user.name}",
+                description="Detailed user information and statistics",
+                command_type="stats",
                 fields=[
-                    {"name": "Level Progress", "value": f"Level: `{level_stats['level']}` | XP: `{level_stats['xp']:,}`", "inline": False},
-                    {"name": "Activity", "value": f"Messages: `{level_stats['messages_sent']:,}`", "inline": True},
-                    {"name": "Last Active", "value": f"<t:{int(level_stats['last_message'])}:R>" if level_stats['last_message'] else "Never", "inline": True},
-                    {"name": "Account Info", "value": f"Created: <t:{int(user.created_at.timestamp())}:D>\nJoined: <t:{int(user.joined_at.timestamp())}:D>", "inline": False}
+                    {"name": "📊 Activity Stats", "value": user_data, "inline": False},
+                    {"name": "👤 Account Info", "value": account_info, "inline": False}
                 ],
-                thumbnail_url=user.display_avatar.url if user.display_avatar else None,
-                ephemeral=True
+                thumbnail_url=user.display_avatar.url if user.display_avatar else None
             )
 
         except Exception as e:
             await self.ui_manager.send_error(
                 interaction,
-                "Stats Error",
-                f"Failed to fetch user statistics: {str(e)}",
-                command_type="Owner"
+                "Stats Lookup Failed",
+                str(e),
+                command_type="stats"
             )
 
 async def setup(bot: commands.Bot):

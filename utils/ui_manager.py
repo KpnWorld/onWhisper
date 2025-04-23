@@ -14,9 +14,22 @@ class UIManager:
             return value
         return f"```{value}```"
 
+    def format_timestamp(self, timestamp, format_type: str = "F") -> str:
+        """Format timestamp using Discord's timestamp formatting
+        R = Relative (e.g. "2 hours ago")
+        F = Full (e.g. "Friday, October 13, 2023 9:32 PM")
+        D = Date (e.g. "October 13, 2023")
+        T = Time (e.g. "9:32:45 PM")
+        """
+        if isinstance(timestamp, datetime):
+            timestamp = int(timestamp.timestamp())
+        return f"<t:{timestamp}:{format_type}>"
+
     def format_value(self, value: Any) -> str:
-        """Format a value for embed display"""
-        if isinstance(value, (int, float)):
+        """Format a value for embed display with proper code blocks"""
+        if isinstance(value, datetime):
+            return self.format_timestamp(value)
+        elif isinstance(value, (int, float)):
             return f"`{value:,}`"
         elif isinstance(value, bool):
             return "✅" if value else "❌"
@@ -24,8 +37,14 @@ class UIManager:
             return value.mention
         elif isinstance(value, discord.Role):
             return value.mention
+        elif isinstance(value, (list, tuple)):
+            formatted = '\n'.join(map(str, value))
+            return f"```{formatted}```"
+        elif isinstance(value, dict):
+            formatted = '\n'.join(f"{k}: {self.format_value(v)}" for k, v in value.items())
+            return f"```{formatted}```"
         else:
-            return str(value)
+            return f"`{str(value)}`"
 
     # ------------------- EMBED BUILDING -------------------
 
@@ -73,6 +92,33 @@ class UIManager:
 
         return embed
 
+    def get_command_emoji(self, command_type: str) -> str:
+        """Get standard emoji for command type"""
+        emojis = {
+            "config": "⚙️",
+            "leveling": "📊",
+            "roles": "👥",
+            "verification": "✅",
+            "info": "ℹ️",
+            "admin": "🛡️",
+            "error": "❌",
+            "warning": "⚠️",
+            "success": "✅",
+            "bot": "🤖",
+            "user": "👤",
+            "stats": "📈",
+            "help": "📚",
+            "system": "🖥️",
+            "reaction": "🎯",
+            "settings": "⚙️",
+            "ping": "🏓",
+            "uptime": "⏱️",
+            "leaderboard": "🏆",
+            "server": "🌐",
+            "database": "🗄️"
+        }
+        return emojis.get(command_type.lower(), "📄")
+
     def create_standard_embed(self,
                             title: str,
                             description: str,
@@ -82,9 +128,9 @@ class UIManager:
                             footer_text: str = None,
                             timestamp: bool = True) -> discord.Embed:
         """Create a standardized embed for command responses"""
-        # Add emoji to title if not present
-        if not any(c in title for c in ['📊', '⚙️', '✅', '❌', '⚠️', '🔧']):
-            title = f"📄 {title}"
+        # Add emoji if not present
+        if not any(c in title for c in ['📊', '⚙️', '✅', '❌', '⚠️', '🔧', '🤖', '👤', '🎮', '🔨']):
+            title = f"{self.get_command_emoji(command_type)} {title}"
 
         embed = discord.Embed(
             title=title,
@@ -96,19 +142,26 @@ class UIManager:
         if fields:
             for field in fields:
                 name = field.get('name', '')
-                value = self.format_value(field.get('value', ''))
+                value = field.get('value', '')
                 inline = field.get('inline', True)
+                
+                # Format field value with code blocks and timestamps if needed
+                if isinstance(value, (datetime, dict, list, tuple)):
+                    value = self.format_value(value)
+                elif not any(marker in str(value) for marker in ['```', '`', '<@', '<#', '<t:']):
+                    value = f"`{value}`"
+                
                 if name and value:
                     embed.add_field(name=name, value=value, inline=inline)
 
         if thumbnail_url:
             embed.set_thumbnail(url=thumbnail_url)
 
+        footer = f"{command_type} Command • {self.bot.user.name}"
         if footer_text:
-            embed.set_footer(text=footer_text)
-        else:
-            embed.set_footer(text=f"{command_type} Command • {self.bot.user.name}")
+            footer = f"{footer} • {footer_text}"
 
+        embed.set_footer(text=footer)
         return embed
 
     def get_command_color(self, command_type: str) -> discord.Color:
