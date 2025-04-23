@@ -30,7 +30,7 @@ class UIManager:
         if isinstance(value, datetime):
             return self.format_timestamp(value)
         elif isinstance(value, (int, float)):
-            return f"`{value:,}`"
+            return f"```\n{value:,}\n```"
         elif isinstance(value, bool):
             return "✅" if value else "❌"
         elif isinstance(value, (discord.Member, discord.User)):
@@ -39,12 +39,16 @@ class UIManager:
             return value.mention
         elif isinstance(value, (list, tuple)):
             formatted = '\n'.join(map(str, value))
-            return f"```{formatted}```"
+            return f"```\n{formatted}\n```"
         elif isinstance(value, dict):
-            formatted = '\n'.join(f"{k}: {self.format_value(v)}" for k, v in value.items())
-            return f"```{formatted}```"
+            formatted = '\n'.join(f"{k}: {v}" for k, v in value.items())
+            return f"```\n{formatted}\n```"
+        elif isinstance(value, str):
+            if any(marker in value for marker in ['<@', '<#', '<t:', 'http']):
+                return value  # Don't wrap mentions, channels, timestamps or URLs
+            return f"```\n{value}\n```"
         else:
-            return f"`{str(value)}`"
+            return f"```\n{str(value)}\n```"
 
     # ------------------- EMBED BUILDING -------------------
 

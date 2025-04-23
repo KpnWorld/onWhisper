@@ -195,23 +195,31 @@ class Info(commands.Cog):
         try:
             target = user or interaction.user
             
-            user_info = {
-                "ID": target.id,
-                "Created": f"<t:{int(target.created_at.timestamp())}:F>",
-                "Joined": f"<t:{int(target.joined_at.timestamp())}:F>" if hasattr(target, 'joined_at') else "N/A",
-                "Status": str(target.status) if hasattr(target, 'status') else "Unknown"
+            # Format account information
+            account_info = {
+                "📅 Account Created": self.ui_manager.format_timestamp(target.created_at, "F"),
+                "📆 Server Joined": self.ui_manager.format_timestamp(target.joined_at, "F") if hasattr(target, 'joined_at') else "Not Found",
+                "🆔 User ID": target.id,
+                "🎭 Status": str(target.status).title() if hasattr(target, 'status') else "Unknown"
             }
+
+            # Get user roles if member
+            roles = []
+            if isinstance(target, discord.Member):
+                roles = [role.mention for role in reversed(target.roles[1:])]
 
             await self.ui_manager.send_response(
                 interaction,
-                title=f"User Information: {target.name}",
-                description=f"Detailed information about {target.mention}",
+                title=f"User Information",
+                description=f"Viewing details for {target.mention}",
                 command_type="user",
                 fields=[
-                    {"name": "Account Details", "value": user_info, "inline": False}
+                    {"name": "📋 Account Information", "value": account_info, "inline": False},
+                    {"name": "🏷️ Roles", "value": " ".join(roles) or "No Roles", "inline": False}
                 ],
-                thumbnail_url=target.display_avatar.url if target.display_avatar else None
+                thumbnail_url=target.display_avatar.url
             )
+
         except Exception as e:
             await self.ui_manager.send_error(
                 interaction,
@@ -262,26 +270,27 @@ class Info(commands.Cog):
                 await self.ui_manager.send_embed(
                     interaction,
                     title="No XP Data Yet",
-                    description="There are no users with XP data yet. Chat more to get on the leaderboard!",
+                    description="```\nThere are no users with XP data yet. Chat more to get on the leaderboard!\n```",
                     command_type="User"
                 )
                 return
 
-            leaderboard = "\n".join(
-                [f"{rank + 1}. <@{row['user_id']}> - Level: {row['level']} | XP: {row['xp']}" for rank, row in enumerate(leaderboard_data)]
+            leaderboard_text = "\n".join(
+                [f"{rank + 1}. {row['user_id']} - Level {row['level']} | {row['xp']:,} XP" 
+                 for rank, row in enumerate(leaderboard_data)]
             )
 
             await self.ui_manager.send_embed(
                 interaction,
                 title="🏆 Server Leaderboard",
-                description=f"**Top 10 Users by XP:**\n{leaderboard}",
+                description=f"**Top 10 Users by XP:**\n```\n{leaderboard_text}\n```",
                 command_type="User"
             )
         except Exception as e:
             await self.ui_manager.send_embed(
                 interaction,
                 title="❌ Error",
-                description=f"An error occurred: {e}",
+                description=f"```\nAn error occurred: {e}\n```",
                 command_type="User"
             )
 
@@ -293,85 +302,76 @@ class Info(commands.Cog):
     async def help(self, interaction: discord.Interaction):
         """Shows all available commands and their descriptions"""
         try:
-            # Main help embed
             embed = discord.Embed(
                 title="📚 Bot Help Menu",
-                description=(
-                    "A versatile Discord bot with leveling, verification, and role management features.\n"
-                    "All commands use `/` slash command format."
-                ),
+                description="A versatile Discord bot with leveling, verification, and role management features.\nAll commands use `/` slash command format.",
                 color=discord.Color.blue()
             )
 
-            # Info & Utility Commands
             info_commands = (
-                "`/help` • Show this help menu\n"
-                "`/ping` • Check bot's latency\n"
-                "`/uptime` • Check bot's uptime\n"
-                "`/botinfo` • View bot information\n"
-                "`/serverinfo` • View server details (Admin)\n"
-                "`/userinfo [user]` • View user details\n"
-                "`/roleinfo [role]` • View role details"
+                "help - Show this help menu\n"
+                "ping - Check bot's latency\n"
+                "uptime - Check bot's uptime\n"
+                "botinfo - View bot information\n"
+                "serverinfo - View server details (Admin)\n"
+                "userinfo [user] - View user details\n"
+                "roleinfo [role] - View role details"
             )
             embed.add_field(
                 name="ℹ️ Information",
-                value=info_commands,
+                value=f"```{info_commands}```",
                 inline=False
             )
 
-            # Leveling System Commands
             leveling_commands = (
-                "`/level [user]` • View level progress\n"
-                "`/leaderboard` • View XP rankings\n"
-                "`/set-xp-rate` • Set XP per message (Admin)\n"
-                "`/set-xp-cooldown` • Set XP cooldown (Admin)\n"
-                "`/set-level-role` • Set level role rewards (Admin)"
+                "level [user] - View level progress\n"
+                "leaderboard - View XP rankings\n"
+                "set-xp-rate - Set XP per message (Admin)\n"
+                "set-xp-cooldown - Set XP cooldown (Admin)\n"
+                "set-level-role - Set level role rewards (Admin)"
             )
             embed.add_field(
                 name="📊 Leveling System",
-                value=leveling_commands,
+                value=f"```{leveling_commands}```",
                 inline=False
             )
 
-            # Role Management Commands
             role_commands = (
-                "`/setautorole` • Set auto role (Admin)\n"
-                "`/listautoroles` • List auto roles (Admin)\n"
-                "`/removeautorole` • Remove auto role (Admin)\n"
-                "`/autorole` • View auto role status\n"
-                "`/bind_reaction_role` • Create reaction role (Admin)\n"
-                "`/reaction_stats` • View reaction statistics"
+                "setautorole - Set auto role (Admin)\n"
+                "listautoroles - List auto roles (Admin)\n"
+                "removeautorole - Remove auto role (Admin)\n"
+                "autorole - View auto role status\n"
+                "bind_reaction_role - Create reaction role (Admin)\n"
+                "reaction_stats - View reaction statistics"
             )
             embed.add_field(
                 name="👥 Role Management",
-                value=role_commands,
+                value=f"```{role_commands}```",
                 inline=False
             )
 
-            # Verification System Commands
             verify_commands = (
-                "`/set-verification` • Configure verification (Admin)\n"
-                "`/verify [method]` • Start verification process"
+                "set-verification - Configure verification (Admin)\n"
+                "verify [method] - Start verification process"
             )
             embed.add_field(
                 name="✅ Verification System",
-                value=verify_commands,
+                value=f"```{verify_commands}```",
                 inline=False
             )
 
-            # Command Usage Notes
             notes = (
-                "**Command Requirements:**\n"
+                "Command Requirements:\n"
                 "• (Admin) - Requires administrator permissions\n"
                 "• [optional] - Optional command parameters\n"
                 "\n"
-                "**Need Help?**\n"
-                "• Use `/help` for command list\n"
+                "Need Help?\n"
+                "• Use /help for command list\n"
                 "• Required permission: Manage Server"
             )
             embed.add_field(
                 name="📝 Additional Information",
-                value=notes,
+                value=f"```{notes}```",
                 inline=False
             )
 
@@ -384,7 +384,7 @@ class Info(commands.Cog):
             await self.ui_manager.send_embed(
                 interaction,
                 title="Error",
-                description=f"An error occurred while fetching help menu: {str(e)}",
+                description=f"```\nAn error occurred while fetching help menu: {str(e)}\n```",
                 command_type="User",
                 ephemeral=True
             )
