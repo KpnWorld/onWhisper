@@ -1,146 +1,234 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
+from typing import Optional, List
 from utils.db_manager import DBManager
-from utils.ui_manager import UIManager
 
 class AutoRole(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_manager = DBManager()
-        self.ui_manager = UIManager(bot)
 
-    # =========================
-    # 🔧 Admin Commands
-    # =========================
-
-    @app_commands.command(name="setautorole", description="Set an auto role for the server")
-    @app_commands.checks.has_permissions(administrator=True)
-    @app_commands.describe(role="The role to automatically assign", enabled="Whether the auto role should be enabled")
-    async def set_auto_role(self, interaction: discord.Interaction, role: discord.Role, enabled: bool = True):
+    @commands.Cog.listener()
+    async def on_member_join(self, member):
+        """Automatically assign roles to new members"""
+        if member.bot:
+            return
+            
         try:
-            await self.db_manager.set_auto_role(interaction.guild.id, role.id, 1 if enabled else 0)
+            auto_role = await self.db_manager.get_auto_role(member.guild.id)
+            if not auto_role or not auto_role[1]:  # If no role or disabled
+                return
+                
+            role_id = auto_role[0]
+            role = member.guild.get_role(role_id)
             
-            config = {
-                "Role": role.name,
-                "Status": "Enabled" if enabled else "Disabled",
-                "Members": len(interaction.guild.members),
-                "Role ID": role.id
-            }
-            
-            await self.ui_manager.send_response(
-                interaction,
-                title="Auto Role Configuration",
-                description="Auto role settings have been updated",
-                command_type="settings",
-                fields=[
-                    {"name": "Settings", "value": config, "inline": False},
-                    {"name": "Role", "value": role.mention, "inline": True},
-                    {"name": "Status", "value": "✅ Active" if enabled else "❌ Inactive", "inline": True}
-                ]
-            )
-        except Exception as e:
-            await self.ui_manager.send_error(
-                interaction,
-                "Auto Role Setup Failed",
-                str(e),
-                command_type="settings"
-            )
-
-    @app_commands.command(name="listautoroles", description="List all auto roles for the server")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def list_auto_roles(self, interaction: discord.Interaction):
-        try:
-            roles = await self.db_manager.get_auto_role(interaction.guild.id)
-            
-            if not roles:
-                await self.ui_manager.send_response(
-                    interaction,
-                    title="Auto Roles List",
-                    description="Server auto role configuration",
-                    command_type="roles",
-                    fields=[{"name": "Status", "value": "No auto roles configured"}]
+            if role:
+                await member.add_roles(role, reason="Auto Role")
+                
+                # Log the action
+                await self.db_manager.log_event(
+                    member.guild.id,
+                    member.id,
+                    "autorole",
+                    f"Auto role {role.name} assigned to {member}"
                 )
+        except Exception as e:
+            print(f"Error in auto role assignment: {e}")
+
+    @commands.slash_command(name="setautorole", description="Set the automatic role for new members")
+    @commands.has_permissions(manage_roles=True)
+    async def setautorole(self, interaction: discord.Interaction, role: discord.Role):
+        """Set the automatic role for new members"""
+        try:
+            # Validate bot's role hierarchy
+            if role >= interaction.guild.me.top_role:
+                embed = self.bot.create_embed(
+                    "Permission Error",
+                    "I cannot assign roles that are higher than or equal to my highest role!",
+                    command_type="Administrative"
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
-            role_data = {}
-            for role_id, enabled in roles:
-                role = interaction.guild.get_role(role_id)
-                if role:
-                    role_data[role.name] = "Enabled" if enabled else "Disabled"
-
-            await self.ui_manager.send_response(
-                interaction,
-                title="Auto Roles Configuration",
-                description="Current auto role settings",
-                command_type="roles",
-                fields=[{"name": "Role Settings", "value": role_data}]
+            await self.db_manager.set_auto_role(interaction.guild.id, role.id, True)
+            
+            embed = self.bot.create_embed(
+                "Auto Role Set",
+                f"New members will now automatically receive the {role.mention} role.",
+                command_type="Administrative"
             )
+            await interaction.response.send_message(embed=embed)
+            
         except Exception as e:
-            await self.ui_manager.send_error(
-                interaction,
-                "Auto Role List Failed",
+            error_embed = self.bot.create_embed(
+                "Error",
                 str(e),
-                command_type="roles"
+                command_type="Administrative"
             )
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @app_commands.command(name="removeautorole", description="Remove an auto role from the server")
-    @app_commands.checks.has_permissions(administrator=True)
-    @app_commands.describe(role="The role to remove from auto roles")
-    async def remove_auto_role(self, interaction: discord.Interaction, role: discord.Role):
+    @commands.slash_command(name="removeautorole", description="Disable the automatic role assignment")
+    @commands.has_permissions(manage_roles=True)
+    async def removeautorole(self, interaction: discord.Interaction):
+        """Disable the automatic role assignment"""
         try:
-            await self.db_manager.remove_auto_role(interaction.guild.id, role.id)
-            await self.ui_manager.send_response(
-                interaction,
-                title="🗑️ Auto Role Removed",
-                description=f"The auto role has been removed successfully.",
-                command_type="Administrator",
-                fields=[
-                    {"name": "Removed Role", "value": role.mention, "inline": True},
-                    {"name": "Action By", "value": interaction.user.mention, "inline": True}
-                ]
+            await self.db_manager.remove_auto_role(interaction.guild.id)
+            
+            embed = self.bot.create_embed(
+                "Auto Role Disabled",
+                "New members will no longer receive an automatic role.",
+                command_type="Administrative"
             )
+            await interaction.response.send_message(embed=embed)
+            
         except Exception as e:
-            await self.ui_manager.send_error(
-                interaction,
-                "Auto Role Removal Error",
-                str(e)
+            error_embed = self.bot.create_embed(
+                "Error",
+                str(e),
+                command_type="Administrative"
             )
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    # =========================
-    # 👤 User Commands
-    # =========================
-
-    @app_commands.command(name="autorole", description="Check the auto role status")
-    async def autorole(self, interaction: discord.Interaction):
+    @commands.slash_command(name="bind_reaction_role", description="Bind a role to a reaction on a message")
+    @commands.has_permissions(manage_roles=True)
+    async def bind_reaction_role(self, interaction: discord.Interaction, 
+                               message_id: str, emoji: str, role: discord.Role):
+        """Bind a role to a reaction on a message"""
         try:
-            auto_roles = await self.db_manager.get_auto_role(interaction.guild.id)
-            if not auto_roles:
-                await self.ui_manager.send_embed(
-                    interaction,
-                    title="No Auto Roles",
-                    description="There are no auto roles set for this server.",
-                    command_type="User"
+            # Convert message ID to int
+            try:
+                message_id = int(message_id)
+            except ValueError:
+                embed = self.bot.create_embed(
+                    "Invalid Input",
+                    "Please provide a valid message ID.",
+                    command_type="Administrative"
                 )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
-            roles_list = "\n".join(
-                [f"<@&{role_id}> - {'🟢 Enabled' if enabled else '🔴 Disabled'}" 
-                 for role_id, enabled in auto_roles]
+            # Validate role hierarchy
+            if role >= interaction.guild.me.top_role:
+                embed = self.bot.create_embed(
+                    "Permission Error",
+                    "I cannot assign roles that are higher than or equal to my highest role!",
+                    command_type="Administrative"
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
+            # Try to find the message
+            try:
+                message = await interaction.channel.fetch_message(message_id)
+            except discord.NotFound:
+                embed = self.bot.create_embed(
+                    "Message Not Found",
+                    "Make sure you're using this command in the same channel as the message.",
+                    command_type="Administrative"
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
+            # Add the reaction to verify emoji is valid
+            try:
+                await message.add_reaction(emoji)
+            except discord.HTTPException:
+                embed = self.bot.create_embed(
+                    "Invalid Emoji",
+                    "Please provide a valid emoji.",
+                    command_type="Administrative"
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
+            # Store the reaction role binding
+            await self.db_manager.add_reaction_role(message_id, str(emoji), role.id)
+            
+            description = (
+                f"Role: {role.mention}\n"
+                f"Emoji: {emoji}\n"
+                f"Message: [Jump to Message]({message.jump_url})"
             )
-            await self.ui_manager.send_embed(
-                interaction,
-                title="Server Auto Roles",
-                description=roles_list,
-                command_type="User"
+            
+            embed = self.bot.create_embed(
+                "Reaction Role Bound",
+                description,
+                command_type="Administrative"
             )
+            await interaction.response.send_message(embed=embed)
+            
         except Exception as e:
-            await self.ui_manager.send_embed(
-                interaction,
-                title="❌ Error",
-                description=f"An error occurred: {str(e)}",
-                command_type="User"
+            error_embed = self.bot.create_embed(
+                "Error",
+                str(e),
+                command_type="Administrative"
             )
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload):
+        """Handle reaction role assignments"""
+        if payload.member.bot:
+            return
+
+        try:
+            # Get reaction role data
+            reaction_roles = await self.db_manager.get_reaction_roles(payload.message_id)
+            if not reaction_roles:
+                return
+
+            for emoji, role_id in reaction_roles:
+                if str(payload.emoji) == emoji:
+                    role = payload.member.guild.get_role(role_id)
+                    if role:
+                        await payload.member.add_roles(role, reason="Reaction Role")
+                        
+                        # Log the action
+                        await self.db_manager.log_event(
+                            payload.guild_id,
+                            payload.user_id,
+                            "reaction_role",
+                            f"Role {role.name} added via reaction"
+                        )
+                    break
+                    
+        except Exception as e:
+            print(f"Error in reaction role assignment: {e}")
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload):
+        """Handle reaction role removals"""
+        try:
+            guild = self.bot.get_guild(payload.guild_id)
+            if not guild:
+                return
+
+            member = guild.get_member(payload.user_id)
+            if not member or member.bot:
+                return
+
+            # Get reaction role data
+            reaction_roles = await self.db_manager.get_reaction_roles(payload.message_id)
+            if not reaction_roles:
+                return
+
+            for emoji, role_id in reaction_roles:
+                if str(payload.emoji) == emoji:
+                    role = guild.get_role(role_id)
+                    if role:
+                        await member.remove_roles(role, reason="Reaction Role Removed")
+                        
+                        # Log the action
+                        await self.db_manager.log_event(
+                            payload.guild_id,
+                            payload.user_id,
+                            "reaction_role",
+                            f"Role {role.name} removed via reaction"
+                        )
+                    break
+                    
+        except Exception as e:
+            print(f"Error in reaction role removal: {e}")
 
 async def setup(bot):
     await bot.add_cog(AutoRole(bot))

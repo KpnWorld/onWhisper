@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands, tasks
-from discord import app_commands
 import os
 import random
 import asyncio
@@ -11,7 +10,6 @@ import sys
 import time
 
 from utils.db_manager import DBManager
-from utils.ui_manager import UIManager
 
 # Load environment variables
 load_dotenv()
@@ -47,10 +45,25 @@ class Bot(commands.Bot):
             help_command=None
         )
         self.db_manager = DBManager('bot')
-        self.ui_manager = UIManager(self)
         self._rate_limit_retries = 0
         self._session_valid = True
-        self.start_time = datetime.utcnow()  # Add this line to track start time
+        self.start_time = datetime.utcnow()
+
+    def create_embed(self, title: str, description: str, command_type: str = "User") -> discord.Embed:
+        """Create a standardized embed with consistent formatting"""
+        color = discord.Color.blurple() if command_type == "User" else discord.Color.red()
+        
+        embed = discord.Embed(
+            title=title,
+            description=f"```\n{description}\n```",
+            color=color,
+            timestamp=datetime.utcnow()
+        )
+        
+        # Add command type footer
+        embed.set_footer(text=f"Command Type • {command_type}")
+        
+        return embed
 
     async def setup_hook(self) -> None:
         await self.db_manager.initialize()
@@ -87,11 +100,11 @@ class Bot(commands.Bot):
         except Exception as e:
             print(f"Failed to initialize settings for guild {guild.name}: {e}")
 
-    async def on_app_command_completion(self, interaction: discord.Interaction, command: app_commands.Command):
+    async def on_app_command_completion(self, interaction: discord.Interaction, command: commands.Command):
         """Command completion handler without logging"""
         pass
 
-    async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+    async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
         """Error handler that just prints to console"""
         print(f"Command error: {str(error)}")
 

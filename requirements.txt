@@ -1,4 +1,5 @@
-discord.py>=2.0.0
+py-cord>=2.0.0
+aiohttp>=3.8.1
 python-dotenv
 colorama
 psutil

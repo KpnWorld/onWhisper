@@ -20,7 +20,7 @@ class DBManager:
 
     async def initialize(self):
         """Initialize the database, creating tables if they don't exist."""
-        conn = await self.connect()  # Use the single connection
+        conn = await self.connect()
         async with conn.cursor() as cursor:
             # Leveling Table
             await cursor.execute(''' 
@@ -115,6 +115,26 @@ class DBManager:
                     verification_message TEXT,
                     verification_channel_id INTEGER,
                     enabled INTEGER DEFAULT 1
+                );
+            ''')
+
+            # Logging Config Table
+            await cursor.execute(''' 
+                CREATE TABLE IF NOT EXISTS logging_config (
+                    guild_id INTEGER PRIMARY KEY,
+                    channel_id INTEGER NOT NULL
+                );
+            ''')
+
+            # Tickets Table
+            await cursor.execute(''' 
+                CREATE TABLE IF NOT EXISTS tickets (
+                    ticket_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER,
+                    channel_id INTEGER UNIQUE,
+                    user_id INTEGER,
+                    status TEXT DEFAULT 'open',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             ''')
 
@@ -319,29 +339,57 @@ class DBManager:
 
     async def create_ticket(self, guild_id: int, channel_id: int, user_id: int):
         """Create a new ticket record."""
-        query = """
-            INSERT INTO tickets (guild_id, channel_id, user_id, status)
-            VALUES ($1, $2, $3, 'open')
-        """
-        await self.pool.execute(query, guild_id, channel_id, user_id)
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                INSERT INTO tickets (guild_id, channel_id, user_id, status)
+                VALUES (?, ?, ?, 'open')
+                """,
+                (guild_id, channel_id, user_id)
+            )
+            await conn.commit()
 
     async def get_open_ticket(self, user_id: int, guild_id: int):
         """Get user's open ticket if exists."""
-        query = """
-            SELECT channel_id FROM tickets
-            WHERE user_id = $1 AND guild_id = $2 AND status = 'open'
-        """
-        return await self.pool.fetchrow(query, user_id, guild_id)
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT channel_id FROM tickets
+                WHERE user_id = ? AND guild_id = ? AND status = 'open'
+                """,
+                (user_id, guild_id)
+            )
+            result = await cursor.fetchone()
+            return result[0] if result else None
 
     async def get_ticket_by_channel(self, channel_id: int):
         """Get ticket by channel ID."""
-        query = "SELECT * FROM tickets WHERE channel_id = $1 AND status = 'open'"
-        return await self.pool.fetchrow(query, channel_id)
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT * FROM tickets 
+                WHERE channel_id = ? AND status = 'open'
+                """,
+                (channel_id,)
+            )
+            return await cursor.fetchone()
 
     async def close_ticket(self, channel_id: int):
         """Close a ticket."""
-        query = "UPDATE tickets SET status = 'closed' WHERE channel_id = $1"
-        await self.pool.execute(query, channel_id)
+        conn = await self.connect()
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                UPDATE tickets 
+                SET status = 'closed' 
+                WHERE channel_id = ?
+                """,
+                (channel_id,)
+            )
+            await conn.commit()
 
     # Add new database methods
     async def fetch_all(self, query: str, params: tuple = None):
