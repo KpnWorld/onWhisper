@@ -52,17 +52,17 @@ class Bot(commands.Bot):
     def create_embed(self, title: str, description: str, command_type: str = "User") -> discord.Embed:
         """Create a standardized embed with consistent formatting"""
         color = discord.Color.blurple() if command_type == "User" else discord.Color.red()
-        
+
         embed = discord.Embed(
             title=title,
             description=f"```\n{description}\n```",
             color=color,
             timestamp=datetime.utcnow()
         )
-        
+
         # Add command type footer
         embed.set_footer(text=f"Command Type • {command_type}")
-        
+
         return embed
 
     async def setup_hook(self) -> None:
@@ -81,17 +81,31 @@ class Bot(commands.Bot):
 
     async def on_ready(self):
         try:
-            for guild in self.guilds:
+            # Check if we need to sync commands (only once per boot)
+            if not hasattr(self, 'commands_synced'):  
                 try:
-                    await self.db_manager.ensure_guild_exists(guild.id, guild.name)
+                    await self.sync_commands()  # Sync commands
+                    self.commands_synced = True  # Set flag after syncing
+                    synced_count = len(self.application_commands)
                 except Exception as e:
-                    print(f"Error initializing guild {guild.id}: {e}")
-            await self.tree.sync()
-            print(f"✓ Successfully registered {len([cmd for cmd in self.tree.walk_commands()])} slash commands")
+                    print(f"⚠ Failed to sync commands: {e}")
+                    synced_count = "?"
+            else:
+                synced_count = len(self.application_commands)
+
+            # Pretty format synced count with commas
+            formatted_count = f"{synced_count:,}"
+
+            print("\n───────────────")
+            print(f"🔌 Connected as {self.user.name}#{self.user.discriminator}")
+            print(f"🌎 Serving {len(self.guilds)} servers")
+            print(f"🎯 Slash commands auto-synced by Pycord ({formatted_count} commands)")
+            print("───────────────\n")
+
             change_activity.start()
-            print(f'{self.user} is ready in {len(self.guilds)} guilds!')
+
         except Exception as e:
-            print(f'Error in on_ready: {str(e)}')
+            print(f"✖ Error during on_ready setup: {str(e)}")
 
     async def on_guild_join(self, guild: discord.Guild):
         try:
