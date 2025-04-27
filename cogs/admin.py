@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
-from utils.db_manager import DBManager
 from typing import Optional
+from utils.db_manager import DBManager
 import json
 
 class Admin(commands.Cog):
@@ -29,218 +29,224 @@ class Admin(commands.Cog):
             await ctx.send(embed=embed)
 
     @config.group(name="xp")
+    @commands.has_permissions(administrator=True)
     async def config_xp(self, ctx):
-        """XP system configuration"""
+        """Configure XP system settings"""
         if ctx.invoked_subcommand is None:
             embed = self.bot.create_embed(
-                "XP System Configuration",
+                "XP Configuration",
                 "Available commands:\n"
-                "• /config xp rate <amount> - Set XP per message\n"
-                "• /config xp cooldown <seconds> - Set XP cooldown\n"
-                "• /config xp view - View current XP settings",
+                "• /config xp rate <amount> - Set XP earned per message\n"
+                "• /config xp cooldown <seconds> - Set cooldown between XP gains",
                 command_type="Administrative"
             )
             await ctx.send(embed=embed)
 
-    @config_xp.command(name="view")
-    async def xp_view(self, ctx):
-        """View current XP system settings"""
-        try:
-            # Get XP settings from leveling cog
-            leveling_cog = self.bot.get_cog('Leveling')
-            if not leveling_cog:
-                raise Exception("Leveling system is not available")
-
-            description = (
-                f"XP Rate: {leveling_cog.base_xp} XP per message\n"
-                f"Cooldown: {leveling_cog.cooldown} seconds"
-            )
+    @config_xp.command(name="rate")
+    async def xp_rate(self, ctx, amount: int):
+        """Set the amount of XP earned per message"""
+        if amount < 1 or amount > 100:
+            await ctx.send("XP rate must be between 1 and 100")
+            return
             
-            embed = self.bot.create_embed(
-                "XP System Settings",
-                description,
-                command_type="Administrative"
-            )
-            await ctx.send(embed=embed)
-        except Exception as e:
-            await ctx.send(f"Error: {str(e)}", ephemeral=True)
+        await self.db_manager.set_data('xp_config', str(ctx.guild.id), {'rate': amount})
+        embed = self.bot.create_embed(
+            "XP Rate Updated",
+            f"Members will now earn {amount} XP per message",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
+
+    @config_xp.command(name="cooldown")
+    async def xp_cooldown(self, ctx, seconds: int):
+        """Set the cooldown between XP gains"""
+        if seconds < 10 or seconds > 300:
+            await ctx.send("Cooldown must be between 10 and 300 seconds")
+            return
+            
+        await self.db_manager.set_data('xp_config', str(ctx.guild.id), {'cooldown': seconds})
+        embed = self.bot.create_embed(
+            "XP Cooldown Updated",
+            f"Members will now have a {seconds} second cooldown between XP gains",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
 
     @config.group(name="tickets")
+    @commands.has_permissions(administrator=True)
     async def config_tickets(self, ctx):
-        """Ticket system configuration"""
+        """Configure ticket system settings"""
         if ctx.invoked_subcommand is None:
-            # Get current settings
-            settings = await self.db_manager.get_data('tickets_config', str(ctx.guild.id)) or {}
-            
-            description = (
-                "Current Settings:\n"
-                f"Support Role: {ctx.guild.get_role(settings.get('support_role_id', 0)).mention if settings.get('support_role_id') else 'Not set'}\n"
-                f"Category: {ctx.guild.get_channel(settings.get('category_id', 0)).mention if settings.get('category_id') else 'Not set'}\n"
-                "\nAvailable commands:\n"
-                "• /config tickets support_role <role> - Set support staff role\n"
-                "• /config tickets category <category> - Set tickets category"
-            )
-            
             embed = self.bot.create_embed(
-                "Ticket System Configuration",
-                description,
+                "Ticket Configuration",
+                "Available commands:\n"
+                "• /config tickets category <category> - Set ticket category\n"
+                "• /config tickets support <role> - Set support role",
                 command_type="Administrative"
             )
             await ctx.send(embed=embed)
 
-    @config_tickets.command(name="support_role")
-    async def tickets_support_role(self, ctx, role: discord.Role):
-        """Set the support staff role for tickets"""
-        try:
-            settings = await self.db_manager.get_data('tickets_config', str(ctx.guild.id)) or {}
-            settings['support_role_id'] = role.id
-            await self.db_manager.set_data('tickets_config', str(ctx.guild.id), settings)
-            
-            embed = self.bot.create_embed(
-                "Support Role Set",
-                f"Ticket support role has been set to {role.mention}",
-                command_type="Administrative"
-            )
-            await ctx.send(embed=embed)
-        except Exception as e:
-            await ctx.send(f"Error: {str(e)}", ephemeral=True)
+    @config_tickets.command(name="category")
+    async def tickets_category(self, ctx, category: discord.CategoryChannel):
+        """Set the category for ticket channels"""
+        await self.db_manager.set_data('tickets_config', str(ctx.guild.id), {'category_id': category.id})
+        embed = self.bot.create_embed(
+            "Ticket Category Set",
+            f"New tickets will be created in {category.mention}",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
+
+    @config_tickets.command(name="support")
+    async def tickets_support(self, ctx, role: discord.Role):
+        """Set the support team role"""
+        await self.db_manager.set_data('tickets_config', str(ctx.guild.id), {'support_role_id': role.id})
+        embed = self.bot.create_embed(
+            "Support Role Set",
+            f"Members with {role.mention} will now have access to tickets",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
 
     @config.group(name="logging")
+    @commands.has_permissions(administrator=True)
     async def config_logging(self, ctx):
-        """Logging system configuration"""
+        """Configure logging system settings"""
         if ctx.invoked_subcommand is None:
-            # Get current settings
-            config = await self.db_manager.get_data('logging_config', str(ctx.guild.id)) or {}
-            
-            description = (
-                "Current Settings:\n"
-                f"Log Channel: {ctx.guild.get_channel(config.get('channel_id', 0)).mention if config.get('channel_id') else 'Not set'}\n"
-                "\nAvailable commands:\n"
-                "• /config logging channel <channel> - Set logging channel\n"
-                "• /config logging test - Send test log"
-            )
-            
             embed = self.bot.create_embed(
-                "Logging System Configuration",
-                description,
+                "Logging Configuration",
+                "Available commands:\n"
+                "• /config logging channel <channel> - Set logging channel",
                 command_type="Administrative"
             )
             await ctx.send(embed=embed)
 
-    @config.group(name="autorole")
-    async def config_autorole(self, ctx):
-        """Auto-role configuration"""
-        if ctx.invoked_subcommand is None:
-            # Get current settings
-            auto_role = await self.db_manager.get_auto_role(ctx.guild.id)
+    @config_logging.command(name="channel")
+    async def logging_channel(self, ctx, channel: discord.TextChannel):
+        """Set the channel for server logs"""
+        # Verify bot permissions
+        if not channel.permissions_for(ctx.guild.me).send_messages:
+            await ctx.send("I need permission to send messages in that channel!")
+            return
             
-            status = "Disabled"
-            role = None
-            if auto_role:
-                role_id, enabled = auto_role
-                role = ctx.guild.get_role(role_id)
-                status = "Enabled" if enabled else "Disabled"
-            
-            description = (
-                "Current Settings:\n"
-                f"Status: {status}\n"
-                f"Role: {role.mention if role else 'Not set'}\n"
-                "\nAvailable commands:\n"
-                "• /config autorole set <role> - Set auto-role\n"
-                "• /config autorole disable - Disable auto-role"
-            )
-            
-            embed = self.bot.create_embed(
-                "Auto-Role Configuration",
-                description,
-                command_type="Administrative"
-            )
-            await ctx.send(embed=embed)
+        await self.db_manager.set_data('logging_config', str(ctx.guild.id), {'channel_id': channel.id})
+        embed = self.bot.create_embed(
+            "Logging Channel Set",
+            f"Server logs will now be sent to {channel.mention}",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
 
     @config.group(name="moderation")
+    @commands.has_permissions(administrator=True)
     async def config_moderation(self, ctx):
-        """Moderation system configuration"""
+        """Configure moderation settings"""
         if ctx.invoked_subcommand is None:
-            # Get current settings
-            settings = await self.db_manager.get_data('moderation_config', str(ctx.guild.id)) or {}
-            
-            muted_role = ctx.guild.get_role(settings.get('muted_role_id', 0))
-            mod_role = ctx.guild.get_role(settings.get('mod_role_id', 0))
-            
-            description = (
-                "Current Settings:\n"
-                f"Muted Role: {muted_role.mention if muted_role else 'Not set'}\n"
-                f"Moderator Role: {mod_role.mention if mod_role else 'Not set'}\n"
-                f"Delete Warns After: {settings.get('warn_delete_days', 30)} days\n"
-                "\nAvailable commands:\n"
-                "• /config moderation muted_role <role> - Set muted role\n"
-                "• /config moderation mod_role <role> - Set moderator role\n"
-                "• /config moderation warn_delete_days <days> - Set warning deletion time"
-            )
-            
             embed = self.bot.create_embed(
                 "Moderation Configuration",
-                description,
+                "Available commands:\n"
+                "• /config moderation muterole <role> - Set muted role\n"
+                "• /config moderation modrole <role> - Set moderator role\n"
+                "• /config moderation warnexpire <days> - Set warning expiration",
                 command_type="Administrative"
             )
             await ctx.send(embed=embed)
 
-    @config_moderation.command(name="muted_role")
-    async def mod_muted_role(self, ctx, role: discord.Role):
+    @config_moderation.command(name="muterole")
+    async def mod_muterole(self, ctx, role: discord.Role):
         """Set the muted role"""
-        try:
-            settings = await self.db_manager.get_data('moderation_config', str(ctx.guild.id)) or {}
-            settings['muted_role_id'] = role.id
-            await self.db_manager.set_data('moderation_config', str(ctx.guild.id), settings)
-            
-            embed = self.bot.create_embed(
-                "Muted Role Set",
-                f"Muted role has been set to {role.mention}",
-                command_type="Administrative"
-            )
-            await ctx.send(embed=embed)
-        except Exception as e:
-            await ctx.send(f"Error: {str(e)}", ephemeral=True)
+        await self.db_manager.set_data('moderation_config', str(ctx.guild.id), {'muted_role_id': role.id})
+        embed = self.bot.create_embed(
+            "Muted Role Set",
+            f"Muted members will now receive the {role.mention} role",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
 
-    @config_moderation.command(name="mod_role")
-    async def mod_mod_role(self, ctx, role: discord.Role):
+    @config_moderation.command(name="modrole")
+    async def mod_modrole(self, ctx, role: discord.Role):
         """Set the moderator role"""
-        try:
-            settings = await self.db_manager.get_data('moderation_config', str(ctx.guild.id)) or {}
-            settings['mod_role_id'] = role.id
-            await self.db_manager.set_data('moderation_config', str(ctx.guild.id), settings)
-            
-            embed = self.bot.create_embed(
-                "Moderator Role Set",
-                f"Moderator role has been set to {role.mention}",
-                command_type="Administrative"
-            )
-            await ctx.send(embed=embed)
-        except Exception as e:
-            await ctx.send(f"Error: {str(e)}", ephemeral=True)
+        await self.db_manager.set_data('moderation_config', str(ctx.guild.id), {'mod_role_id': role.id})
+        embed = self.bot.create_embed(
+            "Moderator Role Set",
+            f"Members with {role.mention} will have access to moderation commands",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
 
-    @config_moderation.command(name="warn_delete_days")
-    async def mod_warn_delete_days(self, ctx, days: int):
-        """Set how many days until warnings are deleted"""
-        try:
-            if days < 1:
-                raise ValueError("Days must be greater than 0")
-                
-            settings = await self.db_manager.get_data('moderation_config', str(ctx.guild.id)) or {}
-            settings['warn_delete_days'] = days
-            await self.db_manager.set_data('moderation_config', str(ctx.guild.id), settings)
+    @config_moderation.command(name="warnexpire")
+    async def mod_warnexpire(self, ctx, days: int):
+        """Set how many days until warnings expire"""
+        if days < 1:
+            await ctx.send("Warning expiration must be at least 1 day")
+            return
             
+        await self.db_manager.set_data('moderation_config', str(ctx.guild.id), {'warn_delete_days': days})
+        embed = self.bot.create_embed(
+            "Warning Expiration Set",
+            f"Warnings will now expire after {days} days",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
+
+    @config.group(name="autorole")
+    @commands.has_permissions(administrator=True)
+    async def config_autorole(self, ctx):
+        """Configure automatic role assignment"""
+        if ctx.invoked_subcommand is None:
             embed = self.bot.create_embed(
-                "Warning Delete Time Set",
-                f"Warnings will be deleted after {days} days",
+                "Auto-Role Configuration",
+                "Available commands:\n"
+                "• /config autorole set <role> - Set the auto-assigned role\n"
+                "• /config autorole toggle - Enable/disable auto-role",
                 command_type="Administrative"
             )
             await ctx.send(embed=embed)
-        except Exception as e:
-            await ctx.send(f"Error: {str(e)}", ephemeral=True)
+
+    @config_autorole.command(name="set")
+    async def autorole_set(self, ctx, role: discord.Role):
+        """Set the role to automatically assign to new members"""
+        # Verify bot permissions
+        if not role.position < ctx.guild.me.top_role.position:
+            await ctx.send("That role is higher than my highest role! I need a role above it to assign it.")
+            return
+            
+        await self.db_manager.set_auto_role(ctx.guild.id, role.id)
+        embed = self.bot.create_embed(
+            "Auto-Role Set",
+            f"New members will now automatically receive the {role.mention} role",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
+
+    @config_autorole.command(name="toggle")
+    async def autorole_toggle(self, ctx):
+        """Toggle automatic role assignment"""
+        current_data = await self.db_manager.get_auto_role(ctx.guild.id)
+        if not current_data:
+            await ctx.send("You need to set an auto-role first!")
+            return
+            
+        role_id, enabled = current_data
+        new_state = not enabled
+        
+        await self.db_manager.toggle_auto_role(ctx.guild.id, new_state)
+        status = "enabled" if new_state else "disabled"
+        
+        role = ctx.guild.get_role(role_id)
+        description = f"Auto-role has been {status}"
+        if role:
+            description += f"\nRole: {role.mention}"
+        
+        embed = self.bot.create_embed(
+            "Auto-Role Toggled",
+            description,
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="settings", description="View all server settings")
-    @commands.default_member_permissions(administrator=True)
+    @commands.has_permissions(administrator=True)
     async def view_settings(self, ctx):
         """View all server configuration settings"""
         try:
