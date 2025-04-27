@@ -1,27 +1,16 @@
 import discord
 from discord.ext import commands
-import psutil
 import platform
-import os
 from datetime import datetime
 from utils.db_manager import DBManager
-from typing import Optional
-
-def get_size(bytes: int) -> str:
-    """Convert bytes to human readable string"""
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if bytes < 1024:
-            return f"{bytes:.2f} {unit}"
-        bytes /= 1024
-    return f"{bytes:.2f} TB"
 
 class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.start_time = datetime.utcnow()
 
-    @commands.slash_command(description="Get information about the bot")
-    async def botinfo(self, interaction: discord.Interaction):
+    @commands.hybrid_command(description="Get information about the bot")
+    async def botinfo(self, ctx):
         """Display information about the bot"""
         try:
             uptime = datetime.utcnow() - self.start_time
@@ -47,7 +36,7 @@ class Info(commands.Cog):
             if self.bot.user.avatar:
                 embed.set_thumbnail(url=self.bot.user.avatar.url)
                 
-            await interaction.response.send_message(embed=embed)
+            await ctx.send(embed=embed)
             
         except Exception as e:
             error_embed = self.bot.create_embed(
@@ -55,13 +44,13 @@ class Info(commands.Cog):
                 str(e),
                 command_type="User"
             )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            await ctx.send(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Get information about the server")
-    async def serverinfo(self, interaction: discord.Interaction):
+    @commands.hybrid_command(description="Get information about the server")
+    async def serverinfo(self, ctx):
         """Display information about the current server"""
         try:
-            guild = interaction.guild
+            guild = ctx.guild
             
             # Count channels by type
             text_channels = len([c for c in guild.channels if isinstance(c, discord.TextChannel)])
@@ -104,7 +93,7 @@ class Info(commands.Cog):
             if guild.icon:
                 embed.set_thumbnail(url=guild.icon.url)
                 
-            await interaction.response.send_message(embed=embed)
+            await ctx.send(embed=embed)
             
         except Exception as e:
             error_embed = self.bot.create_embed(
@@ -112,13 +101,13 @@ class Info(commands.Cog):
                 str(e),
                 command_type="User"
             )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            await ctx.send(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Get information about a user")
-    async def userinfo(self, interaction: discord.Interaction, user: discord.Member = None):
+    @commands.hybrid_command(description="Get information about a user")
+    async def userinfo(self, ctx, user: discord.Member = None):
         """Display information about a user"""
         try:
-            user = user or interaction.user
+            user = user or ctx.author
             
             roles = [role.mention for role in reversed(user.roles[1:])]  # All roles except @everyone
             
@@ -164,7 +153,7 @@ class Info(commands.Cog):
             if user.avatar:
                 embed.set_thumbnail(url=user.avatar.url)
                 
-            await interaction.response.send_message(embed=embed)
+            await ctx.send(embed=embed)
             
         except Exception as e:
             error_embed = self.bot.create_embed(
@@ -172,7 +161,7 @@ class Info(commands.Cog):
                 str(e),
                 command_type="User"
             )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            await ctx.send(embed=error_embed, ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Info(bot))

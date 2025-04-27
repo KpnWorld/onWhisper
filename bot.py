@@ -5,7 +5,6 @@ import random
 import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
-import sqlite3
 import sys
 import time
 
@@ -14,19 +13,6 @@ from utils.db_manager import DBManager
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-
-# Register datetime adapter and converter for sqlite3
-def adapt_datetime(val: datetime) -> str:
-    return val.isoformat()
-
-def convert_datetime(val: bytes) -> datetime:
-    try:
-        return datetime.fromisoformat(val.decode())
-    except (ValueError, AttributeError):
-        return None
-
-sqlite3.register_adapter(datetime, adapt_datetime)
-sqlite3.register_converter("timestamp", convert_datetime)
 
 # List of activities for the bot to cycle through
 ACTIVITIES = [
@@ -40,11 +26,9 @@ ACTIVITIES = [
 class Bot(commands.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix=commands.when_mentioned,
+            command_prefix="!",  # Prefix for hybrid commands
             intents=discord.Intents.all(),
-            help_command=None,
-            # Py-cord specific options
-            debug_guilds=None  # Set this to guild IDs for dev environment
+            help_command=None
         )
         self.db_manager = DBManager('bot')
         self._rate_limit_retries = 0
@@ -67,7 +51,8 @@ class Bot(commands.Bot):
 
         return embed
 
-    async def setup_hook(self) -> None:
+    async def setup_hook(self):
+        """This is called when the bot starts, sets up the database and loads cogs"""
         await self.db_manager.initialize()
         for filename in os.listdir('./cogs'):
             if filename.endswith('.py'):
@@ -77,20 +62,24 @@ class Bot(commands.Bot):
                 except Exception as e:
                     print(f"Failed to load extension {filename}: {e}")
 
+        # Sync hybrid and slash commands
+        print("Syncing commands...")
+        await self.tree.sync()
+
     async def close(self):
         await self.db_manager.close()
         await super().close()
 
     async def on_ready(self):
         try:
-            # Py-cord automatically syncs commands, no need for manual sync
-            synced_count = len(self.application_commands)
-            formatted_count = f"{synced_count:,}"
+            # Count both application commands and hybrid commands
+            all_commands = len(self.commands) + len(self.application_commands)
+            formatted_count = f"{all_commands:,}"
 
             print("\n───────────────")
-            print(f"🔌 Connected as {self.user}")  # Py-cord handles discriminator changes
+            print(f"🔌 Connected as {self.user}")
             print(f"🌎 Serving {len(self.guilds)} servers")
-            print(f"🎯 Slash commands loaded ({formatted_count} commands)")
+            print(f"🎯 Commands loaded ({formatted_count} commands)")
             print("───────────────\n")
 
             change_activity.start()

@@ -1,279 +1,293 @@
-import os
-import aiosqlite
+from replit import db
+from datetime import datetime, timedelta
+import json
 
 class DBManager:
     def __init__(self, name='bot'):
         self.name = name
-        self.db_path = f'data/{name}.db'
-        self._connection = None
-        self._cursor = None
-        
+        self.prefix = f"{name}:"  # Use prefix for namespacing
+
     async def initialize(self):
-        """Initialize database connection and tables"""
+        """Initialize database tables"""
         try:
-            # Ensure data directory exists
-            os.makedirs('data', exist_ok=True)
+            # Initialize default collections if they don't exist
+            collections = [
+                'guilds',
+                'logging_config',
+                'auto_roles',
+                'reaction_roles',
+                'tickets',
+                'levels',
+                'logs'
+            ]
             
-            # Create connection in async context
-            self._connection = await aiosqlite.connect(self.db_path)
-            self._cursor = await self._connection.cursor()
-            
-            # Enable foreign keys
-            await self._cursor.execute('PRAGMA foreign_keys = ON')
-            
-            # Create tables with proper constraints
-            await self._cursor.execute('''
-                CREATE TABLE IF NOT EXISTS guilds (
-                    guild_id INTEGER PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            await self._cursor.execute('''
-                CREATE TABLE IF NOT EXISTS logging_config (
-                    guild_id INTEGER PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE,
-                    channel_id INTEGER NOT NULL
-                )
-            ''')
-            
-            await self._cursor.execute('''
-                CREATE TABLE IF NOT EXISTS auto_roles (
-                    guild_id INTEGER PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE,
-                    role_id INTEGER,
-                    enabled BOOLEAN DEFAULT TRUE
-                )
-            ''')
-            
-            await self._cursor.execute('''
-                CREATE TABLE IF NOT EXISTS reaction_roles (
-                    message_id INTEGER,
-                    emoji TEXT,
-                    role_id INTEGER,
-                    PRIMARY KEY (message_id, emoji)
-                )
-            ''')
-            
-            await self._cursor.execute('''
-                CREATE TABLE IF NOT EXISTS tickets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id INTEGER REFERENCES guilds(guild_id) ON DELETE CASCADE,
-                    channel_id INTEGER NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    closed_at TIMESTAMP,
-                    UNIQUE(channel_id)
-                )
-            ''')
-            
-            await self._cursor.execute('''
-                CREATE TABLE IF NOT EXISTS levels (
-                    user_id INTEGER,
-                    guild_id INTEGER REFERENCES guilds(guild_id) ON DELETE CASCADE,
-                    level INTEGER DEFAULT 0,
-                    xp INTEGER DEFAULT 0,
-                    last_xp TIMESTAMP,
-                    PRIMARY KEY (user_id, guild_id)
-                )
-            ''')
-            
-            await self._cursor.execute('''
-                CREATE TABLE IF NOT EXISTS logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id INTEGER REFERENCES guilds(guild_id) ON DELETE CASCADE,
-                    channel_id INTEGER,
-                    user_id INTEGER,
-                    action TEXT NOT NULL,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    details TEXT
-                )
-            ''')
-            
-            await self._connection.commit()
+            for collection in collections:
+                key = f"{self.prefix}{collection}"
+                if key not in db:
+                    db[key] = {}
             
         except Exception as e:
             print(f"Database initialization error: {e}")
             raise
 
     async def close(self):
-        """Close database connection"""
-        if self._connection:
-            await self._connection.close()
-            self._connection = None
-            self._cursor = None
+        """No need to close connection with Replit db"""
+        pass
 
-    async def execute(self, query: str, params: tuple = ()):
-        """Execute a query and commit changes"""
+    def _make_key(self, collection: str, id: str) -> str:
+        """Create a composite key for the collection"""
+        return f"{self.prefix}{collection}:{id}"
+
+    async def set_data(self, collection: str, id: str, data: dict):
+        """Set data in a collection"""
         try:
-            await self._cursor.execute(query, params)
-            await self._connection.commit()
+            key = self._make_key(collection, id)
+            db[key] = json.dumps(data)
         except Exception as e:
-            print(f"Query execution error: {e}")
+            print(f"Data set error: {e}")
             raise
 
-    async def fetch_one(self, query: str, params: tuple = ()):
-        """Fetch a single row"""
+    async def get_data(self, collection: str, id: str) -> dict:
+        """Get data from a collection"""
         try:
-            await self._cursor.execute(query, params)
-            return await self._cursor.fetchone()
+            key = self._make_key(collection, id)
+            if key in db:
+                return json.loads(db[key])
+            return None
         except Exception as e:
-            print(f"Query fetch error: {e}")
+            print(f"Data get error: {e}")
             raise
 
-    async def fetch_all(self, query: str, params: tuple = ()):
-        """Fetch all rows"""
+    async def delete_data(self, collection: str, id: str):
+        """Delete data from a collection"""
         try:
-            await self._cursor.execute(query, params)
-            return await self._cursor.fetchall()
+            key = self._make_key(collection, id)
+            if key in db:
+                del db[key]
         except Exception as e:
-            print(f"Query fetch error: {e}")
+            print(f"Data delete error: {e}")
             raise
 
-    # Guild Management
     async def ensure_guild_exists(self, guild_id: int, name: str):
         """Ensure guild exists in database"""
-        await self.execute(
-            'INSERT OR IGNORE INTO guilds (guild_id, name) VALUES (?, ?)',
-            (guild_id, name)
-        )
+        try:
+            guild_data = await self.get_data('guilds', str(guild_id))
+            if not guild_data:
+                await self.set_data('guilds', str(guild_id), {
+                    'name': name,
+                    'joined_at': datetime.utcnow().isoformat()
+                })
+        except Exception as e:
+            print(f"Guild creation error: {e}")
+            raise
 
-    # Auto Role Management
     async def set_auto_role(self, guild_id: int, role_id: int, enabled: bool):
         """Set or update auto role configuration"""
-        await self.execute(
-            'INSERT OR REPLACE INTO auto_roles (guild_id, role_id, enabled) VALUES (?, ?, ?)',
-            (guild_id, role_id, enabled)
-        )
+        try:
+            await self.set_data('auto_roles', str(guild_id), {
+                'role_id': role_id,
+                'enabled': enabled
+            })
+        except Exception as e:
+            print(f"Auto role set error: {e}")
+            raise
 
     async def get_auto_role(self, guild_id: int):
         """Get auto role configuration"""
-        return await self.fetch_one(
-            'SELECT role_id, enabled FROM auto_roles WHERE guild_id = ?',
-            (guild_id,)
-        )
+        try:
+            data = await self.get_data('auto_roles', str(guild_id))
+            if data:
+                return (data['role_id'], data['enabled'])
+            return None
+        except Exception as e:
+            print(f"Auto role get error: {e}")
+            raise
 
-    # Reaction Roles Management
     async def add_reaction_role(self, message_id: int, emoji: str, role_id: int):
         """Add a reaction role binding"""
-        await self.execute(
-            'INSERT OR REPLACE INTO reaction_roles (message_id, emoji, role_id) VALUES (?, ?, ?)',
-            (message_id, emoji, role_id)
-        )
+        try:
+            key = f"{message_id}:{emoji}"
+            await self.set_data('reaction_roles', key, {
+                'role_id': role_id
+            })
+        except Exception as e:
+            print(f"Reaction role add error: {e}")
+            raise
 
     async def get_reaction_roles(self, message_id: int):
         """Get reaction role bindings for a message"""
-        return await self.fetch_all(
-            'SELECT emoji, role_id FROM reaction_roles WHERE message_id = ?',
-            (message_id,)
-        )
+        try:
+            prefix = f"{self.prefix}reaction_roles:{message_id}:"
+            bindings = []
+            for key in db.keys():
+                if key.startswith(prefix):
+                    emoji = key.split(':')[-1]
+                    data = json.loads(db[key])
+                    bindings.append((emoji, data['role_id']))
+            return bindings
+        except Exception as e:
+            print(f"Reaction roles get error: {e}")
+            raise
 
-    # Ticket Management
     async def create_ticket(self, guild_id: int, channel_id: int, user_id: int):
         """Create a new ticket"""
-        await self.execute(
-            'INSERT INTO tickets (guild_id, channel_id, user_id) VALUES (?, ?, ?)',
-            (guild_id, channel_id, user_id)
-        )
+        try:
+            ticket_data = {
+                'guild_id': guild_id,
+                'channel_id': channel_id,
+                'user_id': user_id,
+                'created_at': datetime.utcnow().isoformat(),
+                'closed_at': None
+            }
+            await self.set_data('tickets', str(channel_id), ticket_data)
+        except Exception as e:
+            print(f"Ticket creation error: {e}")
+            raise
 
     async def close_ticket(self, channel_id: int):
         """Close a ticket"""
-        await self.execute(
-            'UPDATE tickets SET closed_at = CURRENT_TIMESTAMP WHERE channel_id = ?',
-            (channel_id,)
-        )
+        try:
+            ticket = await self.get_data('tickets', str(channel_id))
+            if ticket:
+                ticket['closed_at'] = datetime.utcnow().isoformat()
+                await self.set_data('tickets', str(channel_id), ticket)
+        except Exception as e:
+            print(f"Ticket close error: {e}")
+            raise
 
     async def get_ticket_by_channel(self, channel_id: int):
         """Get ticket information by channel ID"""
-        return await self.fetch_one(
-            'SELECT * FROM tickets WHERE channel_id = ?',
-            (channel_id,)
-        )
+        try:
+            return await self.get_data('tickets', str(channel_id))
+        except Exception as e:
+            print(f"Ticket get error: {e}")
+            raise
 
     async def get_open_ticket(self, user_id: int, guild_id: int):
         """Check if user has an open ticket"""
-        return await self.fetch_one(
-            'SELECT * FROM tickets WHERE user_id = ? AND guild_id = ? AND closed_at IS NULL',
-            (user_id, guild_id)
-        )
+        try:
+            prefix = f"{self.prefix}tickets:"
+            for key in db.keys():
+                if key.startswith(prefix):
+                    ticket = json.loads(db[key])
+                    if (ticket['user_id'] == user_id and 
+                        ticket['guild_id'] == guild_id and 
+                        ticket['closed_at'] is None):
+                        return ticket
+            return None
+        except Exception as e:
+            print(f"Open ticket check error: {e}")
+            raise
 
-    # Level System Management
     async def add_user_leveling(self, user_id: int, guild_id: int, level: int, xp: int):
         """Add or update user level information"""
-        await self.execute(
-            '''
-            INSERT OR REPLACE INTO levels (user_id, guild_id, level, xp, last_xp)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''',
-            (user_id, guild_id, level, xp)
-        )
+        try:
+            key = f"{guild_id}:{user_id}"
+            await self.set_data('levels', key, {
+                'level': level,
+                'xp': xp,
+                'last_xp': datetime.utcnow().isoformat()
+            })
+        except Exception as e:
+            print(f"Level update error: {e}")
+            raise
 
     async def get_user_leveling(self, user_id: int, guild_id: int):
         """Get user level information"""
-        result = await self.fetch_one(
-            'SELECT level, xp FROM levels WHERE user_id = ? AND guild_id = ?',
-            (user_id, guild_id)
-        )
-        return result if result else (0, 0)
+        try:
+            key = f"{guild_id}:{user_id}"
+            data = await self.get_data('levels', key)
+            if data:
+                return (data['level'], data['xp'])
+            return (0, 0)
+        except Exception as e:
+            print(f"Level get error: {e}")
+            raise
 
     async def get_leaderboard(self, guild_id: int, limit: int = 10):
         """Get guild leaderboard"""
-        return await self.fetch_all(
-            'SELECT user_id, level, xp FROM levels WHERE guild_id = ? ORDER BY xp DESC LIMIT ?',
-            (guild_id, limit)
-        )
+        try:
+            prefix = f"{self.prefix}levels:{guild_id}:"
+            all_levels = []
+            
+            for key in db.keys():
+                if key.startswith(prefix):
+                    user_id = int(key.split(':')[-1])
+                    data = json.loads(db[key])
+                    all_levels.append((user_id, data['level'], data['xp']))
+            
+            # Sort by XP and take top entries
+            return sorted(all_levels, key=lambda x: x[2], reverse=True)[:limit]
+        except Exception as e:
+            print(f"Leaderboard get error: {e}")
+            raise
 
-    # Event Logging
-    async def log_event(self, guild_id: int, user_id: int, action: str, details: str = None):
-        """Log an event"""
-        await self.execute(
-            'INSERT INTO logs (guild_id, user_id, action, details) VALUES (?, ?, ?, ?)',
-            (guild_id, user_id, action, details)
-        )
+    async def log_event(self, guild_id: int, user_id: int, action: str, details: str = None, **kwargs):
+        """Log an event with optional additional data"""
+        try:
+            timestamp = datetime.utcnow().isoformat()
+            log_id = f"{guild_id}:{timestamp}"
+            
+            log_data = {
+                'guild_id': guild_id,
+                'user_id': user_id,
+                'action': action,
+                'details': details,
+                'timestamp': timestamp,
+                **kwargs  # Include any additional data like channel_id
+            }
+            
+            await self.set_data('logs', log_id, log_data)
+        except Exception as e:
+            print(f"Event log error: {e}")
+            raise
 
-    # Database Maintenance
     async def cleanup_old_data(self, days: int = 30):
         """Clean up old logs and closed tickets"""
         try:
-            await self.execute(
-                'DELETE FROM logs WHERE timestamp < datetime("now", ?)',
-                (f'-{days} days',)
-            )
-            await self.execute(
-                'DELETE FROM tickets WHERE closed_at < datetime("now", ?)',
-                (f'-{days} days',)
-            )
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            
+            # Clean logs
+            prefix = f"{self.prefix}logs:"
+            for key in db.keys():
+                if key.startswith(prefix):
+                    log = json.loads(db[key])
+                    if datetime.fromisoformat(log['timestamp']) < cutoff:
+                        del db[key]
+            
+            # Clean tickets
+            prefix = f"{self.prefix}tickets:"
+            for key in db.keys():
+                if key.startswith(prefix):
+                    ticket = json.loads(db[key])
+                    if (ticket['closed_at'] and 
+                        datetime.fromisoformat(ticket['closed_at']) < cutoff):
+                        del db[key]
+                        
         except Exception as e:
             print(f"Cleanup error: {e}")
             raise
 
     async def optimize(self):
-        """Optimize database"""
-        try:
-            await self.execute('VACUUM')
-            await self.execute('ANALYZE')
-        except Exception as e:
-            print(f"Optimization error: {e}")
-            raise
+        """No optimization needed for Replit db"""
+        pass
 
     async def get_connection_stats(self):
-        """Get database connection statistics"""
-        stats = {}
+        """Get database statistics"""
         try:
-            await self._cursor.execute('PRAGMA page_count')
-            stats['page_count'] = (await self._cursor.fetchone())[0]
-            await self._cursor.execute('PRAGMA page_size')
-            stats['page_size'] = (await self._cursor.fetchone())[0]
-            await self._cursor.execute('PRAGMA cache_size')
-            stats['cache_size'] = (await self._cursor.fetchone())[0]
+            stats = {
+                'total_keys': len(list(db.keys())),
+                'collections': {}
+            }
+            
+            # Count keys per collection
+            for collection in ['guilds', 'logging_config', 'auto_roles', 
+                             'reaction_roles', 'tickets', 'levels', 'logs']:
+                prefix = f"{self.prefix}{collection}:"
+                count = len([k for k in db.keys() if k.startswith(prefix)])
+                stats['collections'][collection] = count
+                
             return stats
         except Exception as e:
             print(f"Stats error: {e}")
             return None
-
-    async def get_database_size(self):
-        """Get database file size in bytes"""
-        try:
-            return os.path.getsize(self.db_path)
-        except Exception as e:
-            print(f"Size check error: {e}")
-            return 0

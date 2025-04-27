@@ -1,6 +1,6 @@
 import discord
+from discord.commands import slash_command, Option
 from discord.ext import commands
-from datetime import datetime
 from typing import Optional
 from utils.db_manager import DBManager
 
@@ -8,31 +8,10 @@ class Logging(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_manager = DBManager()
-        self.log_channels = {}  # Cache for log channels
 
-    async def get_log_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
-        """Get the logging channel for a guild"""
-        if guild_id in self.log_channels:
-            return self.log_channels[guild_id]
-            
-        # Fetch from database
-        channel_id = await self.db_manager.fetch_one(
-            "SELECT channel_id FROM logging_config WHERE guild_id = ?",
-            (guild_id,)
-        )
-        
-        if not channel_id:
-            return None
-            
-        channel = self.bot.get_channel(channel_id[0])
-        if channel:
-            self.log_channels[guild_id] = channel
-            
-        return channel
-
-    @commands.slash_command(description="Set the channel for logging events")
+    @discord.slash_command(description="Set the logging channel for the server")
     @commands.default_member_permissions(administrator=True)
-    async def setlogchannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+    async def set_logs(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """Set the channel for logging events"""
         try:
             # Verify bot permissions in the channel
@@ -45,15 +24,10 @@ class Logging(commands.Cog):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
-            await self.db_manager.execute(
-                """
-                INSERT OR REPLACE INTO logging_config (guild_id, channel_id)
-                VALUES (?, ?)
-                """,
-                (interaction.guild.id, channel.id)
-            )
-            
-            self.log_channels[interaction.guild.id] = channel
+            # Store logging channel configuration
+            await self.db_manager.set_data('logging_config', str(interaction.guild.id), {
+                'channel_id': channel.id
+            })
             
             description = f"Server logs will now be sent to {channel.mention}"
             embed = self.bot.create_embed(
@@ -78,6 +52,20 @@ class Logging(commands.Cog):
                 command_type="Administrative"
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
+
+    async def get_log_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
+        """Get the logging channel for a guild"""
+        try:
+            # Get from Replit DB
+            config = await self.db_manager.get_data('logging_config', str(guild_id))
+            if not config:
+                return None
+                
+            channel = self.bot.get_channel(config['channel_id'])
+            return channel
+        except Exception as e:
+            print(f"Error getting log channel: {e}")
+            return None
 
     async def log_to_channel(self, guild: discord.Guild, title: str, description: str, color: discord.Color = None):
         """Send a log embed to the guild's logging channel"""
@@ -176,6 +164,50 @@ class Logging(commands.Cog):
         )
 
     @commands.Cog.listener()
+    async def on_guild_channel_create(self, channel):
+        """Log channel creation"""
+        description = (
+            f"Name: #{channel.name}\n"
+            f"Type: {str(channel.type)}"
+        )
+        await self.log_to_channel(
+            channel.guild,
+            "📝 Channel Created",
+            description,
+            discord.Color.green()
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel):
+        """Log channel deletion"""
+        description = (
+            f"Name: #{channel.name}\n"
+            f"Type: {str(channel.type)}"
+        )
+        await self.log_to_channel(
+            channel.guild,
+            "🗑️ Channel Deleted",
+            description,
+            discord.Color.red()
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_channel_update(self, before, after):
+        """Log channel updates"""
+        if before.name != after.name:
+            description = (
+                f"Channel: #{after.name}\n"
+                f"Before: #{before.name}\n"
+                f"After: #{after.name}"
+            )
+            await self.log_to_channel(
+                after.guild,
+                "📝 Channel Renamed",
+                description,
+                discord.Color.blue()
+            )
+
+    @commands.Cog.listener()
     async def on_member_update(self, before, after):
         """Log member updates (roles, nickname)"""
         if before.roles != after.roles:
@@ -212,32 +244,42 @@ class Logging(commands.Cog):
             )
 
     @commands.Cog.listener()
-    async def on_guild_channel_create(self, channel):
-        """Log channel creation"""
-        description = (
-            f"Name: #{channel.name}\n"
-            f"Type: {str(channel.type)}"
-        )
+    async def on_guild_role_create(self, role):
+        """Log role creation"""
+        description = f"Role: {role.mention}"
         await self.log_to_channel(
-            channel.guild,
-            "📝 Channel Created",
+            role.guild,
+            "📝 Role Created",
             description,
             discord.Color.green()
         )
 
     @commands.Cog.listener()
-    async def on_guild_channel_delete(self, channel):
-        """Log channel deletion"""
-        description = (
-            f"Name: #{channel.name}\n"
-            f"Type: {str(channel.type)}"
-        )
+    async def on_guild_role_delete(self, role):
+        """Log role deletion"""
+        description = f"Role: {role.name}"
         await self.log_to_channel(
-            channel.guild,
-            "🗑️ Channel Deleted",
+            role.guild,
+            "🗑️ Role Deleted",
             description,
             discord.Color.red()
         )
+
+    @commands.Cog.listener()
+    async def on_guild_role_update(self, before, after):
+        """Log role updates"""
+        if before.name != after.name:
+            description = (
+                f"Role: {after.mention}\n"
+                f"Before: {before.name}\n"
+                f"After: {after.name}"
+            )
+            await self.log_to_channel(
+                after.guild,
+                "📝 Role Updated",
+                description,
+                discord.Color.blue()
+            )
 
 async def setup(bot):
     await bot.add_cog(Logging(bot))

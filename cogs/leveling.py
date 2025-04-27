@@ -1,5 +1,7 @@
 import discord
+from discord.commands import slash_command, Option
 from discord.ext import commands
+from typing import Optional
 import math
 from datetime import datetime, timedelta
 from utils.db_manager import DBManager
@@ -87,8 +89,8 @@ class Leveling(commands.Cog):
         except Exception as e:
             print(f"Error in leveling system: {e}")
 
-    @commands.slash_command(description="Check your or another user's level")
-    async def level(self, interaction: discord.Interaction, user: discord.Member = None):
+    @discord.slash_command(description="Check your or another user's level")
+    async def level(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
         """Show level and XP information for a user"""
         try:
             target = user or interaction.user
@@ -138,7 +140,7 @@ class Leveling(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Set the base XP awarded per message")
+    @discord.slash_command(description="Set the base XP awarded per message")
     @commands.default_member_permissions(administrator=True)
     async def set_xp_rate(self, interaction: discord.Interaction, amount: int):
         """Set the base XP awarded per message (Admin only)"""
@@ -169,7 +171,7 @@ class Leveling(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Set the cooldown between XP awards")
+    @discord.slash_command(description="Set the cooldown between XP awards")
     @commands.default_member_permissions(administrator=True)
     async def set_xp_cooldown(self, interaction: discord.Interaction, seconds: int):
         """Set the cooldown between XP awards (Admin only)"""
@@ -202,7 +204,7 @@ class Leveling(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Shows the server's XP leaderboard")
+    @discord.slash_command(description="Shows the server's XP leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
         """Shows the server's XP leaderboard"""
         # Get all leaderboard data

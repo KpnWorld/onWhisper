@@ -1,4 +1,5 @@
 import discord
+from discord.commands import slash_command, Option
 from discord.ext import commands
 from typing import Optional, List
 from utils.db_manager import DBManager
@@ -35,7 +36,7 @@ class AutoRole(commands.Cog):
         except Exception as e:
             print(f"Error in auto role assignment: {e}")
 
-    @commands.slash_command(description="Set the automatic role for new members")
+    @discord.slash_command(description="Set the automatic role for new members")
     @commands.default_member_permissions(manage_roles=True)
     async def setautorole(self, interaction: discord.Interaction, role: discord.Role):
         """Set the automatic role for new members"""
@@ -67,7 +68,7 @@ class AutoRole(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Disable the automatic role assignment")
+    @discord.slash_command(description="Disable the automatic role assignment")
     @commands.default_member_permissions(manage_roles=True)
     async def removeautorole(self, interaction: discord.Interaction):
         """Disable the automatic role assignment"""
@@ -89,7 +90,7 @@ class AutoRole(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Bind a role to a reaction on a message")
+    @discord.slash_command(description="Bind a role to a reaction on a message")
     @commands.default_member_permissions(manage_roles=True)
     async def bind_reaction_role(
         self, 

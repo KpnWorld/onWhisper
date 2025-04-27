@@ -1,7 +1,7 @@
 import discord
+from discord.commands import slash_command, Option
 from discord.ext import commands
 from datetime import datetime
-from typing import Optional
 from utils.db_manager import DBManager
 
 class Tickets(commands.Cog):
@@ -10,7 +10,7 @@ class Tickets(commands.Cog):
         self.db_manager = DBManager()
         self.active_tickets = {}
 
-    @commands.slash_command(description="Create a new support ticket")
+    @discord.slash_command(description="Create a new support ticket")
     async def ticket(self, interaction: discord.Interaction, reason: str):
         """Create a new support ticket thread"""
         try:
@@ -88,7 +88,7 @@ class Tickets(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Close your current support ticket")
+    @discord.slash_command(description="Close your current support ticket")
     async def close_ticket(self, interaction: discord.Interaction):
         """Close an active support ticket"""
         try:
@@ -157,7 +157,7 @@ class Tickets(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Add a user to the current ticket")
+    @discord.slash_command(description="Add a user to the current ticket")
     @commands.default_member_permissions(manage_threads=True)
     async def add_to_ticket(self, interaction: discord.Interaction, user: discord.Member):
         """Add a user to a ticket thread (Staff only)"""
@@ -189,7 +189,7 @@ class Tickets(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Remove a user from the current ticket")
+    @discord.slash_command(description="Remove a user from the current ticket")
     @commands.default_member_permissions(manage_threads=True)
     async def remove_from_ticket(self, interaction: discord.Interaction, user: discord.Member):
         """Remove a user from a ticket thread (Staff only)"""
@@ -221,7 +221,7 @@ class Tickets(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(description="Send information about the ticket system")
+    @discord.slash_command(description="Send ticket system information")
     @commands.default_member_permissions(administrator=True)
     async def tickets_info(self, interaction: discord.Interaction):
         """Send an embed explaining the ticket system (Admin only)"""
