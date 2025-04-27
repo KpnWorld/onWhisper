@@ -62,9 +62,17 @@ class Bot(commands.Bot):
                 except Exception as e:
                     print(f"Failed to load extension {filename}: {e}")
 
-        # Sync hybrid and slash commands
+        # Sync commands
         print("Syncing commands...")
-        await self.tree.sync()
+        try:
+            synced = await self.tree.sync()
+            print(f"Synced {len(synced)} command(s)")
+        except Exception as e:
+            print(f"Failed to sync commands: {e}")
+
+        # Start background tasks
+        self.bg_task = self.loop.create_task(self._periodic_db_cleanup())
+        self.bg_task = self.loop.create_task(self._periodic_db_optimize())
 
     async def close(self):
         await self.db_manager.close()
@@ -72,9 +80,9 @@ class Bot(commands.Bot):
 
     async def on_ready(self):
         try:
-            # Count both application commands and hybrid commands
-            all_commands = len(self.commands) + len(self.application_commands)
-            formatted_count = f"{all_commands:,}"
+            # Count both application commands and text commands
+            total_commands = len(set([cmd.qualified_name for cmd in self.walk_commands()]))
+            formatted_count = f"{total_commands:,}"
 
             print("\n───────────────")
             print(f"🔌 Connected as {self.user}")
@@ -82,7 +90,7 @@ class Bot(commands.Bot):
             print(f"🎯 Commands loaded ({formatted_count} commands)")
             print("───────────────\n")
 
-            change_activity.start()
+            change_activity.start(self)
 
         except Exception as e:
             print(f"✖ Error during on_ready setup: {str(e)}")
@@ -94,7 +102,7 @@ class Bot(commands.Bot):
         except Exception as e:
             print(f"Failed to initialize settings for guild {guild.name}: {e}")
 
-    async def on_app_command_completion(self, interaction: discord.Interaction, command: commands.Command):
+    async def on_app_command_completion(self, interaction: discord.Interaction, command: discord.app_commands.Command):
         """Command completion handler without logging"""
         pass
 
@@ -168,8 +176,7 @@ class Bot(commands.Bot):
             print(f"Optimization loop error: {e}")
 
 @tasks.loop(minutes=10)
-async def change_activity():
-    await bot.wait_until_ready()
+async def change_activity(bot):
     await bot.change_presence(activity=random.choice(ACTIVITIES))
 
 def run_bot():

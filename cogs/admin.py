@@ -12,7 +12,7 @@ class Admin(commands.Cog):
         self.db_manager = DBManager()
 
     @commands.hybrid_group(name="config")
-    @commands.default_member_permissions(administrator=True)
+    @commands.has_permissions(administrator=True)
     async def config(self, ctx):
         """Base command for server configuration"""
         if ctx.invoked_subcommand is None:

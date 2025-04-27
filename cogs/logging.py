@@ -1,5 +1,4 @@
 import discord
-from discord.commands import slash_command, Option
 from discord.ext import commands
 from typing import Optional
 from utils.db_manager import DBManager
@@ -10,7 +9,7 @@ class Logging(commands.Cog):
         self.db_manager = DBManager()
 
     @discord.slash_command(description="Set the logging channel for the server")
-    @commands.default_member_permissions(administrator=True)
+    @commands.has_permissions(administrator=True)
     async def set_logs(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """Set the channel for logging events"""
         try:

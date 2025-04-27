@@ -1,5 +1,4 @@
 import discord
-from discord.commands import slash_command, Option
 from discord.ext import commands
 from typing import Optional
 import math
@@ -13,13 +12,13 @@ class LeaderboardView(discord.ui.View):
         self.current_page = 0
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray)
-    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def previous_button(self, button: discord.ui.Button, interaction: discord.Interaction):
         if self.current_page > 0:
             self.current_page -= 1
             await interaction.response.edit_message(embed=self.pages[self.current_page])
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.gray)
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def next_button(self, button: discord.ui.Button, interaction: discord.Interaction):
         if self.current_page < len(self.pages) - 1:
             self.current_page += 1
             await interaction.response.edit_message(embed=self.pages[self.current_page])
@@ -140,75 +139,11 @@ class Leveling(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @discord.slash_command(description="Set the base XP awarded per message")
-    @commands.default_member_permissions(administrator=True)
-    async def set_xp_rate(self, interaction: discord.Interaction, amount: int):
-        """Set the base XP awarded per message (Admin only)"""
-        try:
-            if amount < 1 or amount > 100:
-                embed = self.bot.create_embed(
-                    "Invalid XP Rate",
-                    "XP rate must be between 1 and 100",
-                    command_type="Administrative"
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-                
-            self.base_xp = amount
-            
-            embed = self.bot.create_embed(
-                "XP Rate Updated",
-                f"Base XP per message has been set to {amount}",
-                command_type="Administrative"
-            )
-            await interaction.response.send_message(embed=embed)
-            
-        except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="Administrative"
-            )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
-
-    @discord.slash_command(description="Set the cooldown between XP awards")
-    @commands.default_member_permissions(administrator=True)
-    async def set_xp_cooldown(self, interaction: discord.Interaction, seconds: int):
-        """Set the cooldown between XP awards (Admin only)"""
-        try:
-            if seconds < 0 or seconds > 300:
-                embed = self.bot.create_embed(
-                    "Invalid Cooldown",
-                    "Cooldown must be between 0 and 300 seconds",
-                    command_type="Administrative"
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-                
-            self.cooldown = seconds
-            # Clear existing cooldowns
-            self.xp_cooldown.clear()
-            
-            embed = self.bot.create_embed(
-                "XP Cooldown Updated",
-                f"XP cooldown has been set to {seconds} seconds",
-                command_type="Administrative"
-            )
-            await interaction.response.send_message(embed=embed)
-            
-        except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="Administrative"
-            )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
-
     @discord.slash_command(description="Shows the server's XP leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
         """Shows the server's XP leaderboard"""
         # Get all leaderboard data
-        leaderboard_data = await self.db_manager.get_leaderboard(interaction.guild_id, limit=100)
+        leaderboard_data = await self.db_manager.get_leaderboard(interaction.guild.id, limit=100)
         
         if not leaderboard_data:
             await interaction.response.send_message("No leaderboard data available yet!")
