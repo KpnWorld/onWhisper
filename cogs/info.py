@@ -9,6 +9,60 @@ class Info(commands.Cog):
         self.bot = bot
         self.start_time = datetime.utcnow()
 
+    @commands.hybrid_command(name="help", description="Shows all available commands")
+    async def help_command(self, ctx, command: str = None):
+        """Shows a list of all commands or detailed help for a specific command"""
+        try:
+            if command:
+                # Show help for specific command
+                cmd = self.bot.get_command(command)
+                if not cmd:
+                    raise commands.CommandNotFound(f"Command '{command}' not found.")
+
+                description = (
+                    f"**Description:** {cmd.description or cmd.help or 'No description available'}\n"
+                    f"**Usage:** !{cmd.qualified_name} {cmd.signature}"
+                )
+                
+                embed = self.bot.create_embed(
+                    f"Help: {cmd.qualified_name}",
+                    description,
+                    command_type="User"
+                )
+                
+            else:
+                # Show all commands grouped by cogs
+                description = ""
+                
+                for cog_name, cog in self.bot.cogs.items():
+                    # Get all commands from the cog that the user can use
+                    cog_commands = [cmd for cmd in cog.get_commands() if cmd.hidden is False]
+                    
+                    if cog_commands:
+                        # Add cog section
+                        description += f"\n**{cog_name}**\n"
+                        
+                        # Add each command's help
+                        for cmd in cog_commands:
+                            description += f"`!{cmd.name}` - {cmd.description or cmd.help or 'No description'}\n"
+                
+                embed = self.bot.create_embed(
+                    "Command Help",
+                    description.strip(),
+                    command_type="User"
+                )
+                embed.set_footer(text="Type !help <command> for detailed information about a command")
+            
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            error_embed = self.bot.create_embed(
+                "Error",
+                str(e),
+                command_type="User"
+            )
+            await ctx.send(embed=error_embed, ephemeral=True)
+
     @commands.hybrid_command(description="Get information about the bot")
     async def botinfo(self, ctx):
         """Display information about the bot"""
