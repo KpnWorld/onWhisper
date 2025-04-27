@@ -35,8 +35,8 @@ class AutoRole(commands.Cog):
         except Exception as e:
             print(f"Error in auto role assignment: {e}")
 
-    @commands.slash_command(name="setautorole", description="Set the automatic role for new members")
-    @commands.has_permissions(manage_roles=True)
+    @commands.slash_command(description="Set the automatic role for new members")
+    @commands.default_member_permissions(manage_roles=True)
     async def setautorole(self, interaction: discord.Interaction, role: discord.Role):
         """Set the automatic role for new members"""
         try:
@@ -67,12 +67,12 @@ class AutoRole(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(name="removeautorole", description="Disable the automatic role assignment")
-    @commands.has_permissions(manage_roles=True)
+    @commands.slash_command(description="Disable the automatic role assignment")
+    @commands.default_member_permissions(manage_roles=True)
     async def removeautorole(self, interaction: discord.Interaction):
         """Disable the automatic role assignment"""
         try:
-            await self.db_manager.remove_auto_role(interaction.guild.id)
+            await self.db_manager.set_auto_role(interaction.guild.id, None, False)
             
             embed = self.bot.create_embed(
                 "Auto Role Disabled",
@@ -89,10 +89,15 @@ class AutoRole(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(name="bind_reaction_role", description="Bind a role to a reaction on a message")
-    @commands.has_permissions(manage_roles=True)
-    async def bind_reaction_role(self, interaction: discord.Interaction, 
-                               message_id: str, emoji: str, role: discord.Role):
+    @commands.slash_command(description="Bind a role to a reaction on a message")
+    @commands.default_member_permissions(manage_roles=True)
+    async def bind_reaction_role(
+        self, 
+        interaction: discord.Interaction, 
+        message_id: str,
+        emoji: str,
+        role: discord.Role
+    ):
         """Bind a role to a reaction on a message"""
         try:
             # Convert message ID to int

@@ -42,7 +42,9 @@ class Bot(commands.Bot):
         super().__init__(
             command_prefix=commands.when_mentioned,
             intents=discord.Intents.all(),
-            help_command=None
+            help_command=None,
+            # Py-cord specific options
+            debug_guilds=None  # Set this to guild IDs for dev environment
         )
         self.db_manager = DBManager('bot')
         self._rate_limit_retries = 0
@@ -81,25 +83,14 @@ class Bot(commands.Bot):
 
     async def on_ready(self):
         try:
-            # Check if we need to sync commands (only once per boot)
-            if not hasattr(self, 'commands_synced'):  
-                try:
-                    await self.sync_commands()  # Sync commands
-                    self.commands_synced = True  # Set flag after syncing
-                    synced_count = len(self.application_commands)
-                except Exception as e:
-                    print(f"⚠ Failed to sync commands: {e}")
-                    synced_count = "?"
-            else:
-                synced_count = len(self.application_commands)
-
-            # Pretty format synced count with commas
+            # Py-cord automatically syncs commands, no need for manual sync
+            synced_count = len(self.application_commands)
             formatted_count = f"{synced_count:,}"
 
             print("\n───────────────")
-            print(f"🔌 Connected as {self.user.name}#{self.user.discriminator}")
+            print(f"🔌 Connected as {self.user}")  # Py-cord handles discriminator changes
             print(f"🌎 Serving {len(self.guilds)} servers")
-            print(f"🎯 Slash commands auto-synced by Pycord ({formatted_count} commands)")
+            print(f"🎯 Slash commands loaded ({formatted_count} commands)")
             print("───────────────\n")
 
             change_activity.start()

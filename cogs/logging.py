@@ -30,11 +30,21 @@ class Logging(commands.Cog):
             
         return channel
 
-    @commands.slash_command(name="setlogchannel", description="Set the channel for logging events")
-    @commands.has_permissions(administrator=True)
+    @commands.slash_command(description="Set the channel for logging events")
+    @commands.default_member_permissions(administrator=True)
     async def setlogchannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """Set the channel for logging events"""
         try:
+            # Verify bot permissions in the channel
+            if not channel.permissions_for(interaction.guild.me).send_messages:
+                embed = self.bot.create_embed(
+                    "Permission Error",
+                    "I need permission to send messages in that channel!",
+                    command_type="Administrative"
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
             await self.db_manager.execute(
                 """
                 INSERT OR REPLACE INTO logging_config (guild_id, channel_id)
@@ -52,6 +62,14 @@ class Logging(commands.Cog):
                 command_type="Administrative"
             )
             await interaction.response.send_message(embed=embed)
+            
+            # Send test log to verify
+            await self.log_to_channel(
+                interaction.guild,
+                "Logging Channel Set",
+                f"Logging channel set to {channel.mention} by {interaction.user.mention}",
+                discord.Color.green()
+            )
             
         except Exception as e:
             error_embed = self.bot.create_embed(

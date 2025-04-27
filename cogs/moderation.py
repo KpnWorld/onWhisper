@@ -10,7 +10,7 @@ class Moderation(commands.Cog):
         self.db_manager = DBManager()
         self.locked_channels = set()
 
-    @commands.slash_command(name="kick", description="Kick a member from the server")
+    @commands.slash_command(description="Kick a member from the server")
     @commands.has_permissions(kick_members=True)
     async def kick(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
         """Kick a member from the server"""
@@ -59,10 +59,9 @@ class Moderation(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(name="ban", description="Ban a member from the server")
+    @commands.slash_command(description="Ban a member from the server")
     @commands.has_permissions(ban_members=True)
-    async def ban(self, interaction: discord.Interaction, member: discord.Member, 
-                 reason: str = None, delete_days: int = 0):
+    async def ban(self, interaction: discord.Interaction, member: discord.Member, reason: str = None, delete_days: int = 0):
         """Ban a member from the server"""
         try:
             # Check hierarchy
@@ -114,10 +113,9 @@ class Moderation(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(name="timeout", description="Timeout (mute) a member")
+    @commands.slash_command(description="Timeout (mute) a member")
     @commands.has_permissions(moderate_members=True)
-    async def timeout(self, interaction: discord.Interaction, member: discord.Member, 
-                     duration: int, unit: str, reason: str = None):
+    async def timeout(self, interaction: discord.Interaction, member: discord.Member, duration: int, unit: str, reason: str = None):
         """Timeout (mute) a member"""
         try:
             # Convert duration to timedelta
@@ -196,12 +194,13 @@ class Moderation(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(name="clear", description="Clear a specified number of messages")
+    @commands.slash_command(description="Clear a specified number of messages")
     @commands.has_permissions(manage_messages=True)
     async def clear(self, interaction: discord.Interaction, amount: int, user: discord.Member = None):
         """Clear a specified number of messages"""
         try:
-            await interaction.response.defer(ephemeral=True)
+            if isinstance(interaction, discord.Interaction):
+                await interaction.response.defer(ephemeral=True)
             
             def check_message(m):
                 return user is None or m.author == user
@@ -209,7 +208,7 @@ class Moderation(commands.Cog):
             deleted = await interaction.channel.purge(
                 limit=amount,
                 check=check_message,
-                before=interaction.created_at
+                before=interaction.message.created_at if hasattr(interaction, 'message') else interaction.created_at
             )
             
             # Log the action
@@ -232,7 +231,11 @@ class Moderation(commands.Cog):
                 description,
                 command_type="Administrative"
             )
-            await interaction.followup.send(embed=embed, ephemeral=True)
+
+            if isinstance(interaction, discord.Interaction):
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            else:
+                await interaction.send(embed=embed, delete_after=5)
             
         except discord.Forbidden:
             error_embed = self.bot.create_embed(
@@ -240,16 +243,22 @@ class Moderation(commands.Cog):
                 "I don't have permission to delete messages!",
                 command_type="Administrative"
             )
-            await interaction.followup.send(embed=error_embed, ephemeral=True)
+            if isinstance(interaction, discord.Interaction):
+                await interaction.followup.send(embed=error_embed, ephemeral=True)
+            else:
+                await interaction.send(embed=error_embed, ephemeral=True)
         except Exception as e:
             error_embed = self.bot.create_embed(
                 "Error",
                 str(e),
                 command_type="Administrative"
             )
-            await interaction.followup.send(embed=error_embed, ephemeral=True)
+            if isinstance(interaction, discord.Interaction):
+                await interaction.followup.send(embed=error_embed, ephemeral=True)
+            else:
+                await interaction.send(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(name="warn", description="Warn a member")
+    @commands.slash_command(description="Warn a member")
     @commands.has_permissions(moderate_members=True)
     async def warn(self, interaction: discord.Interaction, member: discord.Member, reason: str):
         """Warn a member"""
@@ -298,13 +307,12 @@ class Moderation(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.hybrid_command(name="lock", description="Lock a channel")
+    @commands.slash_command(description="Lock a channel")
     @commands.has_permissions(manage_channels=True)
-    @commands.guild_only()
-    async def lock(self, ctx, channel: discord.TextChannel = None, reason: str = None):
+    async def lock(self, interaction: discord.Interaction, channel: discord.TextChannel = None, reason: str = None):
         """Lock a channel to prevent messages from non-moderators"""
         try:
-            channel = channel or ctx.channel
+            channel = channel or interaction.channel
             
             # Don't lock if already locked
             if channel.id in self.locked_channels:
@@ -313,22 +321,22 @@ class Moderation(commands.Cog):
                     f"{channel.mention} is already locked!",
                     command_type="Administrative"
                 )
-                await ctx.send(embed=embed)
+                await interaction.response.send_message(embed=embed)
                 return
 
             # Store current permissions and update
-            overwrites = channel.overwrites_for(ctx.guild.default_role)
+            overwrites = channel.overwrites_for(interaction.guild.default_role)
             overwrites.send_messages = False
-            await channel.set_permissions(ctx.guild.default_role, overwrite=overwrites)
+            await channel.set_permissions(interaction.guild.default_role, overwrite=overwrites)
             
             self.locked_channels.add(channel.id)
             
             # Log the action
             await self.db_manager.log_event(
-                ctx.guild.id,
-                ctx.author.id,
+                interaction.guild.id,
+                interaction.user.id,
                 "lock",
-                f"Channel {channel.name} locked by {ctx.author} for: {reason}"
+                f"Channel {channel.name} locked by {interaction.user} for: {reason}"
             )
             
             description = (
@@ -341,7 +349,7 @@ class Moderation(commands.Cog):
                 description,
                 command_type="Administrative"
             )
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
             
         except Exception as e:
             error_embed = self.bot.create_embed(
@@ -349,15 +357,14 @@ class Moderation(commands.Cog):
                 str(e),
                 command_type="Administrative"
             )
-            await ctx.send(embed=error_embed)
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.hybrid_command(name="unlock", description="Unlock a locked channel")
+    @commands.slash_command(description="Unlock a locked channel")
     @commands.has_permissions(manage_channels=True)
-    @commands.guild_only()
-    async def unlock(self, ctx, channel: discord.TextChannel = None):
+    async def unlock(self, interaction: discord.Interaction, channel: discord.TextChannel = None):
         """Unlock a previously locked channel"""
         try:
-            channel = channel or ctx.channel
+            channel = channel or interaction.channel
             
             if channel.id not in self.locked_channels:
                 embed = self.bot.create_embed(
@@ -365,22 +372,22 @@ class Moderation(commands.Cog):
                     f"{channel.mention} is not locked!",
                     command_type="Administrative"
                 )
-                await ctx.send(embed=embed)
+                await interaction.response.send_message(embed=embed)
                 return
 
             # Restore permissions
-            overwrites = channel.overwrites_for(ctx.guild.default_role)
+            overwrites = channel.overwrites_for(interaction.guild.default_role)
             overwrites.send_messages = None
-            await channel.set_permissions(ctx.guild.default_role, overwrite=overwrites)
+            await channel.set_permissions(interaction.guild.default_role, overwrite=overwrites)
             
             self.locked_channels.remove(channel.id)
             
             # Log the action
             await self.db_manager.log_event(
-                ctx.guild.id,
-                ctx.author.id,
+                interaction.guild.id,
+                interaction.user.id,
                 "unlock",
-                f"Channel {channel.name} unlocked by {ctx.author}"
+                f"Channel {channel.name} unlocked by {interaction.user}"
             )
             
             embed = self.bot.create_embed(
@@ -388,7 +395,7 @@ class Moderation(commands.Cog):
                 f"Channel {channel.mention} has been unlocked.",
                 command_type="Administrative"
             )
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
             
         except Exception as e:
             error_embed = self.bot.create_embed(
@@ -396,15 +403,14 @@ class Moderation(commands.Cog):
                 str(e),
                 command_type="Administrative"
             )
-            await ctx.send(embed=error_embed)
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.hybrid_command(name="snipe", description="Show recently deleted messages")
+    @commands.slash_command(description="Show recently deleted messages")
     @commands.has_permissions(manage_messages=True)
-    @commands.guild_only()
-    async def snipe(self, ctx, channel: discord.TextChannel = None):
+    async def snipe(self, interaction: discord.Interaction, channel: discord.TextChannel = None):
         """Show the most recently deleted message in the channel"""
         try:
-            channel = channel or ctx.channel
+            channel = channel or interaction.channel
             
             # Get deleted message from database
             deleted_message = await self.db_manager.fetch_one(
@@ -415,7 +421,7 @@ class Moderation(commands.Cog):
                 ORDER BY timestamp DESC
                 LIMIT 1
                 """,
-                (ctx.guild.id, channel.id)
+                (interaction.guild.id, channel.id)
             )
             
             if not deleted_message:
@@ -424,11 +430,11 @@ class Moderation(commands.Cog):
                     f"No recently deleted messages found in {channel.mention}",
                     command_type="Administrative"
                 )
-                await ctx.send(embed=embed, ephemeral=True)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
                 
             user_id, content, timestamp = deleted_message
-            user = ctx.guild.get_member(user_id)
+            user = interaction.guild.get_member(user_id)
             
             description = (
                 f"Author: {user.mention if user else 'Unknown User'}\n"
@@ -442,7 +448,7 @@ class Moderation(commands.Cog):
                 description,
                 command_type="Administrative"
             )
-            await ctx.send(embed=embed, ephemeral=True)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             
         except Exception as e:
             error_embed = self.bot.create_embed(
@@ -450,15 +456,14 @@ class Moderation(commands.Cog):
                 str(e),
                 command_type="Administrative"
             )
-            await ctx.send(embed=error_embed)
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.hybrid_command(name="slowmode", description="Set channel slowmode")
+    @commands.slash_command(description="Set channel slowmode")
     @commands.has_permissions(manage_channels=True)
-    @commands.guild_only()
-    async def slowmode(self, ctx, seconds: int, channel: discord.TextChannel = None):
+    async def slowmode(self, interaction: discord.Interaction, seconds: int, channel: discord.TextChannel = None):
         """Set the slowmode delay for a channel"""
         try:
-            channel = channel or ctx.channel
+            channel = channel or interaction.channel
             
             if seconds < 0:
                 embed = self.bot.create_embed(
@@ -466,15 +471,15 @@ class Moderation(commands.Cog):
                     "Slowmode delay must be 0 or higher!",
                     command_type="Administrative"
                 )
-                await ctx.send(embed=embed)
+                await interaction.response.send_message(embed=embed)
                 return
                 
             await channel.edit(slowmode_delay=seconds)
             
             # Log the action
             await self.db_manager.log_event(
-                ctx.guild.id,
-                ctx.author.id,
+                interaction.guild.id,
+                interaction.user.id,
                 "slowmode",
                 f"Slowmode set to {seconds}s in {channel.name}"
             )
@@ -489,7 +494,7 @@ class Moderation(commands.Cog):
                 description,
                 command_type="Administrative"
             )
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
             
         except Exception as e:
             error_embed = self.bot.create_embed(
@@ -497,7 +502,7 @@ class Moderation(commands.Cog):
                 str(e),
                 command_type="Administrative"
             )
-            await ctx.send(embed=error_embed)
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message):

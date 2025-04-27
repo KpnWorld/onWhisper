@@ -4,13 +4,31 @@ import math
 from datetime import datetime, timedelta
 from utils.db_manager import DBManager
 
+class LeaderboardView(discord.ui.View):
+    def __init__(self, pages, timeout=60):
+        super().__init__(timeout=timeout)
+        self.pages = pages
+        self.current_page = 0
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await interaction.response.edit_message(embed=self.pages[self.current_page])
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.gray)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+            await interaction.response.edit_message(embed=self.pages[self.current_page])
+
 class Leveling(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_manager = DBManager()
-        self.xp_cooldown = {}  # User cooldown cache
-        self.base_xp = 15     # Base XP per message
-        self.cooldown = 60    # Default cooldown in seconds
+        self.xp_cooldown = {}
+        self.base_xp = 15
+        self.cooldown = 60
 
     def calculate_level(self, xp):
         """Calculate level from XP using a logarithmic formula"""
@@ -69,8 +87,8 @@ class Leveling(commands.Cog):
         except Exception as e:
             print(f"Error in leveling system: {e}")
 
-    @commands.slash_command(name="level", description="Check your or another user's level")
-    async def level(self, interaction: discord.Interaction, user: discord.User = None):
+    @commands.slash_command(description="Check your or another user's level")
+    async def level(self, interaction: discord.Interaction, user: discord.Member = None):
         """Show level and XP information for a user"""
         try:
             target = user or interaction.user
@@ -120,8 +138,8 @@ class Leveling(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(name="set-xp-rate", description="Set the base XP awarded per message")
-    @commands.has_permissions(administrator=True)
+    @commands.slash_command(description="Set the base XP awarded per message")
+    @commands.default_member_permissions(administrator=True)
     async def set_xp_rate(self, interaction: discord.Interaction, amount: int):
         """Set the base XP awarded per message (Admin only)"""
         try:
@@ -151,8 +169,8 @@ class Leveling(commands.Cog):
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    @commands.slash_command(name="set-xp-cooldown", description="Set the cooldown between XP awards")
-    @commands.has_permissions(administrator=True)
+    @commands.slash_command(description="Set the cooldown between XP awards")
+    @commands.default_member_permissions(administrator=True)
     async def set_xp_cooldown(self, interaction: discord.Interaction, seconds: int):
         """Set the cooldown between XP awards (Admin only)"""
         try:
@@ -183,6 +201,43 @@ class Leveling(commands.Cog):
                 command_type="Administrative"
             )
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
+
+    @commands.slash_command(description="Shows the server's XP leaderboard")
+    async def leaderboard(self, interaction: discord.Interaction):
+        """Shows the server's XP leaderboard"""
+        # Get all leaderboard data
+        leaderboard_data = await self.db_manager.get_leaderboard(interaction.guild_id, limit=100)
+        
+        if not leaderboard_data:
+            await interaction.response.send_message("No leaderboard data available yet!")
+            return
+
+        # Create pages (10 users per page)
+        pages = []
+        users_per_page = 10
+        for i in range(0, len(leaderboard_data), users_per_page):
+            page_data = leaderboard_data[i:i + users_per_page]
+            
+            embed = discord.Embed(
+                title=f"{interaction.guild.name}'s Leaderboard",
+                color=discord.Color.blue()
+            )
+            
+            description = ""
+            for rank, (user_id, level, xp) in enumerate(page_data, start=i + 1):
+                user = interaction.guild.get_member(user_id)
+                username = user.display_name if user else f"User {user_id}"
+                description += f"#{rank}. {username}\nLevel: {level} | XP: {xp:,}\n\n"
+            
+            embed.description = description
+            embed.set_footer(text=f"Page {len(pages) + 1}/{-(-len(leaderboard_data) // users_per_page)}")
+            pages.append(embed)
+        
+        if pages:
+            view = LeaderboardView(pages)
+            await interaction.response.send_message(embed=pages[0], view=view)
+        else:
+            await interaction.response.send_message("No leaderboard data available yet!")
 
 async def setup(bot):
     await bot.add_cog(Leveling(bot))
