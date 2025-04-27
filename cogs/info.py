@@ -72,11 +72,14 @@ class Info(commands.Cog):
             hours, remainder = divmod(uptime.seconds, 3600)
             minutes, seconds = divmod(remainder, 60)
             
+            # Count both application commands and text commands
+            total_commands = len(set([cmd.qualified_name for cmd in self.bot.walk_commands()]))
+            
             description = (
                 f"**Uptime:** {days}d {hours}h {minutes}m {seconds}s\n"
                 f"**Servers:** {len(self.bot.guilds):,}\n"
                 f"**Users:** {len(self.bot.users):,}\n"
-                f"**Commands:** {len(self.bot.application_commands):,}\n"
+                f"**Commands:** {total_commands:,}\n"
                 f"**Python Version:** {platform.python_version()}\n"
                 f"**py-cord Version:** {discord.__version__}"
             )
