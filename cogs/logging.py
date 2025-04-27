@@ -8,23 +8,23 @@ class Logging(commands.Cog):
         self.bot = bot
         self.db_manager = DBManager()
 
-    @discord.slash_command(description="Set the logging channel for the server")
+    @commands.hybrid_command(description="Set the logging channel for the server")
     @commands.has_permissions(administrator=True)
-    async def set_logs(self, interaction: discord.Interaction, channel: discord.TextChannel):
+    async def setlogs(self, ctx, channel: discord.TextChannel):
         """Set the channel for logging events"""
         try:
             # Verify bot permissions in the channel
-            if not channel.permissions_for(interaction.guild.me).send_messages:
+            if not channel.permissions_for(ctx.guild.me).send_messages:
                 embed = self.bot.create_embed(
                     "Permission Error",
                     "I need permission to send messages in that channel!",
                     command_type="Administrative"
                 )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await ctx.send(embed=embed, ephemeral=True)
                 return
 
             # Store logging channel configuration
-            await self.db_manager.set_data('logging_config', str(interaction.guild.id), {
+            await self.db_manager.set_data('logging_config', str(ctx.guild.id), {
                 'channel_id': channel.id
             })
             
@@ -34,13 +34,13 @@ class Logging(commands.Cog):
                 description,
                 command_type="Administrative"
             )
-            await interaction.response.send_message(embed=embed)
+            await ctx.send(embed=embed)
             
             # Send test log to verify
             await self.log_to_channel(
-                interaction.guild,
+                ctx.guild,
                 "Logging Channel Set",
-                f"Logging channel set to {channel.mention} by {interaction.user.mention}",
+                f"Logging channel set to {channel.mention} by {ctx.author.mention}",
                 discord.Color.green()
             )
             
@@ -50,7 +50,7 @@ class Logging(commands.Cog):
                 str(e),
                 command_type="Administrative"
             )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     async def get_log_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
         """Get the logging channel for a guild"""

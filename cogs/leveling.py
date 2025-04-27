@@ -88,14 +88,14 @@ class Leveling(commands.Cog):
         except Exception as e:
             print(f"Error in leveling system: {e}")
 
-    @discord.slash_command(description="Check your or another user's level")
-    async def level(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
+    @commands.hybrid_command(description="Check your or another user's level")
+    async def level(self, ctx, user: Optional[discord.Member] = None):
         """Show level and XP information for a user"""
         try:
-            target = user or interaction.user
+            target = user or ctx.author
             
             # Get level data
-            level_data = await self.db_manager.get_user_leveling(target.id, interaction.guild.id)
+            level_data = await self.db_manager.get_user_leveling(target.id, ctx.guild.id)
             if not level_data:
                 level, xp = 0, 0
             else:
@@ -129,7 +129,7 @@ class Leveling(commands.Cog):
             if target.avatar:
                 embed.set_thumbnail(url=target.avatar.url)
             
-            await interaction.response.send_message(embed=embed)
+            await ctx.send(embed=embed)
             
         except Exception as e:
             error_embed = self.bot.create_embed(
@@ -137,16 +137,16 @@ class Leveling(commands.Cog):
                 str(e),
                 command_type="User"
             )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            await ctx.send(embed=error_embed, ephemeral=True)
 
-    @discord.slash_command(description="Shows the server's XP leaderboard")
-    async def leaderboard(self, interaction: discord.Interaction):
+    @commands.hybrid_command(description="Shows the server's XP leaderboard")
+    async def leaderboard(self, ctx):
         """Shows the server's XP leaderboard"""
         # Get all leaderboard data
-        leaderboard_data = await self.db_manager.get_leaderboard(interaction.guild.id, limit=100)
+        leaderboard_data = await self.db_manager.get_leaderboard(ctx.guild.id, limit=100)
         
         if not leaderboard_data:
-            await interaction.response.send_message("No leaderboard data available yet!")
+            await ctx.send("No leaderboard data available yet!")
             return
 
         # Create pages (10 users per page)
@@ -156,13 +156,13 @@ class Leveling(commands.Cog):
             page_data = leaderboard_data[i:i + users_per_page]
             
             embed = discord.Embed(
-                title=f"{interaction.guild.name}'s Leaderboard",
+                title=f"{ctx.guild.name}'s Leaderboard",
                 color=discord.Color.blue()
             )
             
             description = ""
             for rank, (user_id, level, xp) in enumerate(page_data, start=i + 1):
-                user = interaction.guild.get_member(user_id)
+                user = ctx.guild.get_member(user_id)
                 username = user.display_name if user else f"User {user_id}"
                 description += f"#{rank}. {username}\nLevel: {level} | XP: {xp:,}\n\n"
             
@@ -172,9 +172,9 @@ class Leveling(commands.Cog):
         
         if pages:
             view = LeaderboardView(pages)
-            await interaction.response.send_message(embed=pages[0], view=view)
+            await ctx.send(embed=pages[0], view=view)
         else:
-            await interaction.response.send_message("No leaderboard data available yet!")
+            await ctx.send("No leaderboard data available yet!")
 
 async def setup(bot):
     await bot.add_cog(Leveling(bot))
