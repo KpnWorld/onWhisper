@@ -57,18 +57,32 @@ class Admin(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @config_xp.command(name="cooldown")
-    async def xp_cooldown(self, ctx, seconds: int):
-        """Set the cooldown between XP gains"""
-        if seconds < 10 or seconds > 300:
-            await ctx.send("Cooldown must be between 10 and 300 seconds")
+    @config_tickets.command(name="category")
+    async def tickets_category(self, ctx, category: discord.CategoryChannel):
+        """Set the category for ticket channels"""
+        await self.db_manager.set_data('tickets_config', str(ctx.guild.id), {'category_id': category.id})
+        embed = self.ui.admin_embed(
+            "Ticket Category Set",
+            f"New tickets will be created in {category.mention}"
+        )
+        await ctx.send(embed=embed)
+
+    @config_logging.command(name="channel")
+    async def logging_channel(self, ctx, channel: discord.TextChannel):
+        """Set the channel for server logs"""
+        # Verify bot permissions
+        if not channel.permissions_for(ctx.guild.me).send_messages:
+            embed = self.ui.admin_embed(
+                "Permission Error",
+                "I need permission to send messages in that channel!"
+            )
+            await ctx.send(embed=embed, ephemeral=True)
             return
             
-        await self.db_manager.set_data('xp_config', str(ctx.guild.id), {'cooldown': seconds})
+        await self.db_manager.set_data('logging_config', str(ctx.guild.id), {'channel_id': channel.id})
         embed = self.ui.admin_embed(
-            "XP Cooldown Updated",
-            f"Members will now have a {seconds} second cooldown between XP gains",
-            command_type="Administrative"
+            "Logging Channel Set",
+            f"Server logs will now be sent to {channel.mention}"
         )
         await ctx.send(embed=embed)
 
@@ -85,17 +99,6 @@ class Admin(commands.Cog):
                 command_type="Administrative"
             )
             await ctx.send(embed=embed)
-
-    @config_tickets.command(name="category")
-    async def tickets_category(self, ctx, category: discord.CategoryChannel):
-        """Set the category for ticket channels"""
-        await self.db_manager.set_data('tickets_config', str(ctx.guild.id), {'category_id': category.id})
-        embed = self.ui.admin_embed(
-            "Ticket Category Set",
-            f"New tickets will be created in {category.mention}",
-            command_type="Administrative"
-        )
-        await ctx.send(embed=embed)
 
     @config_tickets.command(name="support")
     async def tickets_support(self, ctx, role: discord.Role):
@@ -121,19 +124,17 @@ class Admin(commands.Cog):
             )
             await ctx.send(embed=embed)
 
-    @config_logging.command(name="channel")
-    async def logging_channel(self, ctx, channel: discord.TextChannel):
-        """Set the channel for server logs"""
-        # Verify bot permissions
-        if not channel.permissions_for(ctx.guild.me).send_messages:
-            await ctx.send("I need permission to send messages in that channel!")
+    @config_xp.command(name="cooldown")
+    async def xp_cooldown(self, ctx, seconds: int):
+        """Set the cooldown between XP gains"""
+        if seconds < 10 or seconds > 300:
+            await ctx.send("Cooldown must be between 10 and 300 seconds")
             return
             
-        await self.db_manager.set_data('logging_config', str(ctx.guild.id), {'channel_id': channel.id})
+        await self.db_manager.set_data('xp_config', str(ctx.guild.id), {'cooldown': seconds})
         embed = self.ui.admin_embed(
-            "Logging Channel Set",
-            f"Server logs will now be sent to {channel.mention}",
-            command_type="Administrative"
+            "XP Cooldown Updated",
+            f"Members will now have a {seconds} second cooldown between XP gains"
         )
         await ctx.send(embed=embed)
 
@@ -206,18 +207,28 @@ class Admin(commands.Cog):
     @config_autorole.command(name="set")
     async def autorole_set(self, ctx, role: discord.Role):
         """Set the role to automatically assign to new members"""
-        # Verify bot permissions
-        if not role.position < ctx.guild.me.top_role.position:
-            await ctx.send("That role is higher than my highest role! I need a role above it to assign it.")
-            return
+        try:
+            # Verify bot permissions
+            if not role.position < ctx.guild.me.top_role.position:
+                embed = self.ui.admin_embed(
+                    "Permission Error",
+                    "That role is higher than my highest role! I need a role above it to assign it."
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
             
-        await self.db_manager.set_auto_role(ctx.guild.id, role.id)
-        embed = self.ui.admin_embed(
-            "Auto-Role Set",
-            f"New members will now automatically receive the {role.mention} role",
-            command_type="Administrative"
-        )
-        await ctx.send(embed=embed)
+            # Always enable when setting new role
+            await self.db_manager.set_auto_role(ctx.guild.id, role.id, True)
+            
+            embed = self.ui.admin_embed(
+                "Auto-Role Set",
+                f"New members will now automatically receive the {role.mention} role"
+            )
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     @config_autorole.command(name="toggle")
     async def autorole_toggle(self, ctx):
