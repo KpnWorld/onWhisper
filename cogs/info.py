@@ -30,6 +30,7 @@ class Info(commands.Cog):
                     f"Help: {cmd.qualified_name}",
                     description
                 )
+
                 if isinstance(ctx, discord.Interaction):
                     await ctx.response.send_message(embed=embed, ephemeral=True)
                 else:
@@ -42,10 +43,26 @@ class Info(commands.Cog):
                 commands_per_page = 10
                 total_commands = 0
 
+                # First page with overview
+                info_embed = self.ui.info_embed(
+                    "Help System",
+                    f"Use `/help <command>` or `!help <command>` for detailed information about a specific command.\n\n"
+                    f"**Navigation:**\n"
+                    f"• Use the buttons below to navigate pages\n"
+                    f"• Each page shows {commands_per_page} commands\n"
+                    f"• Both slash and prefix versions are shown"
+                )
+                pages.append(info_embed)
+
+                # Group commands by cog
                 for cog_name, cog in self.bot.cogs.items():
                     cog_commands = [cmd for cmd in cog.get_commands() if not cmd.hidden]
                     if not cog_commands:
                         continue
+
+                    # Start new page for each cog
+                    current_page = []
+                    current_page.append(f"**{cog_name} Commands**\n")
 
                     for cmd in cog_commands:
                         command_info = (
@@ -57,38 +74,28 @@ class Info(commands.Cog):
                         current_page.append(command_info)
                         total_commands += 1
 
-                        if len(current_page) >= commands_per_page:
-                            embed = self.ui.info_embed(
-                                "📚 Command Help",
-                                "\n".join(current_page)
-                            )
-                            pages.append(embed)
-                            current_page = []
-
-                if current_page:
+                    # Add cog commands to pages
                     embed = self.ui.info_embed(
-                        "📚 Command Help",
+                        f"📚 {cog_name} Commands",
                         "\n".join(current_page)
                     )
                     pages.append(embed)
 
-                info_embed = self.ui.info_embed(
-                    "Help System",
-                    f"Total Commands: {total_commands}\n\n"
-                    f"Use `/help <command>` or `!help <command>` for detailed information about a specific command.\n\n"
-                    f"**Navigation:**\n"
-                    f"• Use the buttons below to navigate pages\n"
-                    f"• Each page shows {commands_per_page} commands\n"
-                    f"• Both slash and prefix versions are shown"
-                )
-                pages.insert(0, info_embed)
+                # Update first page with total commands
+                pages[0].description = f"Total Commands: {total_commands}\n\n" + pages[0].description
 
                 # Send paginated help
                 if isinstance(ctx, discord.Interaction):
-                    await self.ui.paginate(ctx, pages, timeout=300, ephemeral=True)
+                    await ctx.response.send_message(
+                        embed=pages[0],
+                        view=self.ui.Paginator(pages=pages),
+                        ephemeral=True
+                    )
                 else:
-                    msg = await ctx.send(embed=pages[0])
-                    await self.ui.paginate(msg, pages, timeout=300, ephemeral=True)
+                    msg = await ctx.send(
+                        embed=pages[0],
+                        view=self.ui.Paginator(pages=pages)
+                    )
 
         except Exception as e:
             error_embed = self.ui.error_embed("Error", str(e))
