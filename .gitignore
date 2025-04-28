@@ -32,3 +32,6 @@ db.json
 *.toml
 pythonlibs/
 upm/
+
+# Ignore Requirements.txt
+requirements.txt
