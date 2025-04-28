@@ -30,7 +30,11 @@ class Info(commands.Cog):
                     f"Help: {cmd.qualified_name}",
                     description
                 )
-                await ctx.send(embed=embed)
+                if isinstance(ctx, discord.Interaction):
+                    await ctx.response.send_message(embed=embed, ephemeral=True)
+                else:
+                    await ctx.send(embed=embed)
+                    
             else:
                 # Get all commands grouped by cogs
                 pages = []
@@ -39,13 +43,11 @@ class Info(commands.Cog):
                 total_commands = 0
 
                 for cog_name, cog in self.bot.cogs.items():
-                    # Get commands user can use
                     cog_commands = [cmd for cmd in cog.get_commands() if not cmd.hidden]
                     if not cog_commands:
                         continue
 
                     for cmd in cog_commands:
-                        # Add command to current page
                         command_info = (
                             f"**{cmd.qualified_name}**\n"
                             f"• Slash: /{cmd.qualified_name} {cmd.signature}\n"
@@ -55,7 +57,6 @@ class Info(commands.Cog):
                         current_page.append(command_info)
                         total_commands += 1
 
-                        # Create new page if needed
                         if len(current_page) >= commands_per_page:
                             embed = self.ui.info_embed(
                                 "📚 Command Help",
@@ -64,7 +65,6 @@ class Info(commands.Cog):
                             pages.append(embed)
                             current_page = []
 
-                # Add remaining commands to last page
                 if current_page:
                     embed = self.ui.info_embed(
                         "📚 Command Help",
@@ -72,7 +72,6 @@ class Info(commands.Cog):
                     )
                     pages.append(embed)
 
-                # Add initial info page
                 info_embed = self.ui.info_embed(
                     "Help System",
                     f"Total Commands: {total_commands}\n\n"
@@ -85,16 +84,18 @@ class Info(commands.Cog):
                 pages.insert(0, info_embed)
 
                 # Send paginated help
-                await self.ui.paginate(
-                    ctx if isinstance(ctx, discord.Interaction) else await ctx.interaction.original_response(),
-                    pages,
-                    timeout=300,
-                    ephemeral=True
-                )
+                if isinstance(ctx, discord.Interaction):
+                    await self.ui.paginate(ctx, pages, timeout=300, ephemeral=True)
+                else:
+                    msg = await ctx.send(embed=pages[0])
+                    await self.ui.paginate(msg, pages, timeout=300, ephemeral=True)
 
         except Exception as e:
             error_embed = self.ui.error_embed("Error", str(e))
-            await ctx.send(embed=error_embed, ephemeral=True)
+            if isinstance(ctx, discord.Interaction):
+                await ctx.response.send_message(embed=error_embed, ephemeral=True)
+            else:
+                await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Get information about the bot")
     async def botinfo(self, ctx):
