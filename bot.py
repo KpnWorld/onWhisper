@@ -93,34 +93,141 @@ class Bot(commands.Bot):
         pass
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
-        """Error handler that just prints to console"""
-        print(f"Command error: {str(error)}")
+        """Enhanced error handler for slash commands"""
+        try:
+            if isinstance(error, discord.app_commands.CommandOnCooldown):
+                await interaction.response.send_message(
+                    f"This command is on cooldown. Try again in {error.retry_after:.1f} seconds.",
+                    ephemeral=True
+                )
+                return
+
+            if isinstance(error, discord.app_commands.MissingPermissions):
+                perms = ", ".join(error.missing_permissions)
+                await interaction.response.send_message(
+                    f"You need the following permissions: {perms}",
+                    ephemeral=True
+                )
+                return
+
+            if isinstance(error, discord.app_commands.BotMissingPermissions):
+                perms = ", ".join(error.missing_permissions)
+                await interaction.response.send_message(
+                    f"I need the following permissions: {perms}",
+                    ephemeral=True
+                )
+                return
+
+            # Log unexpected errors
+            print(f"Command error in {interaction.command.name}: {str(error)}")
+            
+            error_embed = self.ui_manager.error_embed(
+                "Command Error",
+                "An unexpected error occurred. The error has been logged."
+            )
+            
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=error_embed, ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+
+        except Exception as e:
+            print(f"Error in error handler: {str(e)}")
 
     async def on_command_completion(self, ctx):
         """Legacy command completion handler without logging"""
         pass
 
     async def on_command_error(self, ctx, error):
-        """Legacy error handler that just prints to console"""
-        if not isinstance(error, commands.CommandNotFound):
-            print(f"Command error: {str(error)}")
-
-    async def on_error(self, event_method: str, *args, **kwargs):
+        """Enhanced error handler for prefix commands"""
         try:
-            error = sys.exc_info()[1]
-            if isinstance(error, discord.errors.HTTPException) and error.status == 429:
-                retry_after = error.response.headers.get('Retry-After', 5)
-                self._rate_limit_retries += 1
-                wait_time = float(retry_after) * (2 ** self._rate_limit_retries)
-                print(f"Rate limited. Waiting {wait_time:.2f} seconds. Retry #{self._rate_limit_retries}")
-                await asyncio.sleep(wait_time)
-                if event_method == "start":
-                    await self.start(TOKEN)
-            else:
-                self._rate_limit_retries = 0
-                print(f"Error in {event_method}: {str(error)}")
+            if isinstance(error, commands.CommandNotFound):
+                return
+
+            if isinstance(error, commands.MissingPermissions):
+                perms = ", ".join(error.missing_permissions)
+                await ctx.send(
+                    embed=self.ui_manager.error_embed(
+                        "Missing Permissions",
+                        f"You need the following permissions: {perms}"
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            if isinstance(error, commands.BotMissingPermissions):
+                perms = ", ".join(error.missing_permissions)
+                await ctx.send(
+                    embed=self.ui_manager.error_embed(
+                        "Bot Missing Permissions",
+                        f"I need the following permissions: {perms}"
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            if isinstance(error, commands.MissingRequiredArgument):
+                await ctx.send(
+                    embed=self.ui_manager.error_embed(
+                        "Missing Argument",
+                        f"Missing required argument: {error.param.name}"
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Log unexpected errors
+            print(f"Command error in {ctx.command}: {str(error)}")
+            await ctx.send(
+                embed=self.ui_manager.error_embed(
+                    "Command Error",
+                    "An unexpected error occurred. The error has been logged."
+                ),
+                ephemeral=True
+            )
+
         except Exception as e:
             print(f"Error in error handler: {str(e)}")
+
+    async def on_error(self, event_method: str, *args, **kwargs):
+        """Enhanced global error handler"""
+        try:
+            error = sys.exc_info()[1]
+            
+            if isinstance(error, discord.errors.HTTPException):
+                if error.status == 429:  # Rate limit
+                    retry_after = error.response.headers.get('Retry-After', 5)
+                    self._rate_limit_retries += 1
+                    wait_time = float(retry_after) * (2 ** self._rate_limit_retries)
+                    print(f"Rate limited. Waiting {wait_time:.2f} seconds. Retry #{self._rate_limit_retries}")
+                    await asyncio.sleep(wait_time)
+                    if event_method == "start":
+                        await self.start(TOKEN)
+                elif error.status == 403:  # Forbidden
+                    print(f"Permission error in {event_method}: {error.text}")
+                elif error.status == 404:  # Not Found
+                    print(f"Resource not found in {event_method}: {error.text}")
+                else:
+                    print(f"HTTP error in {event_method}: {error.status} - {error.text}")
+                    
+            elif isinstance(error, discord.errors.GatewayNotFound):
+                print("Discord gateway not found. Retrying in 30 seconds...")
+                await asyncio.sleep(30)
+                self._session_valid = False
+                
+            elif isinstance(error, discord.errors.ConnectionClosed):
+                print(f"Connection closed unexpectedly. Code: {error.code}, Reason: {error.reason}")
+                self._session_valid = False
+                
+            else:
+                print(f"Unexpected error in {event_method}: {error.__class__.__name__}: {str(error)}")
+                
+            # Reset rate limit counter on non-rate-limit errors
+            if not isinstance(error, discord.errors.HTTPException) or error.status != 429:
+                self._rate_limit_retries = 0
+                
+        except Exception as e:
+            print(f"Critical error in error handler: {str(e)}")
 
     async def on_shard_ready(self, shard_id): print(f"Shard {shard_id} ready")
     async def on_shard_connect(self, shard_id): print(f"Shard {shard_id} connected")
