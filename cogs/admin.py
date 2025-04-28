@@ -3,6 +3,7 @@ from discord.ext import commands
 from typing import Optional
 from utils.db_manager import DBManager
 import json
+from datetime import datetime
 
 class Admin(commands.Cog):
     """Server administration and configuration commands"""
@@ -50,10 +51,9 @@ class Admin(commands.Cog):
             return
             
         await self.db_manager.set_data('xp_config', str(ctx.guild.id), {'rate': amount})
-        embed = self.ui.make_embed(
-            title="XP Rate Updated",
-            description=f"Members will now earn {amount} XP per message",
-            command_type="admin"
+        embed = self.ui.admin_embed(
+            "XP Rate Updated",
+            f"Members will now earn {amount} XP per message"
         )
         await ctx.send(embed=embed)
 
@@ -122,8 +122,7 @@ class Admin(commands.Cog):
         await self.db_manager.set_data('tickets_config', str(ctx.guild.id), {'support_role_id': role.id})
         embed = self.ui.admin_embed(
             "Support Role Set",
-            f"Members with {role.mention} will now have access to tickets",
-            command_type="Administrative"
+            f"Members with {role.mention} will now have access to tickets"
         )
         await ctx.send(embed=embed)
 
@@ -181,8 +180,7 @@ class Admin(commands.Cog):
         await self.db_manager.set_data('moderation_config', str(ctx.guild.id), {'muted_role_id': role.id})
         embed = self.ui.admin_embed(
             "Muted Role Set",
-            f"Muted members will now receive the {role.mention} role",
-            command_type="Administrative"
+            f"Muted members will now receive the {role.mention} role"
         )
         await ctx.send(embed=embed)
 
@@ -192,8 +190,7 @@ class Admin(commands.Cog):
         await self.db_manager.set_data('moderation_config', str(ctx.guild.id), {'mod_role_id': role.id})
         embed = self.ui.admin_embed(
             "Moderator Role Set",
-            f"Members with {role.mention} will have access to moderation commands",
-            command_type="Administrative"
+            f"Members with {role.mention} will have access to moderation commands"
         )
         await ctx.send(embed=embed)
 
@@ -207,8 +204,7 @@ class Admin(commands.Cog):
         await self.db_manager.set_data('moderation_config', str(ctx.guild.id), {'warn_delete_days': days})
         embed = self.ui.admin_embed(
             "Warning Expiration Set",
-            f"Warnings will now expire after {days} days",
-            command_type="Administrative"
+            f"Warnings will now expire after {days} days"
         )
         await ctx.send(embed=embed)
 
@@ -274,66 +270,90 @@ class Admin(commands.Cog):
         
         embed = self.ui.admin_embed(
             "Auto-Role Toggled",
-            description,
-            command_type="Administrative"
+            description
         )
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="settings", description="View all server settings")
     @commands.has_permissions(administrator=True)
     async def view_settings(self, ctx):
-        """View all server configuration settings"""
         try:
-            # Get settings from all systems
+            # Get all configuration data
+            guild_id = str(ctx.guild.id)
             autorole_data = await self.db_manager.get_auto_role(ctx.guild.id)
-            logging_config = await self.db_manager.get_data('logging_config', str(ctx.guild.id)) or {}
-            tickets_config = await self.db_manager.get_data('tickets_config', str(ctx.guild.id)) or {}
-            mod_config = await self.db_manager.get_data('moderation_config', str(ctx.guild.id)) or {}
+            logging_config = await self.db_manager.get_data('logging_config', guild_id) or {}
+            tickets_config = await self.db_manager.get_data('tickets_config', guild_id) or {}
+            mod_config = await self.db_manager.get_data('moderation_config', guild_id) or {}
+            xp_config = await self.db_manager.get_data('xp_config', guild_id) or {}
             
             # Format XP settings
             leveling_cog = self.bot.get_cog('Leveling')
+            xp_system_enabled = xp_config.get('enabled', True)
             xp_settings = (
-                f"XP Rate: {leveling_cog.base_xp if leveling_cog else 'N/A'}\n"
-                f"Cooldown: {leveling_cog.cooldown if leveling_cog else 'N/A'} seconds"
+                f"Status: {'🟢 Enabled' if xp_system_enabled else '🔴 Disabled'}\n"
+                f"Base XP: {xp_config.get('rate', leveling_cog.base_xp if leveling_cog else 15)}\n"
+                f"Cooldown: {xp_config.get('cooldown', leveling_cog.cooldown if leveling_cog else 60)} seconds\n"
+                f"Last Updated: {xp_config.get('last_updated', 'Never')}"
+            )
+            
+            # Format ticket settings
+            ticket_settings = (
+                f"Category: {ctx.guild.get_channel(tickets_config.get('category_id', 0)).mention if tickets_config.get('category_id') else '❌ Not set'}\n"
+                f"Support Role: {ctx.guild.get_role(tickets_config.get('support_role_id', 0)).mention if tickets_config.get('support_role_id') else '❌ Not set'}\n"
+                f"Auto-Close: {'🟢 Enabled' if tickets_config.get('auto_close', False) else '🔴 Disabled'}\n"
+                f"Close After: {tickets_config.get('close_hours', 24)} hours"
             )
             
             # Format autorole settings
-            autorole_status = "Disabled"
-            autorole = None
+            autorole_status = "❌ Disabled"
             if autorole_data:
                 role_id, enabled = autorole_data
                 autorole = ctx.guild.get_role(role_id)
-                autorole_status = f"{'Enabled' if enabled else 'Disabled'} - {autorole.mention if autorole else 'Invalid Role'}"
+                autorole_status = f"{'🟢 Enabled' if enabled else '🔴 Disabled'} - {autorole.mention if autorole else 'Invalid Role'}"
+            
+            # Format moderation settings
+            mod_settings = (
+                f"Muted Role: {ctx.guild.get_role(mod_config.get('muted_role_id', 0)).mention if mod_config.get('muted_role_id') else '❌ Not set'}\n"
+                f"Mod Role: {ctx.guild.get_role(mod_config.get('mod_role_id', 0)).mention if mod_config.get('mod_role_id') else '❌ Not set'}\n"
+                f"Warn Expire: {mod_config.get('warn_delete_days', 30)} days\n"
+                f"Auto-Punish: {'🟢 Enabled' if mod_config.get('auto_punish', False) else '🔴 Disabled'}\n"
+                f"Max Warnings: {mod_config.get('max_warnings', 3)}"
+            )
+            
+            # Format logging settings
+            log_settings = (
+                f"Channel: {ctx.guild.get_channel(logging_config.get('channel_id', 0)).mention if logging_config.get('channel_id') else '❌ Not set'}\n"
+                f"Message Logs: {'🟢 Enabled' if logging_config.get('message_logs', True) else '🔴 Disabled'}\n"
+                f"Member Logs: {'🟢 Enabled' if logging_config.get('member_logs', True) else '🔴 Disabled'}\n"
+                f"Mod Logs: {'🟢 Enabled' if logging_config.get('mod_logs', True) else '🔴 Disabled'}\n"
+                f"Server Logs: {'🟢 Enabled' if logging_config.get('server_logs', True) else '🔴 Disabled'}"
+            )
             
             description = (
                 "**XP System:**\n"
                 f"{xp_settings}\n\n"
                 "**Ticket System:**\n"
-                f"Support Role: {ctx.guild.get_role(tickets_config.get('support_role_id', 0)).mention if tickets_config.get('support_role_id') else 'Not set'}\n"
-                f"Category: {ctx.guild.get_channel(tickets_config.get('category_id', 0)).mention if tickets_config.get('category_id') else 'Not set'}\n\n"
+                f"{ticket_settings}\n\n"
                 "**Logging System:**\n"
-                f"Channel: {ctx.guild.get_channel(logging_config.get('channel_id', 0)).mention if logging_config.get('channel_id') else 'Not set'}\n\n"
+                f"{log_settings}\n\n"
                 "**Auto-Role:**\n"
                 f"Status: {autorole_status}\n\n"
                 "**Moderation:**\n"
-                f"Muted Role: {ctx.guild.get_role(mod_config.get('muted_role_id', 0)).mention if mod_config.get('muted_role_id') else 'Not set'}\n"
-                f"Moderator Role: {ctx.guild.get_role(mod_config.get('mod_role_id', 0)).mention if mod_config.get('mod_role_id') else 'Not set'}\n"
-                f"Warning Delete Time: {mod_config.get('warn_delete_days', 30)} days"
+                f"{mod_settings}"
             )
             
             embed = self.ui.admin_embed(
                 f"{ctx.guild.name} Settings",
-                description,
-                command_type="Administrative"
+                description
             )
+            
+            # Add footer with last updated timestamp
+            embed.set_footer(text=f"Use /config to modify settings • Last refreshed: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+            
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.ui.admin_embed(
-                "Error",
-                str(e),
-                command_type="Administrative"
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
 async def setup(bot):

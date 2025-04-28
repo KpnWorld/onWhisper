@@ -87,6 +87,7 @@ class UIManager:
 
     def admin_embed(self, title=None, description=None, **kwargs):
         """Shortcut for an administrative command embed."""
+        kwargs.pop('command_type', None)  # Remove command_type if present
         return self.make_embed(
             title=title,
             description=description,
