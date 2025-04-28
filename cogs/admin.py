@@ -375,9 +375,9 @@ class Admin(commands.Cog):
                 description
             )
             
-            # Add footer with Discord timestamp format
+            # Add footer with clean timestamp format
             current_time = int(datetime.utcnow().timestamp())
-            embed.set_footer(text=f"Use /config to modify settings • Last refreshed: <t:{current_time}:R>")
+            embed.set_footer(text=f"Use /config to modify settings • <t:{current_time}:R>")
             
             await ctx.send(embed=embed)
             
