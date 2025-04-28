@@ -12,46 +12,89 @@ class Debug(commands.Cog):
 
     @commands.command(name="dbcheck")
     @commands.is_owner()
-    async def db_check(self, ctx, collection: str, id: Optional[str] = None):
-        """Check raw database entries for a collection"""
+    async def check_database(self, ctx, key: str = None):
+        """Check raw database contents"""
         try:
-            if id:
-                # Get specific entry
-                data = await self.db_manager.get_data(collection, id)
-                if data:
-                    formatted = json.dumps(data, indent=2)
-                    embed = self.ui.system_embed(
-                        f"Database Entry: {collection}:{id}",
-                        f"```json\n{formatted}\n```",
-                        codeblock=False
-                    )
-                else:
-                    embed = self.ui.error_embed(
-                        "Not Found",
-                        f"No data found for {collection}:{id}"
-                    )
-            else:
-                # List all entries in collection
-                prefix = f"{self.db_manager.prefix}{collection}:"
-                entries = [key.replace(prefix, '') for key in self.db_manager.db.keys() 
-                          if key.startswith(prefix)]
+            # Verify DB connection
+            if not self.db_manager.db:
+                await ctx.send("Database connection not available!")
+                return
+
+            # Permission check
+            if not ctx.channel.permissions_for(ctx.guild.me).send_messages:
+                return
                 
-                if entries:
-                    description = "\n".join(entries)
-                    embed = self.ui.system_embed(
-                        f"Database Entries in {collection}",
-                        f"Total entries: {len(entries)}\n\nKeys:\n{description}"
+            if key:
+                # Check specific key
+                if key not in self.db_manager.db:
+                    embed = self.ui.error_embed(
+                        "Key Not Found",
+                        f"No data found for key: {key}"
                     )
                 else:
-                    embed = self.ui.error_embed(
-                        "Empty Collection",
-                        f"No entries found in {collection}"
+                    try:
+                        value = self.db_manager.db[key]
+                        try:
+                            # Try to parse as JSON
+                            parsed = json.dumps(json.loads(value), indent=2)
+                            formatted = f"```json\n{parsed}\n```"
+                        except:
+                            formatted = f"```\n{value}\n```"
+                            
+                        embed = self.ui.system_embed(
+                            f"Database Value for: {key}",
+                            formatted,
+                            codeblock=False
+                        )
+                    except Exception as e:
+                        embed = self.ui.error_embed(
+                            "Error Reading Value",
+                            f"Error: {str(e)}"
+                        )
+            else:
+                # List all keys
+                all_keys = list(self.db_manager.db.keys())
+                if not all_keys:
+                    embed = self.ui.system_embed(
+                        "Database Status",
+                        "Database is empty"
                     )
+                else:
+                    # Group keys by prefix
+                    prefixes = {}
+                    for k in all_keys:
+                        prefix = k.split(':')[0] if ':' in k else 'other'
+                        if prefix not in prefixes:
+                            prefixes[prefix] = []
+                        prefixes[prefix].append(k)
                     
+                    # Format output
+                    description = "**Database Contents:**\n\n"
+                    for prefix, keys in prefixes.items():
+                        description += f"**{prefix}** ({len(keys)} keys):\n"
+                        # Show first 5 keys of each prefix
+                        for k in keys[:5]:
+                            description += f"• `{k}`\n"
+                        if len(keys) > 5:
+                            description += f"• ...and {len(keys) - 5} more\n"
+                        description += "\n"
+                    
+                    embed = self.ui.system_embed(
+                        "Database Overview",
+                        description
+                    )
+                    embed.set_footer(text="Use !checkdb <key> to view specific values")
+            
             await ctx.send(embed=embed)
             
+        except discord.Forbidden:
+            await ctx.send("Missing required permissions!", ephemeral=True)
         except Exception as e:
-            await ctx.send(f"Error: {str(e)}")
+            error_embed = self.ui.error_embed(
+                "Database Error",
+                str(e)
+            )
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.command(name="dblookup")
     @commands.is_owner()
@@ -221,77 +264,6 @@ class Debug(commands.Cog):
 
         except Exception as e:
             await ctx.send(f"Error: {str(e)}")
-
-    @commands.command(name="checkdb")
-    @commands.is_owner()
-    async def check_database(self, ctx, key: str = None):
-        """Check raw database contents"""
-        try:
-            if key:
-                # Check specific key
-                if key not in self.db_manager.db:
-                    embed = self.ui.error_embed(
-                        "Key Not Found",
-                        f"No data found for key: {key}"
-                    )
-                else:
-                    try:
-                        value = self.db_manager.db[key]
-                        try:
-                            # Try to parse as JSON
-                            parsed = json.dumps(json.loads(value), indent=2)
-                            formatted = f"```json\n{parsed}\n```"
-                        except:
-                            formatted = f"```\n{value}\n```"
-                            
-                        embed = self.ui.system_embed(
-                            f"Database Value for: {key}",
-                            formatted,
-                            codeblock=False
-                        )
-                    except Exception as e:
-                        embed = self.ui.error_embed(
-                            "Error Reading Value",
-                            f"Error: {str(e)}"
-                        )
-            else:
-                # List all keys
-                all_keys = list(self.db_manager.db.keys())
-                if not all_keys:
-                    embed = self.ui.system_embed(
-                        "Database Status",
-                        "Database is empty"
-                    )
-                else:
-                    # Group keys by prefix
-                    prefixes = {}
-                    for k in all_keys:
-                        prefix = k.split(':')[0] if ':' in k else 'other'
-                        if prefix not in prefixes:
-                            prefixes[prefix] = []
-                        prefixes[prefix].append(k)
-                    
-                    # Format output
-                    description = "**Database Contents:**\n\n"
-                    for prefix, keys in prefixes.items():
-                        description += f"**{prefix}** ({len(keys)} keys):\n"
-                        # Show first 5 keys of each prefix
-                        for k in keys[:5]:
-                            description += f"• `{k}`\n"
-                        if len(keys) > 5:
-                            description += f"• ...and {len(keys) - 5} more\n"
-                        description += "\n"
-                    
-                    embed = self.ui.system_embed(
-                        "Database Overview",
-                        description
-                    )
-                    embed.set_footer(text="Use !checkdb <key> to view specific values")
-            
-            await ctx.send(embed=embed)
-            
-        except Exception as e:
-            await ctx.send(f"Error accessing database: {str(e)}")
 
 async def setup(bot):
     await bot.add_cog(Debug(bot))

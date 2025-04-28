@@ -30,9 +30,34 @@ class Tickets(commands.Cog):
 
     @commands.hybrid_command(description="Create a support ticket")
     async def ticket(self, ctx, *, reason: str = None):
+        """Create a support ticket"""
         try:
+            # Verify bot permissions
+            required_permissions = [
+                'manage_channels',
+                'send_messages',
+                'embed_links',
+                'manage_roles'
+            ]
+            
+            missing_perms = []
+            for perm in required_permissions:
+                if not getattr(ctx.guild.me.guild_permissions, perm):
+                    missing_perms.append(perm)
+                    
+            if missing_perms:
+                await ctx.send(f"I need the following permissions: {', '.join(missing_perms)}")
+                return
+
+            # Check database connection
+            try:
+                existing_ticket = await self.db_manager.get_open_ticket(ctx.author.id, ctx.guild.id)
+            except Exception as e:
+                await ctx.send("Unable to check ticket status. Database error.")
+                print(f"DB Error in tickets: {e}")
+                return
+
             # Check if user already has an open ticket
-            existing_ticket = await self.db_manager.get_open_ticket(ctx.author.id, ctx.guild.id)
             if existing_ticket:
                 channel = ctx.guild.get_channel(existing_ticket['channel_id'])
                 if channel:
@@ -108,12 +133,10 @@ class Tickets(commands.Cog):
             )
             await ctx.send(embed=confirm_embed, ephemeral=True)
 
+        except discord.Forbidden:
+            await ctx.send("I don't have the required permissions to create tickets.")
         except Exception as e:
-            error_embed = self.ui.user_embed(
-                "Error",
-                str(e),
-            )
-            await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
 async def setup(bot):
     await bot.add_cog(Tickets(bot))

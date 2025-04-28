@@ -42,14 +42,22 @@ class Leveling(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        """Award XP for messages"""
-        if message.author.bot or not message.guild:
-            return
-
         try:
-            # Check if leveling is enabled
-            config = await self.db_manager.get_data('xp_config', str(message.guild.id)) or {}
-            if not config.get('enabled', True):  # Default to enabled if not set
+            if message.author.bot or not message.guild:
+                return
+
+            # Verify bot permissions first
+            if not message.guild.me.guild_permissions.send_messages:
+                return
+
+            # Check if leveling is enabled with DB error handling
+            try:
+                config = await self.db_manager.get_data('xp_config', str(message.guild.id)) or {}
+            except Exception as e:
+                print(f"DB Error in leveling: {e}")
+                return
+
+            if not config.get('enabled', True):
                 return
 
             # Check cooldown
@@ -95,12 +103,16 @@ class Leveling(commands.Cog):
                 print(f"Error in leveling system: {e}")
 
         except Exception as e:
-            print(f"Error in on_message: {e}")
+            print(f"Error in leveling: {e}")
 
     @commands.hybrid_command(description="Check your or another user's level")
     async def level(self, ctx, user: Optional[discord.Member] = None):
-        """Show level and XP information for a user"""
         try:
+            # Verify bot permissions
+            if not ctx.channel.permissions_for(ctx.guild.me).embed_links:
+                await ctx.send("I need the 'Embed Links' permission!")
+                return
+
             target = user or ctx.author
             
             # Get level data
@@ -139,12 +151,10 @@ class Leveling(commands.Cog):
             
             await ctx.send(embed=embed)
             
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to show level information.")
         except Exception as e:
-            error_embed = self.ui.user_embed(
-                "Error",
-                str(e)
-            )
-            await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
     @commands.hybrid_command(description="Shows the server's XP leaderboard")
     async def leaderboard(self, ctx):

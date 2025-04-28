@@ -12,29 +12,50 @@ class AutoRole(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member):
         """Automatically assign roles to new members"""
-        if member.bot:
-            return
-            
         try:
-            auto_role = await self.db_manager.get_auto_role(member.guild.id)
-            if not auto_role or not auto_role[1]:  # If no role or disabled
+            if member.bot:
                 return
-                
+
+            # Verify bot permissions
+            if not member.guild.me.guild_permissions.manage_roles:
+                return
+
+            # Check database connection with error handling
+            try:
+                auto_role = await self.db_manager.get_auto_role(member.guild.id)
+            except Exception as e:
+                print(f"DB Error in autorole: {e}")
+                return
+
+            if not auto_role or not auto_role[1]:
+                return
+
             role_id = auto_role[0]
             role = member.guild.get_role(role_id)
-            
+
             if role:
+                # Verify role hierarchy
+                if role.position >= member.guild.me.top_role.position:
+                    print(f"Cannot assign role {role.name} - higher than bot's role")
+                    return
+
                 await member.add_roles(role, reason="Auto Role")
                 
-                # Log the action
-                await self.db_manager.log_event(
-                    member.guild.id,
-                    member.id,
-                    "autorole",
-                    f"Auto role {role.name} assigned to {member}"
-                )
+                # Log with error handling
+                try:
+                    await self.db_manager.log_event(
+                        member.guild.id,
+                        member.id,
+                        "autorole",
+                        f"Auto role {role.name} assigned to {member}"
+                    )
+                except Exception as e:
+                    print(f"Failed to log autorole event: {e}")
+
+        except discord.Forbidden:
+            print(f"Missing permissions to assign roles in {member.guild.name}")
         except Exception as e:
-            print(f"Error in auto role assignment: {e}")
+            print(f"Error in autorole: {e}")
 
     @commands.hybrid_command(description="Set the automatic role for new members")
     @commands.has_permissions(manage_roles=True)

@@ -129,34 +129,62 @@ class Admin(commands.Cog):
     # Logging Config Group
     @config.group(name="logging")
     @commands.has_permissions(administrator=True)
+    @commands.bot_has_permissions(manage_channels=True)
     async def config_logging(self, ctx):
         """Configure logging system settings"""
-        if ctx.invoked_subcommand is None:
-            embed = self.ui.admin_embed(
-                "Logging Configuration",
-                "Available commands:\n"
-                "• /config logging channel <channel> - Set logging channel"
-            )
-            await ctx.send(embed=embed)
+        try:
+            if ctx.invoked_subcommand is None:
+                embed = self.ui.admin_embed(
+                    "Logging Configuration",
+                    "Available commands:\n"
+                    "• /config logging channel <channel> - Set logging channel"
+                )
+                await ctx.send(embed=embed)
+        except Exception as e:
+            await self.bot.on_command_error(ctx, e)
 
     @config_logging.command(name="channel")
     async def logging_channel(self, ctx, channel: discord.TextChannel):
         """Set the channel for server logs"""
-        # Verify bot permissions
-        if not channel.permissions_for(ctx.guild.me).send_messages:
-            embed = self.ui.admin_embed(
-                "Permission Error",
-                "I need permission to send messages in that channel!"
-            )
-            await ctx.send(embed=embed, ephemeral=True)
-            return
+        try:
+            # Verify bot permissions
+            required_perms = ['send_messages', 'embed_links', 'attach_files']
+            missing_perms = []
             
-        await self.db_manager.set_data('logging_config', str(ctx.guild.id), {'channel_id': channel.id})
-        embed = self.ui.admin_embed(
-            "Logging Channel Set",
-            f"Server logs will now be sent to {channel.mention}"
-        )
-        await ctx.send(embed=embed)
+            for perm in required_perms:
+                if not getattr(channel.permissions_for(ctx.guild.me), perm):
+                    missing_perms.append(perm)
+            
+            if missing_perms:
+                embed = self.ui.admin_embed(
+                    "Permission Error",
+                    f"I need the following permissions in {channel.mention}:\n" +
+                    "\n".join(f"• {perm}" for perm in missing_perms)
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
+                
+            # Verify database connection
+            if not self.db_manager.db:
+                raise Exception("Database connection not available")
+                
+            await self.db_manager.set_data('logging_config', str(ctx.guild.id), {
+                'channel_id': channel.id,
+                'setup_by': ctx.author.id,
+                'setup_at': datetime.utcnow().isoformat()
+            })
+            
+            embed = self.ui.admin_embed(
+                "Logging Channel Set",
+                f"Server logs will now be sent to {channel.mention}"
+            )
+            await ctx.send(embed=embed)
+            
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to manage that channel!", ephemeral=True)
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     # Moderation Config Group
     @config.group(name="moderation")

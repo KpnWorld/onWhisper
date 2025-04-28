@@ -12,8 +12,13 @@ class Info(commands.Cog):
 
     @commands.hybrid_command(name="help", description="Shows all available commands")
     async def help_command(self, ctx, command: str = None):
-        """Shows a list of all commands or detailed help for a specific command"""
         try:
+            if not isinstance(ctx.channel, discord.DMChannel):
+                # Verify bot permissions
+                if not ctx.channel.permissions_for(ctx.guild.me).embed_links:
+                    await ctx.send("I need the 'Embed Links' permission to show help!")
+                    return
+
             if command:
                 cmd = self.bot.get_command(command)
                 if not cmd:
@@ -97,16 +102,20 @@ class Info(commands.Cog):
                         view=self.ui.Paginator(pages=pages)
                     )
 
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to send embeds in this channel.")
         except Exception as e:
-            error_embed = self.ui.error_embed("Error", str(e))
-            if isinstance(ctx, discord.Interaction):
-                await ctx.response.send_message(embed=error_embed, ephemeral=True)
-            else:
-                await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
     @commands.hybrid_command(description="Get information about the bot")
     async def botinfo(self, ctx):
         try:
+            if not isinstance(ctx.channel, discord.DMChannel):
+                # Verify bot permissions
+                if not ctx.channel.permissions_for(ctx.guild.me).embed_links:
+                    await ctx.send("I need the 'Embed Links' permission!")
+                    return
+
             uptime = datetime.utcnow() - self.start_time
             days = uptime.days
             hours, remainder = divmod(uptime.seconds, 3600)
@@ -133,9 +142,10 @@ class Info(commands.Cog):
                 
             await ctx.send(embed=embed)
             
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to send embeds.")
         except Exception as e:
-            error_embed = self.ui.error_embed("Error", str(e))
-            await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
     @commands.hybrid_command(description="Get information about the server")
     async def serverinfo(self, ctx):
@@ -184,8 +194,7 @@ class Info(commands.Cog):
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.ui.error_embed("Error", str(e))
-            await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
     @commands.hybrid_command(description="Get information about a user")
     async def userinfo(self, ctx, user: discord.Member = None):
@@ -247,13 +256,17 @@ class Info(commands.Cog):
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.ui.error_embed("Error", str(e))
-            await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
     @commands.hybrid_command(description="Shows how long the bot has been running")
     async def uptime(self, ctx):
-        """Display the bot's current uptime"""
         try:
+            if not isinstance(ctx.channel, discord.DMChannel):
+                # Verify bot permissions
+                if not ctx.channel.permissions_for(ctx.guild.me).embed_links:
+                    await ctx.send("I need the 'Embed Links' permission!")
+                    return
+
             uptime = datetime.utcnow() - self.start_time
             days = uptime.days
             hours, rem = divmod(uptime.seconds, 3600)
@@ -273,9 +286,10 @@ class Info(commands.Cog):
             )
             await ctx.send(embed=embed)
             
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to send embeds.")
         except Exception as e:
-            error_embed = self.ui.error_embed("Error", str(e))
-            await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
 async def setup(bot):
     await bot.add_cog(Info(bot))

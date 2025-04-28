@@ -15,19 +15,27 @@ class Moderation(commands.Cog):
 
     async def log_mod_action(self, guild: discord.Guild, action: str, description: str):
         """Send mod action to logging channel"""
-        logging_cog = self.bot.get_cog('Logging')
-        if logging_cog:
-            await logging_cog.log_to_channel(
-                guild,
-                f"⚔️ {action}",
-                description,
-                discord.Color.red()
-            )
+        try:
+            logging_cog = self.bot.get_cog('Logging')
+            if logging_cog:
+                await logging_cog.log_to_channel(
+                    guild,
+                    f"⚔️ {action}",
+                    description,
+                    discord.Color.red()
+                )
+        except Exception as e:
+            print(f"Failed to log moderation action: {e}")
 
     @commands.hybrid_command(description="Kick a member from the server")
+    @commands.has_permissions(kick_members=True)
+    @commands.bot_has_permissions(kick_members=True)
     async def kick(self, ctx, member: discord.Member, reason: str = None):
         """Kick a member from the server"""
         try:
+            if not ctx.guild.me.guild_permissions.kick_members:
+                raise commands.BotMissingPermissions(['kick_members'])
+
             # Check hierarchy
             if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
                 embed = self.ui.mod_embed(
@@ -63,12 +71,14 @@ class Moderation(commands.Cog):
             )
             await ctx.send(embed=embed)
             
+        except commands.MissingPermissions:
+            await ctx.send("You don't have permission to kick members!", ephemeral=True)
+        except commands.BotMissingPermissions:
+            await ctx.send("I don't have permission to kick members!", ephemeral=True)
+        except discord.Forbidden:
+            await ctx.send("I can't kick that member due to role hierarchy!", ephemeral=True)
         except Exception as e:
-            error_embed = self.ui.mod_embed(
-                "Error",
-                str(e),
-            )
-            await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
     @commands.hybrid_command(description="Ban a member from the server")
     @commands.has_permissions(ban_members=True)

@@ -71,27 +71,34 @@ class Logging(commands.Cog):
     async def log_to_channel(self, guild: discord.Guild, title: str, description: str, color: discord.Color = None):
         """Send a log embed to the guild's logging channel"""
         try:
+            # Verify DB connection first
+            if not self.db_manager.db:
+                print("Database connection not available")
+                return
+
             channel = await self.get_log_channel(guild.id)
             if not channel:
-                return  # Silently return if no log channel is set
-                
+                return
+
+            # Verify bot permissions
+            if not channel.permissions_for(guild.me).send_messages:
+                print(f"Missing send message permissions in log channel for {guild.name}")
+                return
+
             embed = self.ui.system_embed(
                 title,
                 description
             )
             if color:
                 embed.color = color
-                
-            # Add timestamp to all log messages
+
             embed.timestamp = datetime.utcnow()
-            
-            try:
-                await channel.send(embed=embed)
-            except discord.Forbidden:
-                print(f"Missing permissions to send logs in {guild.name}")
-            except discord.HTTPException as e:
-                print(f"Failed to send log message in {guild.name}: {e}")
-                
+            await channel.send(embed=embed)
+
+        except discord.Forbidden:
+            print(f"Missing permissions to send logs in {guild.name}")
+        except discord.HTTPException as e:
+            print(f"Failed to send log message in {guild.name}: {e}")
         except Exception as e:
             print(f"Failed to log to channel: {e}")
 
