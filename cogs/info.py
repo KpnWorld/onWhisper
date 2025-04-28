@@ -12,6 +12,7 @@ class Info(commands.Cog):
 
     @commands.hybrid_command(name="help", description="Shows all available commands")
     async def help_command(self, ctx, command: str = None):
+        """Shows a list of all commands or detailed help for a specific command"""
         try:
             if command:
                 cmd = self.bot.get_command(command)
@@ -20,31 +21,77 @@ class Info(commands.Cog):
 
                 description = (
                     f"**Description:** {cmd.description or cmd.help or 'No description available'}\n"
-                    f"**Usage:** !{cmd.qualified_name} {cmd.signature}"
+                    f"**Usage:**\n"
+                    f"• Slash: /{cmd.qualified_name} {cmd.signature}\n"
+                    f"• Prefix: !{cmd.qualified_name} {cmd.signature}"
                 )
                 
                 embed = self.ui.info_embed(
                     f"Help: {cmd.qualified_name}",
                     description
                 )
-                
+                await ctx.send(embed=embed)
             else:
-                description = ""
+                # Get all commands grouped by cogs
+                pages = []
+                current_page = []
+                commands_per_page = 10
+                total_commands = 0
+
                 for cog_name, cog in self.bot.cogs.items():
-                    cog_commands = [cmd for cmd in cog.get_commands() if cmd.hidden is False]
-                    if cog_commands:
-                        description += f"\n**{cog_name}**\n"
-                        for cmd in cog_commands:
-                            description += f"`!{cmd.name}` - {cmd.description or cmd.help or 'No description'}\n"
-                
-                embed = self.ui.info_embed(
-                    "Command Help",
-                    description.strip()
+                    # Get commands user can use
+                    cog_commands = [cmd for cmd in cog.get_commands() if not cmd.hidden]
+                    if not cog_commands:
+                        continue
+
+                    for cmd in cog_commands:
+                        # Add command to current page
+                        command_info = (
+                            f"**{cmd.qualified_name}**\n"
+                            f"• Slash: /{cmd.qualified_name} {cmd.signature}\n"
+                            f"• Prefix: !{cmd.qualified_name} {cmd.signature}\n"
+                            f"• *{cmd.description or cmd.help or 'No description'}*\n"
+                        )
+                        current_page.append(command_info)
+                        total_commands += 1
+
+                        # Create new page if needed
+                        if len(current_page) >= commands_per_page:
+                            embed = self.ui.info_embed(
+                                "📚 Command Help",
+                                "\n".join(current_page)
+                            )
+                            pages.append(embed)
+                            current_page = []
+
+                # Add remaining commands to last page
+                if current_page:
+                    embed = self.ui.info_embed(
+                        "📚 Command Help",
+                        "\n".join(current_page)
+                    )
+                    pages.append(embed)
+
+                # Add initial info page
+                info_embed = self.ui.info_embed(
+                    "Help System",
+                    f"Total Commands: {total_commands}\n\n"
+                    f"Use `/help <command>` or `!help <command>` for detailed information about a specific command.\n\n"
+                    f"**Navigation:**\n"
+                    f"• Use the buttons below to navigate pages\n"
+                    f"• Each page shows {commands_per_page} commands\n"
+                    f"• Both slash and prefix versions are shown"
                 )
-                embed.set_footer(text="Type !help <command> for detailed information about a command")
-            
-            await ctx.send(embed=embed)
-            
+                pages.insert(0, info_embed)
+
+                # Send paginated help
+                await self.ui.paginate(
+                    ctx if isinstance(ctx, discord.Interaction) else await ctx.interaction.original_response(),
+                    pages,
+                    timeout=300,
+                    ephemeral=True
+                )
+
         except Exception as e:
             error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
@@ -189,6 +236,33 @@ class Info(commands.Cog):
 
             embed.set_footer(text=f"Command Type • User")
                 
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
+
+    @commands.hybrid_command(description="Shows how long the bot has been running")
+    async def uptime(self, ctx):
+        """Display the bot's current uptime"""
+        try:
+            uptime = datetime.utcnow() - self.start_time
+            days = uptime.days
+            hours, rem = divmod(uptime.seconds, 3600)
+            minutes, seconds = divmod(rem, 60)
+            
+            description = (
+                f"I have been running for:\n"
+                f"**{days}** days\n"
+                f"**{hours}** hours\n"
+                f"**{minutes}** minutes\n"
+                f"**{seconds}** seconds"
+            )
+            
+            embed = self.ui.info_embed(
+                "🕒 Bot Uptime",
+                description
+            )
             await ctx.send(embed=embed)
             
         except Exception as e:

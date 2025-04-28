@@ -291,3 +291,42 @@ class DBManager:
         except Exception as e:
             print(f"Stats error: {e}")
             return None
+
+    async def get_all_guild_data(self, guild_id: int) -> dict:
+        """Get all data related to a specific guild"""
+        try:
+            guild_data = {}
+            str_guild_id = str(guild_id)
+            
+            # Collections that store guild-specific data
+            guild_collections = {
+                'guilds': str_guild_id,
+                'logging_config': str_guild_id,
+                'auto_roles': str_guild_id,
+                'tickets': lambda k: json.loads(db[k]).get('guild_id') == guild_id,
+                'levels': lambda k: k.startswith(f"{self.prefix}levels:{guild_id}:"),
+                'logs': lambda k: json.loads(db[k]).get('guild_id') == guild_id
+            }
+            
+            for collection, filter_func in guild_collections.items():
+                collection_data = []
+                prefix = f"{self.prefix}{collection}:"
+                
+                for key in db.keys():
+                    if not key.startswith(prefix):
+                        continue
+                        
+                    if callable(filter_func):
+                        if filter_func(key):
+                            collection_data.append(json.loads(db[key]))
+                    elif key == f"{prefix}{filter_func}":
+                        collection_data.append(json.loads(db[key]))
+                
+                if collection_data:
+                    guild_data[collection] = collection_data
+                    
+            return guild_data
+            
+        except Exception as e:
+            print(f"Guild data retrieval error: {e}")
+            raise
