@@ -166,5 +166,61 @@ class Debug(commands.Cog):
         except Exception as e:
             await ctx.send(f"Error: {str(e)}")
 
+    @commands.command(name="dblist")
+    @commands.is_owner()
+    async def list_raw_db(self, ctx, filter_text: str = None):
+        """List raw database key-value pairs, optionally filtered"""
+        try:
+            # Get all keys, optionally filtered
+            keys = [k for k in self.db_manager.db.keys() 
+                   if not filter_text or filter_text in k]
+            
+            if not keys:
+                embed = self.ui.error_embed(
+                    "No Data",
+                    "No keys found" + (f" matching '{filter_text}'" if filter_text else "")
+                )
+                await ctx.send(embed=embed)
+                return
+
+            # Create pages of key-value pairs
+            pages = []
+            pairs_per_page = 5
+            
+            for i in range(0, len(keys), pairs_per_page):
+                page_keys = keys[i:i + pairs_per_page]
+                content = []
+                
+                for key in page_keys:
+                    try:
+                        value = self.db_manager.db[key]
+                        # Try to parse and format JSON values
+                        try:
+                            parsed = json.loads(value)
+                            formatted_value = json.dumps(parsed, indent=2)
+                        except:
+                            formatted_value = str(value)
+                            
+                        content.append(f"Key: {key}\nValue:\n```json\n{formatted_value}\n```")
+                    except Exception as e:
+                        content.append(f"Key: {key}\nError reading value: {str(e)}")
+
+                description = "\n\n".join(content)
+                embed = self.ui.system_embed(
+                    f"Database Contents (Page {len(pages)+1})",
+                    description,
+                    codeblock=False
+                )
+                embed.set_footer(text=f"Showing {i+1}-{min(i+pairs_per_page, len(keys))} of {len(keys)} keys")
+                pages.append(embed)
+
+            if len(pages) > 1:
+                await self.ui.paginate(ctx, pages, timeout=180)
+            else:
+                await ctx.send(embed=pages[0])
+
+        except Exception as e:
+            await ctx.send(f"Error: {str(e)}")
+
 async def setup(bot):
     await bot.add_cog(Debug(bot))
