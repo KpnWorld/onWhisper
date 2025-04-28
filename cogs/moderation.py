@@ -13,6 +13,17 @@ class Moderation(commands.Cog):
         self.ui = self.bot.ui_manager
         self.locked_channels = set()
 
+    async def log_mod_action(self, guild: discord.Guild, action: str, description: str):
+        """Send mod action to logging channel"""
+        logging_cog = self.bot.get_cog('Logging')
+        if logging_cog:
+            await logging_cog.log_to_channel(
+                guild,
+                f"⚔️ {action}",
+                description,
+                discord.Color.red()
+            )
+
     @commands.hybrid_command(description="Kick a member from the server")
     async def kick(self, ctx, member: discord.Member, reason: str = None):
         """Kick a member from the server"""
@@ -28,7 +39,7 @@ class Moderation(commands.Cog):
 
             await member.kick(reason=f"Kicked by {ctx.author}: {reason}")
             
-            # Log the action
+            # Log the action to database
             await self.db_manager.log_event(
                 ctx.guild.id,
                 member.id,
@@ -38,18 +49,20 @@ class Moderation(commands.Cog):
             
             description = f"Member: {member.mention}\nReason: {reason or 'No reason provided'}"
             
+            # Send to mod-logs channel
+            await self.log_mod_action(
+                ctx.guild,
+                "Member Kicked",
+                description
+            )
+            
+            # Send confirmation to command channel
             embed = self.ui.mod_embed(
                 "Member Kicked",
                 description
             )
             await ctx.send(embed=embed)
             
-        except discord.Forbidden:
-            error_embed = self.ui.mod_embed(
-                "Permission Error",
-                "I don't have permission to kick that member!",
-            )
-            await ctx.send(embed=error_embed, ephemeral=True)
         except Exception as e:
             error_embed = self.ui.mod_embed(
                 "Error",
@@ -74,7 +87,7 @@ class Moderation(commands.Cog):
             await member.ban(reason=f"Banned by {ctx.author}: {reason}", 
                            delete_message_days=delete_days)
             
-            # Log the action
+            # Log the action to database
             await self.db_manager.log_event(
                 ctx.guild.id,
                 member.id,
@@ -88,18 +101,20 @@ class Moderation(commands.Cog):
                 f"Message Deletion: {delete_days} days"
             )
             
+            # Send to mod-logs channel
+            await self.log_mod_action(
+                ctx.guild,
+                "Member Banned",
+                description
+            )
+            
+            # Send confirmation to command channel
             embed = self.ui.mod_embed(
                 "Member Banned",
                 description
             )
             await ctx.send(embed=embed)
             
-        except discord.Forbidden:
-            error_embed = self.ui.mod_embed(
-                "Permission Error",
-                "I don't have permission to ban that member!",
-            )
-            await ctx.send(embed=error_embed, ephemeral=True)
         except Exception as e:
             error_embed = self.ui.mod_embed(
                 "Error",
@@ -149,7 +164,7 @@ class Moderation(commands.Cog):
 
             await member.timeout(delta, reason=f"Timeout by {ctx.author}: {reason}")
             
-            # Log the action
+            # Log the action to database
             await self.db_manager.log_event(
                 ctx.guild.id,
                 member.id,
@@ -163,18 +178,20 @@ class Moderation(commands.Cog):
                 f"Reason: {reason or 'No reason provided'}"
             )
             
+            # Send to mod-logs channel
+            await self.log_mod_action(
+                ctx.guild,
+                "Member Timed Out",
+                description
+            )
+            
+            # Send confirmation to command channel
             embed = self.ui.mod_embed(
                 "Member Timed Out",
                 description
             )
             await ctx.send(embed=embed)
             
-        except discord.Forbidden:
-            error_embed = self.ui.mod_embed(
-                "Permission Error",
-                "I don't have permission to timeout that member!",
-            )
-            await ctx.send(embed=error_embed, ephemeral=True)
         except Exception as e:
             error_embed = self.ui.mod_embed(
                 "Error",
@@ -199,7 +216,7 @@ class Moderation(commands.Cog):
                 before=ctx.message.created_at if hasattr(ctx, 'message') else ctx.created_at
             )
             
-            # Log the action
+            # Log the action to database
             await self.db_manager.log_event(
                 ctx.guild.id,
                 ctx.author.id,
@@ -224,15 +241,6 @@ class Moderation(commands.Cog):
             else:
                 await ctx.send(embed=embed, delete_after=5)
             
-        except discord.Forbidden:
-            error_embed = self.ui.mod_embed(
-                "Permission Error",
-                "I don't have permission to delete messages!",
-            )
-            if isinstance(ctx, discord.Interaction):
-                await ctx.followup.send(embed=error_embed, ephemeral=True)
-            else:
-                await ctx.send(embed=error_embed, ephemeral=True)
         except Exception as e:
             error_embed = self.ui.mod_embed(
                 "Error",
@@ -248,7 +256,7 @@ class Moderation(commands.Cog):
     async def warn(self, ctx, member: discord.Member, reason: str):
         """Warn a member"""
         try:
-            # Log the warning
+            # Log the warning to database
             await self.db_manager.log_event(
                 ctx.guild.id,
                 member.id,
@@ -312,7 +320,7 @@ class Moderation(commands.Cog):
             
             self.locked_channels.add(channel.id)
             
-            # Log the action
+            # Log the action to database
             await self.db_manager.log_event(
                 ctx.guild.id,
                 ctx.author.id,
@@ -360,7 +368,7 @@ class Moderation(commands.Cog):
             
             self.locked_channels.remove(channel.id)
             
-            # Log the action
+            # Log the action to database
             await self.db_manager.log_event(
                 ctx.guild.id,
                 ctx.author.id,
@@ -451,7 +459,7 @@ class Moderation(commands.Cog):
                 
             await channel.edit(slowmode_delay=seconds)
             
-            # Log the action
+            # Log the action to database
             await self.db_manager.log_event(
                 ctx.guild.id,
                 ctx.author.id,

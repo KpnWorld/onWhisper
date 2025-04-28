@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from typing import Optional
 from utils.db_manager import DBManager
+from datetime import datetime
 
 class Logging(commands.Cog):
     def __init__(self, bot):
@@ -56,7 +57,7 @@ class Logging(commands.Cog):
     async def get_log_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
         """Get the logging channel for a guild"""
         try:
-            # Get from Replit DB
+            # Get from database
             config = await self.db_manager.get_data('logging_config', str(guild_id))
             if not config:
                 return None
@@ -71,14 +72,26 @@ class Logging(commands.Cog):
         """Send a log embed to the guild's logging channel"""
         try:
             channel = await self.get_log_channel(guild.id)
-            if channel:
-                embed = self.ui.system_embed(
-                    title,
-                    description
-                )
-                if color:
-                    embed.color = color
+            if not channel:
+                return  # Silently return if no log channel is set
+                
+            embed = self.ui.system_embed(
+                title,
+                description
+            )
+            if color:
+                embed.color = color
+                
+            # Add timestamp to all log messages
+            embed.timestamp = datetime.utcnow()
+            
+            try:
                 await channel.send(embed=embed)
+            except discord.Forbidden:
+                print(f"Missing permissions to send logs in {guild.name}")
+            except discord.HTTPException as e:
+                print(f"Failed to send log message in {guild.name}: {e}")
+                
         except Exception as e:
             print(f"Failed to log to channel: {e}")
 
