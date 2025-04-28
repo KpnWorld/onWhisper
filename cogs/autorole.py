@@ -7,6 +7,7 @@ class AutoRole(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_manager = DBManager()
+        self.ui = self.bot.ui_manager
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
@@ -38,86 +39,61 @@ class AutoRole(commands.Cog):
     @commands.hybrid_command(description="Set the automatic role for new members")
     @commands.has_permissions(manage_roles=True)
     async def setautorole(self, ctx, role: discord.Role):
-        """Set the automatic role for new members"""
         try:
-            # Validate bot's role hierarchy
             if role >= ctx.guild.me.top_role:
-                embed = self.bot.create_embed(
+                embed = self.ui.error_embed(
                     "Permission Error",
-                    "I cannot assign roles that are higher than or equal to my highest role!",
-                    command_type="Administrative"
+                    "I cannot assign roles that are higher than or equal to my highest role!"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
 
             await self.db_manager.set_auto_role(ctx.guild.id, role.id, True)
             
-            embed = self.bot.create_embed(
+            embed = self.ui.admin_embed(
                 "Auto Role Set",
-                f"New members will now automatically receive the {role.mention} role.",
-                command_type="Administrative"
+                f"New members will now automatically receive the {role.mention} role."
             )
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="Administrative"
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Disable the automatic role assignment")
     @commands.has_permissions(manage_roles=True)
     async def removeautorole(self, ctx):
-        """Disable the automatic role assignment"""
         try:
             await self.db_manager.set_auto_role(ctx.guild.id, None, False)
             
-            embed = self.bot.create_embed(
+            embed = self.ui.admin_embed(
                 "Auto Role Disabled",
-                "New members will no longer receive an automatic role.",
-                command_type="Administrative"
+                "New members will no longer receive an automatic role."
             )
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="Administrative"
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Bind a role to a reaction on a message")
     @commands.has_permissions(manage_roles=True)
-    async def bindreactionrole(
-        self, 
-        ctx,
-        message_id: str,
-        emoji: str,
-        role: discord.Role
-    ):
-        """Bind a role to a reaction on a message"""
+    async def bindreactionrole(self, ctx, message_id: str, emoji: str, role: discord.Role):
         try:
-            # Convert message ID to int
             try:
                 message_id = int(message_id)
             except ValueError:
-                embed = self.bot.create_embed(
+                embed = self.ui.error_embed(
                     "Invalid Input",
-                    "Please provide a valid message ID.",
-                    command_type="Administrative"
+                    "Please provide a valid message ID."
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
 
-            # Validate role hierarchy
             if role >= ctx.guild.me.top_role:
-                embed = self.bot.create_embed(
+                embed = self.ui.error_embed(
                     "Permission Error",
-                    "I cannot assign roles that are higher than or equal to my highest role!",
-                    command_type="Administrative"
+                    "I cannot assign roles that are higher than or equal to my highest role!"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
@@ -126,10 +102,9 @@ class AutoRole(commands.Cog):
             try:
                 message = await ctx.channel.fetch_message(message_id)
             except discord.NotFound:
-                embed = self.bot.create_embed(
+                embed = self.ui.error_embed(
                     "Message Not Found",
-                    "Make sure you're using this command in the same channel as the message.",
-                    command_type="Administrative"
+                    "Make sure you're using this command in the same channel as the message."
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
@@ -138,10 +113,9 @@ class AutoRole(commands.Cog):
             try:
                 await message.add_reaction(emoji)
             except discord.HTTPException:
-                embed = self.bot.create_embed(
+                embed = self.ui.error_embed(
                     "Invalid Emoji",
-                    "Please provide a valid emoji.",
-                    command_type="Administrative"
+                    "Please provide a valid emoji."
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
@@ -155,19 +129,14 @@ class AutoRole(commands.Cog):
                 f"Message: [Jump to Message]({message.jump_url})"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.admin_embed(
                 "Reaction Role Bound",
-                description,
-                command_type="Administrative"
+                description
             )
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="Administrative"
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.Cog.listener()

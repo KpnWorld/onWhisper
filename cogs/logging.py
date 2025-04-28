@@ -7,6 +7,7 @@ class Logging(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_manager = DBManager()
+        self.ui = self.bot.ui_manager
 
     @commands.hybrid_command(description="Set the logging channel for the server")
     @commands.has_permissions(administrator=True)
@@ -71,10 +72,9 @@ class Logging(commands.Cog):
         try:
             channel = await self.get_log_channel(guild.id)
             if channel:
-                embed = self.bot.create_embed(
+                embed = self.ui.system_embed(
                     title,
-                    description,
-                    command_type="Logging"
+                    description
                 )
                 if color:
                     embed.color = color

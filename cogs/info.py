@@ -8,13 +8,12 @@ class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.start_time = datetime.utcnow()
+        self.ui = self.bot.ui_manager
 
     @commands.hybrid_command(name="help", description="Shows all available commands")
     async def help_command(self, ctx, command: str = None):
-        """Shows a list of all commands or detailed help for a specific command"""
         try:
             if command:
-                # Show help for specific command
                 cmd = self.bot.get_command(command)
                 if not cmd:
                     raise commands.CommandNotFound(f"Command '{command}' not found.")
@@ -24,55 +23,40 @@ class Info(commands.Cog):
                     f"**Usage:** !{cmd.qualified_name} {cmd.signature}"
                 )
                 
-                embed = self.bot.create_embed(
+                embed = self.ui.info_embed(
                     f"Help: {cmd.qualified_name}",
-                    description,
-                    command_type="User"
+                    description
                 )
                 
             else:
-                # Show all commands grouped by cogs
                 description = ""
-                
                 for cog_name, cog in self.bot.cogs.items():
-                    # Get all commands from the cog that the user can use
                     cog_commands = [cmd for cmd in cog.get_commands() if cmd.hidden is False]
-                    
                     if cog_commands:
-                        # Add cog section
                         description += f"\n**{cog_name}**\n"
-                        
-                        # Add each command's help
                         for cmd in cog_commands:
                             description += f"`!{cmd.name}` - {cmd.description or cmd.help or 'No description'}\n"
                 
-                embed = self.bot.create_embed(
+                embed = self.ui.info_embed(
                     "Command Help",
-                    description.strip(),
-                    command_type="User"
+                    description.strip()
                 )
                 embed.set_footer(text="Type !help <command> for detailed information about a command")
             
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="User"
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Get information about the bot")
     async def botinfo(self, ctx):
-        """Display information about the bot"""
         try:
             uptime = datetime.utcnow() - self.start_time
             days = uptime.days
             hours, remainder = divmod(uptime.seconds, 3600)
             minutes, seconds = divmod(remainder, 60)
             
-            # Count both application commands and text commands
             total_commands = len(set([cmd.qualified_name for cmd in self.bot.walk_commands()]))
             
             description = (
@@ -84,10 +68,9 @@ class Info(commands.Cog):
                 f"**py-cord Version:** {discord.__version__}"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.info_embed(
                 "Bot Information",
-                description,
-                command_type="User"
+                description
             )
             
             if self.bot.user.avatar:
@@ -96,11 +79,7 @@ class Info(commands.Cog):
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="User"
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Get information about the server")
@@ -109,13 +88,11 @@ class Info(commands.Cog):
         try:
             guild = ctx.guild
             
-            # Count channels by type
             text_channels = len([c for c in guild.channels if isinstance(c, discord.TextChannel)])
             voice_channels = len([c for c in guild.channels if isinstance(c, discord.VoiceChannel)])
             categories = len(guild.categories)
             threads = len(guild.threads)
             
-            # Count member status
             total_members = guild.member_count
             online = len([m for m in guild.members if m.status != discord.Status.offline])
             bots = len([m for m in guild.members if m.bot])
@@ -141,10 +118,9 @@ class Info(commands.Cog):
                 f"**Boosters:** {guild.premium_subscription_count or 0}"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.info_embed(
                 f"{guild.name} Information",
-                description,
-                command_type="User"
+                description
             )
             
             if guild.icon:
@@ -153,11 +129,7 @@ class Info(commands.Cog):
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="User"
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Get information about a user")
@@ -168,8 +140,21 @@ class Info(commands.Cog):
             
             roles = [role.mention for role in reversed(user.roles[1:])]  # All roles except @everyone
             
-            created_ago = f"<t:{int(user.created_at.timestamp())}:R>"
-            joined_ago = f"<t:{int(user.joined_at.timestamp())}:R>" if user.joined_at else "Unknown"
+            embed = discord.Embed(
+                title=f"User Information",
+                color=discord.Color.blurple(),
+                timestamp=datetime.utcnow()
+            )
+            
+            embed.add_field(
+                name="User Details",
+                value=f"**ID:** {user.id}\n"
+                      f"**Created:** <t:{int(user.created_at.timestamp())}:R>\n"
+                      f"**Joined:** <t:{int(user.joined_at.timestamp() if user.joined_at else 0)}:R>\n"
+                      f"**Display Name:** {user.display_name}\n"
+                      f"**Bot:** {'Yes' if user.bot else 'No'}",
+                inline=False
+            )
             
             permissions = []
             if user.guild_permissions.administrator:
@@ -186,38 +171,28 @@ class Info(commands.Cog):
                 if user.guild_permissions.manage_roles:
                     permissions.append("Manage Roles")
             
-            description = (
-                f"**ID:** {user.id}\n"
-                f"**Created:** {created_ago}\n"
-                f"**Joined:** {joined_ago}\n"
-                f"\n"
-                f"**Display Name:** {user.display_name}\n"
-                f"**Bot:** {'Yes' if user.bot else 'No'}\n"
-                f"\n"
-                f"**Key Permissions:**\n"
-                f"{', '.join(permissions) or 'None'}\n"
-                f"\n"
-                f"**Roles [{len(roles)}]:**\n"
-                f"{' '.join(roles) if roles else 'None'}"
+            embed.add_field(
+                name="Key Permissions",
+                value=', '.join(permissions) or 'None',
+                inline=False
             )
             
-            embed = self.bot.create_embed(
-                f"User Information: {user}",
-                description,
-                command_type="User"
-            )
-            
+            if roles:
+                embed.add_field(
+                    name=f"Roles [{len(roles)}]",
+                    value=' '.join(roles),
+                    inline=False
+                )
+
             if user.avatar:
                 embed.set_thumbnail(url=user.avatar.url)
+
+            embed.set_footer(text=f"Command Type • User")
                 
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="User"
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
 async def setup(bot):

@@ -9,6 +9,7 @@ import sys
 import time
 
 from utils.db_manager import DBManager
+from utils.ui_manager import UIManager
 
 # Load environment variables
 load_dotenv()
@@ -26,30 +27,15 @@ ACTIVITIES = [
 class Bot(commands.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix="!",  # Prefix for hybrid commands
+            command_prefix="!",
             intents=discord.Intents.all(),
             help_command=None
         )
         self.db_manager = DBManager('bot')
+        self.ui_manager = UIManager(self)
         self._rate_limit_retries = 0
         self._session_valid = True
         self.start_time = datetime.utcnow()
-
-    def create_embed(self, title: str, description: str, command_type: str = "User") -> discord.Embed:
-        """Create a standardized embed with consistent formatting"""
-        color = discord.Color.blurple() if command_type == "User" else discord.Color.red()
-
-        embed = discord.Embed(
-            title=title,
-            description=f"```\n{description}\n```",
-            color=color,
-            timestamp=datetime.utcnow()
-        )
-
-        # Add command type footer
-        embed.set_footer(text=f"Command Type • {command_type}")
-
-        return embed
 
     async def setup_hook(self):
         """This is called when the bot starts, sets up the database and loads cogs"""

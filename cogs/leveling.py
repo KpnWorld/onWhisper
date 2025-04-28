@@ -27,6 +27,7 @@ class Leveling(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_manager = DBManager()
+        self.ui = self.bot.ui_manager
         self.xp_cooldown = {}
         self.base_xp = 15
         self.cooldown = 60
@@ -78,10 +79,9 @@ class Leveling(commands.Cog):
                     f"You've reached level {new_level}!\n\n"
                     f"Total XP: {new_xp:,}"
                 )
-                embed = self.bot.create_embed(
+                embed = self.ui.user_embed(
                     "🎉 Level Up!",
-                    description,
-                    command_type="User"
+                    description
                 )
                 await message.channel.send(embed=embed)
         
@@ -120,10 +120,9 @@ class Leveling(commands.Cog):
                 f"{xp_progress:,}/{xp_needed:,} XP needed"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.user_embed(
                 f"Level Information: {target.display_name}",
-                description,
-                command_type="User"
+                description
             )
             
             if target.avatar:
@@ -132,10 +131,9 @@ class Leveling(commands.Cog):
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.user_embed(
                 "Error",
-                str(e),
-                command_type="User"
+                str(e)
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 

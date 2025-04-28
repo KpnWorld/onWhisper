@@ -26,20 +26,19 @@ class Tickets(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_manager = DBManager()
+        self.ui = self.bot.ui_manager
 
     @commands.hybrid_command(description="Create a support ticket")
     async def ticket(self, ctx, *, reason: str = None):
-        """Create a support ticket"""
         try:
             # Check if user already has an open ticket
             existing_ticket = await self.db_manager.get_open_ticket(ctx.author.id, ctx.guild.id)
             if existing_ticket:
                 channel = ctx.guild.get_channel(existing_ticket['channel_id'])
                 if channel:
-                    embed = self.bot.create_embed(
+                    embed = self.ui.user_embed(
                         "Ticket Already Open",
                         f"You already have an open ticket: {channel.mention}",
-                        command_type="User"
                     )
                     await ctx.send(embed=embed, ephemeral=True)
                     return
@@ -47,10 +46,9 @@ class Tickets(commands.Cog):
             # Get ticket settings
             settings = await self.db_manager.get_data('tickets_config', str(ctx.guild.id))
             if not settings:
-                embed = self.bot.create_embed(
+                embed = self.ui.user_embed(
                     "Tickets Not Configured",
                     "The ticket system has not been set up yet!",
-                    command_type="User"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
@@ -59,10 +57,9 @@ class Tickets(commands.Cog):
             support_role = ctx.guild.get_role(settings.get('support_role_id'))
 
             if not category or not support_role:
-                embed = self.bot.create_embed(
+                embed = self.ui.user_embed(
                     "Configuration Error",
                     "The ticket system is not properly configured!",
-                    command_type="User"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
@@ -88,10 +85,9 @@ class Tickets(commands.Cog):
                 f"Reason: {reason or 'No reason provided'}"
             )
 
-            embed = self.bot.create_embed(
+            embed = self.ui.user_embed(
                 "Ticket Created",
-                description,
-                command_type="User"
+                description
             )
 
             # Add close button
@@ -106,18 +102,16 @@ class Tickets(commands.Cog):
             )
 
             # Send confirmation
-            confirm_embed = self.bot.create_embed(
+            confirm_embed = self.ui.user_embed(
                 "Ticket Created",
                 f"Your ticket has been created: {channel.mention}",
-                command_type="User"
             )
             await ctx.send(embed=confirm_embed, ephemeral=True)
 
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.user_embed(
                 "Error",
                 str(e),
-                command_type="User"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 

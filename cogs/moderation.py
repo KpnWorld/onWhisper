@@ -10,19 +10,18 @@ class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_manager = DBManager()
+        self.ui = self.bot.ui_manager
         self.locked_channels = set()
 
     @commands.hybrid_command(description="Kick a member from the server")
-    @commands.has_permissions(kick_members=True)
     async def kick(self, ctx, member: discord.Member, reason: str = None):
         """Kick a member from the server"""
         try:
             # Check hierarchy
             if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
-                embed = self.bot.create_embed(
+                embed = self.ui.mod_embed(
                     "Permission Error",
                     "You cannot kick someone with a higher or equal role!",
-                    command_type="Administrative"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
@@ -39,25 +38,22 @@ class Moderation(commands.Cog):
             
             description = f"Member: {member.mention}\nReason: {reason or 'No reason provided'}"
             
-            embed = self.bot.create_embed(
+            embed = self.ui.mod_embed(
                 "Member Kicked",
-                description,
-                command_type="Administrative"
+                description
             )
             await ctx.send(embed=embed)
             
         except discord.Forbidden:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Permission Error",
                 "I don't have permission to kick that member!",
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Error",
                 str(e),
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 
@@ -68,10 +64,9 @@ class Moderation(commands.Cog):
         try:
             # Check hierarchy
             if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
-                embed = self.bot.create_embed(
+                embed = self.ui.mod_embed(
                     "Permission Error",
                     "You cannot ban someone with a higher or equal role!",
-                    command_type="Administrative"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
@@ -93,25 +88,22 @@ class Moderation(commands.Cog):
                 f"Message Deletion: {delete_days} days"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.mod_embed(
                 "Member Banned",
-                description,
-                command_type="Administrative"
+                description
             )
             await ctx.send(embed=embed)
             
         except discord.Forbidden:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Permission Error",
                 "I don't have permission to ban that member!",
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Error",
                 str(e),
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 
@@ -131,29 +123,26 @@ class Moderation(commands.Cog):
             elif unit in ['d', 'day', 'days']:
                 delta = timedelta(days=duration)
             else:
-                embed = self.bot.create_embed(
+                embed = self.ui.mod_embed(
                     "Invalid Unit",
                     "Use s/m/h/d for seconds/minutes/hours/days",
-                    command_type="Administrative"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
 
             if delta > timedelta(days=28):  # Discord's maximum timeout duration
-                embed = self.bot.create_embed(
+                embed = self.ui.mod_embed(
                     "Invalid Duration",
                     "Timeout duration cannot exceed 28 days!",
-                    command_type="Administrative"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
 
             # Check hierarchy
             if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
-                embed = self.bot.create_embed(
+                embed = self.ui.mod_embed(
                     "Permission Error",
                     "You cannot timeout someone with a higher or equal role!",
-                    command_type="Administrative"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
@@ -174,25 +163,22 @@ class Moderation(commands.Cog):
                 f"Reason: {reason or 'No reason provided'}"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.mod_embed(
                 "Member Timed Out",
-                description,
-                command_type="Administrative"
+                description
             )
             await ctx.send(embed=embed)
             
         except discord.Forbidden:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Permission Error",
                 "I don't have permission to timeout that member!",
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Error",
                 str(e),
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 
@@ -228,10 +214,9 @@ class Moderation(commands.Cog):
                 f"Target User: {user.mention if user else 'All users'}"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.mod_embed(
                 "Messages Cleared",
-                description,
-                command_type="Administrative"
+                description
             )
 
             if isinstance(ctx, discord.Interaction):
@@ -240,20 +225,18 @@ class Moderation(commands.Cog):
                 await ctx.send(embed=embed, delete_after=5)
             
         except discord.Forbidden:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Permission Error",
                 "I don't have permission to delete messages!",
-                command_type="Administrative"
             )
             if isinstance(ctx, discord.Interaction):
                 await ctx.followup.send(embed=error_embed, ephemeral=True)
             else:
                 await ctx.send(embed=error_embed, ephemeral=True)
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Error",
                 str(e),
-                command_type="Administrative"
             )
             if isinstance(ctx, discord.Interaction):
                 await ctx.followup.send(embed=error_embed, ephemeral=True)
@@ -278,10 +261,9 @@ class Moderation(commands.Cog):
                 f"Reason: {reason}"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.mod_embed(
                 "Member Warned",
-                description,
-                command_type="Administrative"
+                description
             )
             await ctx.send(embed=embed)
             
@@ -292,20 +274,18 @@ class Moderation(commands.Cog):
                     f"Reason: {reason}"
                 )
                 
-                warn_dm = self.bot.create_embed(
+                warn_dm = self.ui.mod_embed(
                     "Warning Received",
-                    dm_description,
-                    command_type="Administrative"
+                    dm_description
                 )
                 await member.send(embed=warn_dm)
             except:
                 pass  # Ignore if DM fails
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Error",
                 str(e),
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 
@@ -318,10 +298,9 @@ class Moderation(commands.Cog):
             
             # Don't lock if already locked
             if channel.id in self.locked_channels:
-                embed = self.bot.create_embed(
+                embed = self.ui.mod_embed(
                     "Channel Already Locked",
                     f"{channel.mention} is already locked!",
-                    command_type="Administrative"
                 )
                 await ctx.send(embed=embed)
                 return
@@ -346,18 +325,16 @@ class Moderation(commands.Cog):
                 f"Reason: {reason or 'No reason provided'}"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.mod_embed(
                 "🔒 Channel Locked",
-                description,
-                command_type="Administrative"
+                description
             )
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Error",
                 str(e),
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 
@@ -369,10 +346,9 @@ class Moderation(commands.Cog):
             channel = channel or ctx.channel
             
             if channel.id not in self.locked_channels:
-                embed = self.bot.create_embed(
+                embed = self.ui.mod_embed(
                     "Channel Not Locked",
                     f"{channel.mention} is not locked!",
-                    command_type="Administrative"
                 )
                 await ctx.send(embed=embed)
                 return
@@ -392,18 +368,16 @@ class Moderation(commands.Cog):
                 f"Channel {channel.name} unlocked by {ctx.author}"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.mod_embed(
                 "🔓 Channel Unlocked",
-                f"Channel {channel.mention} has been unlocked.",
-                command_type="Administrative"
+                f"Channel {channel.mention} has been unlocked."
             )
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Error",
                 str(e),
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 
@@ -431,10 +405,9 @@ class Moderation(commands.Cog):
                             latest_deleted = log_data
             
             if not latest_deleted:
-                embed = self.bot.create_embed(
+                embed = self.ui.mod_embed(
                     "No Deleted Messages",
                     f"No recently deleted messages found in {channel.mention}",
-                    command_type="Administrative"
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
@@ -448,18 +421,16 @@ class Moderation(commands.Cog):
                 f"\nContent:\n{latest_deleted.get('details', 'No content')}"
             )
             
-            embed = self.bot.create_embed(
+            embed = self.ui.mod_embed(
                 "📝 Deleted Message",
-                description,
-                command_type="Administrative"
+                description
             )
             await ctx.send(embed=embed, ephemeral=True)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Error",
                 str(e),
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 
@@ -471,10 +442,9 @@ class Moderation(commands.Cog):
             channel = channel or ctx.channel
             
             if seconds < 0:
-                embed = self.bot.create_embed(
+                embed = self.ui.mod_embed(
                     "Invalid Duration",
                     "Slowmode delay must be 0 or higher!",
-                    command_type="Administrative"
                 )
                 await ctx.send(embed=embed)
                 return
@@ -494,18 +464,16 @@ class Moderation(commands.Cog):
             else:
                 description = f"Slowmode set to {seconds} seconds in {channel.mention}"
             
-            embed = self.bot.create_embed(
+            embed = self.ui.mod_embed(
                 "⏱️ Slowmode Updated",
-                description,
-                command_type="Administrative"
+                description
             )
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
+            error_embed = self.ui.mod_embed(
                 "Error",
                 str(e),
-                command_type="Administrative"
             )
             await ctx.send(embed=error_embed, ephemeral=True)
 
