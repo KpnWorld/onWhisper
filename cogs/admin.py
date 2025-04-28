@@ -28,6 +28,7 @@ class Admin(commands.Cog):
             )
             await ctx.send(embed=embed)
 
+    # XP Config Group
     @config.group(name="xp")
     @commands.has_permissions(administrator=True)
     async def config_xp(self, ctx):
@@ -37,8 +38,7 @@ class Admin(commands.Cog):
                 "XP Configuration",
                 "Available commands:\n"
                 "• /config xp rate <amount> - Set XP earned per message\n"
-                "• /config xp cooldown <seconds> - Set cooldown between XP gains",
-                command_type="Administrative"
+                "• /config xp cooldown <seconds> - Set cooldown between XP gains"
             )
             await ctx.send(embed=embed)
 
@@ -57,6 +57,55 @@ class Admin(commands.Cog):
         )
         await ctx.send(embed=embed)
 
+    @config_xp.command(name="cooldown")
+    async def xp_cooldown(self, ctx, seconds: int):
+        """Set the cooldown between XP gains"""
+        if seconds < 10 or seconds > 300:
+            await ctx.send("Cooldown must be between 10 and 300 seconds")
+            return
+            
+        await self.db_manager.set_data('xp_config', str(ctx.guild.id), {'cooldown': seconds})
+        embed = self.ui.admin_embed(
+            "XP Cooldown Updated",
+            f"Members will now have a {seconds} second cooldown between XP gains"
+        )
+        await ctx.send(embed=embed)
+
+    @config_xp.command(name="toggle")
+    async def xp_toggle(self, ctx):
+        """Toggle the XP system on/off"""
+        try:
+            config = await self.db_manager.get_data('xp_config', str(ctx.guild.id)) or {}
+            current_state = config.get('enabled', True)  # Default to enabled
+            
+            config['enabled'] = not current_state
+            await self.db_manager.set_data('xp_config', str(ctx.guild.id), config)
+            
+            status = "enabled" if config['enabled'] else "disabled"
+            embed = self.ui.admin_embed(
+                "XP System Toggled",
+                f"Leveling system has been {status}"
+            )
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
+
+    # Tickets Config Group
+    @config.group(name="tickets")
+    @commands.has_permissions(administrator=True)
+    async def config_tickets(self, ctx):
+        """Configure ticket system settings"""
+        if ctx.invoked_subcommand is None:
+            embed = self.ui.admin_embed(
+                "Ticket Configuration",
+                "Available commands:\n"
+                "• /config tickets category <category> - Set ticket category\n"
+                "• /config tickets support <role> - Set support role"
+            )
+            await ctx.send(embed=embed)
+
     @config_tickets.command(name="category")
     async def tickets_category(self, ctx, category: discord.CategoryChannel):
         """Set the category for ticket channels"""
@@ -66,6 +115,30 @@ class Admin(commands.Cog):
             f"New tickets will be created in {category.mention}"
         )
         await ctx.send(embed=embed)
+
+    @config_tickets.command(name="support")
+    async def tickets_support(self, ctx, role: discord.Role):
+        """Set the support team role"""
+        await self.db_manager.set_data('tickets_config', str(ctx.guild.id), {'support_role_id': role.id})
+        embed = self.ui.admin_embed(
+            "Support Role Set",
+            f"Members with {role.mention} will now have access to tickets",
+            command_type="Administrative"
+        )
+        await ctx.send(embed=embed)
+
+    # Logging Config Group
+    @config.group(name="logging")
+    @commands.has_permissions(administrator=True)
+    async def config_logging(self, ctx):
+        """Configure logging system settings"""
+        if ctx.invoked_subcommand is None:
+            embed = self.ui.admin_embed(
+                "Logging Configuration",
+                "Available commands:\n"
+                "• /config logging channel <channel> - Set logging channel"
+            )
+            await ctx.send(embed=embed)
 
     @config_logging.command(name="channel")
     async def logging_channel(self, ctx, channel: discord.TextChannel):
@@ -86,58 +159,7 @@ class Admin(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @config.group(name="tickets")
-    @commands.has_permissions(administrator=True)
-    async def config_tickets(self, ctx):
-        """Configure ticket system settings"""
-        if ctx.invoked_subcommand is None:
-            embed = self.ui.admin_embed(
-                "Ticket Configuration",
-                "Available commands:\n"
-                "• /config tickets category <category> - Set ticket category\n"
-                "• /config tickets support <role> - Set support role",
-                command_type="Administrative"
-            )
-            await ctx.send(embed=embed)
-
-    @config_tickets.command(name="support")
-    async def tickets_support(self, ctx, role: discord.Role):
-        """Set the support team role"""
-        await self.db_manager.set_data('tickets_config', str(ctx.guild.id), {'support_role_id': role.id})
-        embed = self.ui.admin_embed(
-            "Support Role Set",
-            f"Members with {role.mention} will now have access to tickets",
-            command_type="Administrative"
-        )
-        await ctx.send(embed=embed)
-
-    @config.group(name="logging")
-    @commands.has_permissions(administrator=True)
-    async def config_logging(self, ctx):
-        """Configure logging system settings"""
-        if ctx.invoked_subcommand is None:
-            embed = self.ui.admin_embed(
-                "Logging Configuration",
-                "Available commands:\n"
-                "• /config logging channel <channel> - Set logging channel",
-                command_type="Administrative"
-            )
-            await ctx.send(embed=embed)
-
-    @config_xp.command(name="cooldown")
-    async def xp_cooldown(self, ctx, seconds: int):
-        """Set the cooldown between XP gains"""
-        if seconds < 10 or seconds > 300:
-            await ctx.send("Cooldown must be between 10 and 300 seconds")
-            return
-            
-        await self.db_manager.set_data('xp_config', str(ctx.guild.id), {'cooldown': seconds})
-        embed = self.ui.admin_embed(
-            "XP Cooldown Updated",
-            f"Members will now have a {seconds} second cooldown between XP gains"
-        )
-        await ctx.send(embed=embed)
-
+    # Moderation Config Group
     @config.group(name="moderation")
     @commands.has_permissions(administrator=True)
     async def config_moderation(self, ctx):
@@ -190,6 +212,7 @@ class Admin(commands.Cog):
         )
         await ctx.send(embed=embed)
 
+    # Autorole Config Group
     @config.group(name="autorole")
     @commands.has_permissions(administrator=True)
     async def config_autorole(self, ctx):

@@ -46,47 +46,56 @@ class Leveling(commands.Cog):
         if message.author.bot or not message.guild:
             return
 
-        # Check cooldown
-        user_id = message.author.id
-        guild_id = message.guild.id
-        current_time = datetime.utcnow()
-        cooldown_key = f"{user_id}-{guild_id}"
-
-        if cooldown_key in self.xp_cooldown:
-            if current_time < self.xp_cooldown[cooldown_key]:
-                return
-        
-        # Award XP
         try:
-            # Get current level and XP
-            current_data = await self.db_manager.get_user_leveling(user_id, guild_id)
-            current_level, current_xp = current_data if current_data else (0, 0)
+            # Check if leveling is enabled
+            config = await self.db_manager.get_data('xp_config', str(message.guild.id)) or {}
+            if not config.get('enabled', True):  # Default to enabled if not set
+                return
+
+            # Check cooldown
+            user_id = message.author.id
+            guild_id = message.guild.id
+            current_time = datetime.utcnow()
+            cooldown_key = f"{user_id}-{guild_id}"
+
+            if cooldown_key in self.xp_cooldown:
+                if current_time < self.xp_cooldown[cooldown_key]:
+                    return
             
-            # Add XP
-            new_xp = current_xp + self.base_xp
-            new_level = self.calculate_level(new_xp)
+            # Award XP
+            try:
+                # Get current level and XP
+                current_data = await self.db_manager.get_user_leveling(user_id, guild_id)
+                current_level, current_xp = current_data if current_data else (0, 0)
+                
+                # Add XP
+                new_xp = current_xp + self.base_xp
+                new_level = self.calculate_level(new_xp)
+                
+                # Update database
+                await self.db_manager.add_user_leveling(user_id, guild_id, new_level, new_xp)
+                
+                # Set cooldown
+                self.xp_cooldown[cooldown_key] = current_time + timedelta(seconds=self.cooldown)
+                
+                # Level up notification
+                if new_level > current_level:
+                    description = (
+                        f"Congratulations {message.author.mention}!\n"
+                        f"You've reached level {new_level}!\n\n"
+                        f"Total XP: {new_xp:,}"
+                    )
+                    embed = self.ui.user_embed(
+                        "🎉 Level Up!",
+                        description
+                    )
+                    await message.channel.send(embed=embed)
             
-            # Update database
-            await self.db_manager.add_user_leveling(user_id, guild_id, new_level, new_xp)
-            
-            # Set cooldown
-            self.xp_cooldown[cooldown_key] = current_time + timedelta(seconds=self.cooldown)
-            
-            # Level up notification
-            if new_level > current_level:
-                description = (
-                    f"Congratulations {message.author.mention}!\n"
-                    f"You've reached level {new_level}!\n\n"
-                    f"Total XP: {new_xp:,}"
-                )
-                embed = self.ui.user_embed(
-                    "🎉 Level Up!",
-                    description
-                )
-                await message.channel.send(embed=embed)
-        
+            except Exception as e:
+                print(f"Error in leveling system: {e}")
+
         except Exception as e:
-            print(f"Error in leveling system: {e}")
+            print(f"Error in on_message: {e}")
 
     @commands.hybrid_command(description="Check your or another user's level")
     async def level(self, ctx, user: Optional[discord.Member] = None):
