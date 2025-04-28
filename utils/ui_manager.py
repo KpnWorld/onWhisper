@@ -34,10 +34,8 @@ class UIManager:
         command_type: str = "user"
     ) -> discord.Embed:
         """Creates a clean, reusable embed."""
-        # Normalize command type
+        # Normalize command type and get color
         cmd_type = command_type.lower()
-        
-        # Get color based on command type or passed color
         embed_color = color or self.colors.get(cmd_type, self.colors["info"])
         
         embed = discord.Embed(
@@ -68,8 +66,7 @@ class UIManager:
         return self.make_embed(
             title=title,
             description=description,
-            color=self.colors["success"],
-            **kwargs
+            color=self.colors["success"]
         )
 
     def error_embed(self, title=None, description=None, **kwargs):
@@ -77,8 +74,7 @@ class UIManager:
         return self.make_embed(
             title=title,
             description=description,
-            color=self.colors["error"],
-            **kwargs
+            color=self.colors["error"]
         )
 
     def info_embed(self, title=None, description=None, **kwargs):
@@ -86,8 +82,7 @@ class UIManager:
         return self.make_embed(
             title=title,
             description=description,
-            color=self.colors["info"],
-            **kwargs
+            command_type="user"
         )
 
     def admin_embed(self, title=None, description=None, **kwargs):

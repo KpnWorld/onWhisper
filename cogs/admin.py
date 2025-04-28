@@ -50,10 +50,10 @@ class Admin(commands.Cog):
             return
             
         await self.db_manager.set_data('xp_config', str(ctx.guild.id), {'rate': amount})
-        embed = self.ui.admin_embed(
-            "XP Rate Updated",
-            f"Members will now earn {amount} XP per message",
-            command_type="Administrative"
+        embed = self.ui.make_embed(
+            title="XP Rate Updated",
+            description=f"Members will now earn {amount} XP per message",
+            command_type="admin"
         )
         await ctx.send(embed=embed)
 
