@@ -9,6 +9,53 @@ class Logging(commands.Cog):
         self.bot = bot
         self.db_manager = DBManager()
         self.ui = self.bot.ui_manager
+        self.log_channels = {}  # Cache log channel IDs
+        self.bot.loop.create_task(self.load_log_channels())
+
+    async def load_log_channels(self):
+        """Load all logging channels from database on startup"""
+        try:
+            await self.bot.wait_until_ready()
+            
+            # Get all guild configs that have logging enabled
+            prefix = f"{self.db_manager.prefix}logging_config:"
+            for key in self.db_manager.db.keys():
+                if key.startswith(prefix):
+                    guild_id = key.split(':')[-1]
+                    config = await self.db_manager.get_data('logging_config', guild_id)
+                    
+                    if config and 'channel_id' in config:
+                        self.log_channels[int(guild_id)] = config['channel_id']
+                        
+            print(f"Loaded {len(self.log_channels)} logging channels")
+
+        except Exception as e:
+            print(f"Error loading log channels: {e}")
+
+    async def get_log_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
+        """Get the logging channel for a guild, using cache first"""
+        try:
+            # Check cache first
+            channel_id = self.log_channels.get(guild_id)
+            if channel_id:
+                channel = self.bot.get_channel(channel_id)
+                if channel:
+                    return channel
+
+            # If not in cache or channel not found, check database
+            config = await self.db_manager.get_data('logging_config', str(guild_id))
+            if config and 'channel_id' in config:
+                channel = self.bot.get_channel(config['channel_id'])
+                if channel:
+                    # Update cache
+                    self.log_channels[guild_id] = config['channel_id']
+                    return channel
+                    
+            return None
+
+        except Exception as e:
+            print(f"Error getting log channel: {e}")
+            return None
 
     @commands.hybrid_command(description="Set the logging channel for the server")
     @commands.has_permissions(administrator=True)
@@ -16,57 +63,44 @@ class Logging(commands.Cog):
         """Set the channel for logging events"""
         try:
             # Verify bot permissions in the channel
-            if not channel.permissions_for(ctx.guild.me).send_messages:
-                embed = self.bot.create_embed(
-                    "Permission Error",
-                    "I need permission to send messages in that channel!",
-                    command_type="Administrative"
+            perms = channel.permissions_for(ctx.guild.me)
+            required_perms = ['view_channel', 'send_messages', 'embed_links']
+            
+            missing = [p for p in required_perms if not getattr(perms, p)]
+            if missing:
+                embed = self.ui.error_embed(
+                    "Missing Permissions",
+                    f"I need the following permissions in {channel.mention}:\n" +
+                    "\n".join(f"• {p}" for p in missing)
                 )
                 await ctx.send(embed=embed, ephemeral=True)
                 return
 
-            # Store logging channel configuration
-            await self.db_manager.set_data('logging_config', str(ctx.guild.id), {
-                'channel_id': channel.id
+            # Save to both cache and database
+            self.log_channels[ctx.guild.id] = channel.id
+            await self.db_manager.update_config('logging_config', str(ctx.guild.id), {
+                'channel_id': channel.id,
+                'enabled': True,
+                'last_updated': datetime.utcnow().isoformat()
             })
             
-            description = f"Server logs will now be sent to {channel.mention}"
-            embed = self.bot.create_embed(
-                "Log Channel Set",
-                description,
-                command_type="Administrative"
+            embed = self.ui.admin_embed(
+                "Logging Channel Set",
+                f"Server logs will now be sent to {channel.mention}"
             )
             await ctx.send(embed=embed)
             
-            # Send test log to verify
-            await self.log_to_channel(
-                ctx.guild,
-                "Logging Channel Set",
-                f"Logging channel set to {channel.mention} by {ctx.author.mention}",
-                discord.Color.green()
+            # Send test message to verify
+            test_embed = self.ui.system_embed(
+                "🔔 Logging System Active",
+                f"Logging channel set by {ctx.author.mention}\n"
+                f"Server logs will be sent here"
             )
+            await channel.send(embed=test_embed)
             
         except Exception as e:
-            error_embed = self.bot.create_embed(
-                "Error",
-                str(e),
-                command_type="Administrative"
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
-
-    async def get_log_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
-        """Get the logging channel for a guild"""
-        try:
-            # Get from database
-            config = await self.db_manager.get_data('logging_config', str(guild_id))
-            if not config:
-                return None
-                
-            channel = self.bot.get_channel(config['channel_id'])
-            return channel
-        except Exception as e:
-            print(f"Error getting log channel: {e}")
-            return None
 
     async def log_to_channel(self, guild: discord.Guild, title: str, description: str, color: discord.Color = None):
         """Send a log embed to the guild's logging channel"""

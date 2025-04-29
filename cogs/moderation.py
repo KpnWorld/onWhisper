@@ -325,12 +325,21 @@ class Moderation(commands.Cog):
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Lock a channel")
-    @commands.has_permissions(manage_channels=True)
+    @commands.has_permissions(manage_guild=True)  # Changed from manage_channels to manage_guild
     async def lock(self, ctx, channel: discord.TextChannel = None, reason: str = None):
         """Lock a channel to prevent messages from non-moderators"""
         try:
             channel = channel or ctx.channel
             
+            # Check if user has required permissions
+            if not (ctx.author.guild_permissions.administrator or ctx.author.guild_permissions.manage_guild):
+                embed = self.ui.error_embed(
+                    "Missing Permissions",
+                    "You need Administrator or Manage Server permission to use this command!"
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
+
             # Don't lock if already locked
             if channel.id in self.locked_channels:
                 embed = self.ui.mod_embed(
@@ -357,7 +366,8 @@ class Moderation(commands.Cog):
             
             description = (
                 f"Channel: {channel.mention}\n"
-                f"Reason: {reason or 'No reason provided'}"
+                f"Reason: {reason or 'No reason provided'}\n"
+                f"Locked by: {ctx.author.mention}"
             )
             
             embed = self.ui.mod_embed(
@@ -367,19 +377,25 @@ class Moderation(commands.Cog):
             await ctx.send(embed=embed)
             
         except Exception as e:
-            error_embed = self.ui.mod_embed(
-                "Error",
-                str(e),
-            )
+            error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Unlock a locked channel")
-    @commands.has_permissions(manage_channels=True)
+    @commands.has_permissions(manage_guild=True)  # Changed from manage_channels to manage_guild
     async def unlock(self, ctx, channel: discord.TextChannel = None):
         """Unlock a previously locked channel"""
         try:
             channel = channel or ctx.channel
             
+            # Check if user has required permissions
+            if not (ctx.author.guild_permissions.administrator or ctx.author.guild_permissions.manage_guild):
+                embed = self.ui.error_embed(
+                    "Missing Permissions",
+                    "You need Administrator or Manage Server permission to use this command!"
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
+
             if channel.id not in self.locked_channels:
                 embed = self.ui.mod_embed(
                     "Channel Not Locked",
