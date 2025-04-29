@@ -179,29 +179,67 @@ class DBManager:
             print(f"Open ticket check error: {e}")
             raise
 
-    async def add_mod_action(self, guild_id: int, action: str, user_id: int, details: str = None):
-        """Log a moderation action"""
+    async def add_mod_action(self, guild_id: int, action: str, user_id: int, details: str = None, expires: datetime = None):
+        """Log a moderation action, keeping only recent history"""
         try:
+            # Get current mod actions
+            data = await self.get_guild_data(guild_id)
+            mod_actions = data.get('mod_actions', [])
+
+            # Add new action
             action_data = {
                 "action": action,
                 "user_id": user_id,
                 "details": details,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "expires": expires.isoformat() if expires else None
             }
+
+            # Remove expired actions
+            current_time = datetime.utcnow()
+            mod_actions = [
+                action for action in mod_actions 
+                if not action.get('expires') or 
+                datetime.fromisoformat(action['expires']) > current_time
+            ]
+
+            # Add new action and keep only last 100
+            mod_actions.append(action_data)
+            if len(mod_actions) > 100:
+                mod_actions = mod_actions[-100:]
+
+            # Update database
             await self.update_guild_data(
                 guild_id,
-                action_data,
-                ["mod_actions"]
+                {'mod_actions': mod_actions}
             )
+
         except Exception as e:
             print(f"Add mod action error: {e}")
             raise
 
-    async def get_mod_actions(self, guild_id: int):
-        """Get moderation actions log"""
+    async def get_mod_actions(self, guild_id: int, user_id: int = None):
+        """Get moderation actions log, optionally filtered by user"""
         try:
             data = await self.get_guild_data(guild_id)
-            return data.get("mod_actions", [])
+            mod_actions = data.get('mod_actions', [])
+
+            # Clean expired actions
+            current_time = datetime.utcnow()
+            mod_actions = [
+                action for action in mod_actions 
+                if not action.get('expires') or 
+                datetime.fromisoformat(action['expires']) > current_time
+            ]
+
+            # Filter by user if specified
+            if user_id:
+                mod_actions = [
+                    action for action in mod_actions 
+                    if action['user_id'] == user_id
+                ]
+
+            return mod_actions
         except Exception as e:
             print(f"Get mod actions error: {e}")
             raise

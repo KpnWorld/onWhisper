@@ -134,9 +134,12 @@ The bot uses Replit Database with nested JSON structures. Each guild has its own
             "action": "string",
             "user_id": number,
             "details": "string",
-            "timestamp": "ISO datetime"
+            "timestamp": "ISO datetime",
+            "expires": "ISO datetime or null"  // New field for temporary actions
         }
     ],
+    // Keep only the last 100 actions per guild
+    // Auto-cleanup of expired actions
     "reaction_roles": {
         "message_id": {
             "emoji": "role_id"
