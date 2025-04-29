@@ -3,6 +3,7 @@ from discord.ext import commands
 from typing import Optional
 from utils.db_manager import DBManager
 from datetime import datetime
+import asyncio
 
 class Logging(commands.Cog):
     def __init__(self, bot):
@@ -16,6 +17,16 @@ class Logging(commands.Cog):
         """Load all logging channels from database on startup"""
         try:
             await self.bot.wait_until_ready()
+            
+            # Wait for database to be ready
+            retries = 0
+            while not self.db_manager.db and retries < 5:
+                await asyncio.sleep(1)
+                retries += 1
+            
+            if not self.db_manager.db:
+                print("Failed to load log channels: Database not available")
+                return
             
             # Get all guild configs that have logging enabled
             prefix = f"{self.db_manager.prefix}logging_config:"
