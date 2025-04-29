@@ -160,6 +160,99 @@ class AutoRole(commands.Cog):
             error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
+    @commands.hybrid_command(description="Remove reaction role bindings from a message") 
+    @commands.has_permissions(manage_roles=True)
+    async def unbindreactionrole(self, ctx, message_id: str):
+        """Remove reaction role bindings from a message"""
+        try:
+            try:
+                message_id = int(message_id)
+            except ValueError:
+                embed = self.ui.error_embed(
+                    "Invalid Input",
+                    "Please provide a valid message ID."
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
+
+            # Try to find the message
+            try:
+                message = await ctx.channel.fetch_message(message_id)
+            except discord.NotFound:
+                embed = self.ui.error_embed(
+                    "Message Not Found",
+                    "Make sure you're using this command in the same channel as the message."
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
+
+            # Get all reaction roles for this message
+            reaction_roles = await self.db_manager.get_reaction_roles(message_id)
+            
+            if not reaction_roles:
+                embed = self.ui.error_embed(
+                    "No Reaction Roles",
+                    "This message has no reaction role bindings."
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
+            
+            # Create select menu options
+            options = []
+            for emoji, role_id in reaction_roles:
+                role = ctx.guild.get_role(role_id)
+                role_name = role.name if role else "Unknown Role"
+                options.append({
+                    "label": f"Role: {role_name}",
+                    "description": f"Emoji: {emoji}",
+                    "value": emoji,
+                    "emoji": emoji if len(emoji) == 1 else None
+                })
+
+            view = self.ui.CommandSelectView(
+                options=options,
+                placeholder="Select reaction role to remove"
+            )
+
+            embed = self.ui.admin_embed(
+                "Remove Reaction Role",
+                f"Select which reaction role binding to remove from [this message]({message.jump_url})"
+            )
+
+            sent = await ctx.send(embed=embed, view=view)
+            view.message = sent
+
+            # Wait for selection
+            await view.wait()
+            if view.result:
+                emoji = view.result
+                await self.db_manager.remove_reaction_role(message_id, emoji)
+                try:
+                    await message.clear_reaction(emoji)
+                except:
+                    pass  # Ignore if removing reaction fails
+
+                description = (
+                    f"Message: [Jump to Message]({message.jump_url})\n"
+                    f"Emoji: {emoji}\n"
+                    "Reaction role binding has been removed."
+                )
+                
+                result_embed = self.ui.admin_embed(
+                    "Reaction Role Unbound",
+                    description
+                )
+                await sent.edit(embed=result_embed, view=None)
+            else:
+                await sent.edit(
+                    embed=self.ui.error_embed("Timed Out", "Selection timed out"),
+                    view=None
+                )
+            
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
+
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
         """Handle reaction role assignments"""

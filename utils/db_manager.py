@@ -6,14 +6,23 @@ class DBManager:
     def __init__(self, name='bot'):
         self.name = name
         self.prefix = f"{name}:"  # Use prefix for namespacing
+        try:
+            self.db = db
+        except Exception as e:
+            print(f"Failed to initialize database connection: {e}")
+            self.db = None
 
     async def initialize(self):
         """Initialize database tables"""
         try:
-            # Initialize default collections if they don't exist
+            # Verify db connection
+            if not self.db:
+                self.db = db
+
+            # Initialize default collections
             collections = [
                 'guilds',
-                'logging_config',
+                'logging_config', 
                 'auto_roles',
                 'reaction_roles',
                 'tickets',
@@ -23,12 +32,15 @@ class DBManager:
             
             for collection in collections:
                 key = f"{self.prefix}{collection}"
-                if key not in db:
-                    db[key] = {}
+                if key not in self.db:
+                    self.db[key] = {}
+            
+            return True
             
         except Exception as e:
             print(f"Database initialization error: {e}")
-            raise
+            self.db = None
+            return False
 
     async def close(self):
         """No need to close connection with Replit db"""
@@ -42,7 +54,7 @@ class DBManager:
         """Set data in a collection"""
         try:
             key = self._make_key(collection, id)
-            db[key] = json.dumps(data)
+            self.db[key] = json.dumps(data)
         except Exception as e:
             print(f"Data set error: {e}")
             raise
@@ -51,8 +63,8 @@ class DBManager:
         """Get data from a collection"""
         try:
             key = self._make_key(collection, id)
-            if key in db:
-                return json.loads(db[key])
+            if key in self.db:
+                return json.loads(self.db[key])
             return None
         except Exception as e:
             print(f"Data get error: {e}")
@@ -62,8 +74,8 @@ class DBManager:
         """Delete data from a collection"""
         try:
             key = self._make_key(collection, id)
-            if key in db:
-                del db[key]
+            if key in self.db:
+                del self.db[key]
         except Exception as e:
             print(f"Data delete error: {e}")
             raise
@@ -119,14 +131,26 @@ class DBManager:
         try:
             prefix = f"{self.prefix}reaction_roles:{message_id}:"
             bindings = []
-            for key in db.keys():
+            for key in self.db.keys():
                 if key.startswith(prefix):
                     emoji = key.split(':')[-1]
-                    data = json.loads(db[key])
+                    data = json.loads(self.db[key])
                     bindings.append((emoji, data['role_id']))
             return bindings
         except Exception as e:
             print(f"Reaction roles get error: {e}")
+            raise
+
+    async def remove_reaction_role(self, message_id: int, emoji: str) -> bool:
+        """Remove a reaction role binding. Returns True if binding existed."""
+        try:
+            key = f"{self.prefix}reaction_roles:{message_id}:{emoji}"
+            if key in self.db:
+                del self.db[key]
+                return True
+            return False
+        except Exception as e:
+            print(f"Reaction role remove error: {e}")
             raise
 
     async def create_ticket(self, guild_id: int, channel_id: int, user_id: int):
@@ -167,9 +191,9 @@ class DBManager:
         """Check if user has an open ticket"""
         try:
             prefix = f"{self.prefix}tickets:"
-            for key in db.keys():
+            for key in self.db.keys():
                 if key.startswith(prefix):
-                    ticket = json.loads(db[key])
+                    ticket = json.loads(self.db[key])
                     if (ticket['user_id'] == user_id and 
                         ticket['guild_id'] == guild_id and 
                         ticket['closed_at'] is None):
@@ -210,10 +234,10 @@ class DBManager:
             prefix = f"{self.prefix}levels:{guild_id}:"
             all_levels = []
             
-            for key in db.keys():
+            for key in self.db.keys():
                 if key.startswith(prefix):
                     user_id = int(key.split(':')[-1])
-                    data = json.loads(db[key])
+                    data = json.loads(self.db[key])
                     all_levels.append((user_id, data['level'], data['xp']))
             
             # Sort by XP and take top entries
@@ -249,20 +273,20 @@ class DBManager:
             
             # Clean logs
             prefix = f"{self.prefix}logs:"
-            for key in db.keys():
+            for key in self.db.keys():
                 if key.startswith(prefix):
-                    log = json.loads(db[key])
+                    log = json.loads(self.db[key])
                     if datetime.fromisoformat(log['timestamp']) < cutoff:
-                        del db[key]
+                        del self.db[key]
             
             # Clean tickets
             prefix = f"{self.prefix}tickets:"
-            for key in db.keys():
+            for key in self.db.keys():
                 if key.startswith(prefix):
-                    ticket = json.loads(db[key])
+                    ticket = json.loads(self.db[key])
                     if (ticket['closed_at'] and 
                         datetime.fromisoformat(ticket['closed_at']) < cutoff):
-                        del db[key]
+                        del self.db[key]
                         
         except Exception as e:
             print(f"Cleanup error: {e}")
@@ -276,7 +300,7 @@ class DBManager:
         """Get database statistics"""
         try:
             stats = {
-                'total_keys': len(list(db.keys())),
+                'total_keys': len(list(self.db.keys())),
                 'collections': {}
             }
             
@@ -284,7 +308,7 @@ class DBManager:
             for collection in ['guilds', 'logging_config', 'auto_roles', 
                              'reaction_roles', 'tickets', 'levels', 'logs']:
                 prefix = f"{self.prefix}{collection}:"
-                count = len([k for k in db.keys() if k.startswith(prefix)])
+                count = len([k for k in self.db.keys() if k.startswith(prefix)])
                 stats['collections'][collection] = count
                 
             return stats
@@ -303,24 +327,24 @@ class DBManager:
                 'guilds': str_guild_id,
                 'logging_config': str_guild_id,
                 'auto_roles': str_guild_id,
-                'tickets': lambda k: json.loads(db[k]).get('guild_id') == guild_id,
+                'tickets': lambda k: json.loads(self.db[k]).get('guild_id') == guild_id,
                 'levels': lambda k: k.startswith(f"{self.prefix}levels:{guild_id}:"),
-                'logs': lambda k: json.loads(db[k]).get('guild_id') == guild_id
+                'logs': lambda k: json.loads(self.db[k]).get('guild_id') == guild_id
             }
             
             for collection, filter_func in guild_collections.items():
                 collection_data = []
                 prefix = f"{self.prefix}{collection}:"
                 
-                for key in db.keys():
+                for key in self.db.keys():
                     if not key.startswith(prefix):
                         continue
                         
                     if callable(filter_func):
                         if filter_func(key):
-                            collection_data.append(json.loads(db[key]))
+                            collection_data.append(json.loads(self.db[key]))
                     elif key == f"{prefix}{filter_func}":
-                        collection_data.append(json.loads(db[key]))
+                        collection_data.append(json.loads(self.db[key]))
                 
                 if collection_data:
                     guild_data[collection] = collection_data

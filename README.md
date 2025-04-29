@@ -1,115 +1,132 @@
 # onWhisperBot
 
-A feature-rich Discord bot built with discord.py that includes leveling, tickets, moderation, autoroles, and logging functionalities.
+A feature-rich Discord bot built with py-cord that includes leveling, tickets, moderation, autoroles, and logging functionalities.
 
 ## Features
 
 ### 🎮 Leveling System
-- Experience (XP) gain from chat activity
+- Experience (XP) gain from chat activity 
 - Customizable XP rates and cooldowns
-- Level-up notifications
-- Server leaderboards
+- Level-up notifications with progress bar
+- Server-wide leaderboards
+- XP rewards based on message activity
 
 ### 🎫 Ticket System
 - Thread-based support tickets
-- Easy ticket creation and management
-- Staff-only commands for ticket handling
-- Ticket archiving
+- Customizable ticket categories
+- Staff role assignments 
+- Automatic ticket closure
+- Ticket logging and archival
 
 ### 👮 Moderation
-- Basic moderation commands (kick, ban, timeout)
-- Message purging
-- Warning system
-- Role management
+- Core moderation commands (kick, ban, timeout)
+- Warning system with auto-expire
+- Message bulk deletion
+- Channel lockdown capabilities
+- Slowmode management
+- Message snipe command
+- Detailed mod logs
 
 ### 🎭 Role Management
 - Automatic role assignment for new members
-- Reaction roles
+- Reaction roles with selection menu management
 - Role hierarchy respect
-- Custom role commands
+- Interactive role unbinding interface
+- Bulk role assignments
+- Error handling for permissions
+- Role logging and tracking
 
 ### 📝 Logging
-- Comprehensive server logging
+- Comprehensive event logging
+- Member join/leave tracking
+- Message edit/delete logging
+- Role & channel update logs
+- Mod action logging
+- Clean embed formatting
 - Customizable log channels
-- Tracks member events, messages, and moderation actions
-- Detailed audit logs
 
-## Setup
+## Commands
 
-1. Clone the repository
-2. Install dependencies:
+### Configuration (`/config`)
+- `/config xp rate <amount>` - Set XP per message
+- `/config xp cooldown <seconds>` - Set XP gain cooldown
+- `/config xp toggle` - Toggle XP system
+- `/config tickets category <category>` - Set ticket category
+- `/config tickets support <role>` - Set support team role
+- `/config logging channel <channel>` - Set log channel
+- `/config moderation muterole <role>` - Set muted role
+- `/config moderation modrole <role>` - Set mod role
+- `/config moderation warnexpire <days>` - Set warning expiration
+- `/config autorole set <role>` - Set auto-role
+- `/config autorole toggle` - Toggle auto-role
+
+### Moderation
+- `/kick <member> [reason]` - Kick a member
+- `/ban <member> [reason] [delete_days]` - Ban a member
+- `/timeout <member> <duration> <unit> [reason]` - Timeout member
+- `/warn <member> <reason>` - Warn a member
+- `/clear <amount> [user]` - Clear messages
+- `/lock [channel] [reason]` - Lock channel
+- `/unlock [channel]` - Unlock channel
+- `/slowmode <seconds> [channel]` - Set slowmode
+- `/snipe [channel]` - Show deleted message
+
+### Leveling
+- `/level [user]` - Show level info
+- `/leaderboard` - Show XP leaderboard
+
+### Tickets
+- `/ticket <reason>` - Create ticket
+- Close button in ticket channels
+
+### Roles
+- `/setautorole <role>` - Set auto-role
+- `/removeautorole` - Remove auto-role
+- `/bindreactionrole <message_id> <emoji> <role>` - Create reaction role
+- `/unbindreactionrole <message_id>` - Remove reaction role (shows selection menu)
+
+### Information
+- `/help [command]` - Show help
+- `/botinfo` - Show bot stats
+- `/serverinfo` - Show server info
+- `/userinfo [user]` - Show user info
+- `/uptime` - Show bot uptime
+
+### Debug (Owner Only)
+- `!dbcheck [key]` - Check database
+- `!dblookup <collection> <key> <field>` - Look up data
+- `!dbstats` - Show database stats
+- `!guilddata [collection]` - Show guild data
+- `!dblist [filter]` - List database entries
+
+## Setup & Configuration
+
+1. Install requirements:
 ```bash
 pip install -r requirements.txt
 ```
-3. Configure the .env file:
+
+2. Configure `.env`:
 ```env
 DISCORD_TOKEN=your_token_here
-BOT-OWNER=your_id_here
+BOT_OWNER=your_id_here
 ```
-4. Run the bot:
+
+3. Run the bot:
 ```bash
 python bot.py
 ```
 
-## Project Structure
+## Database Structure
 
-```
-onWhisperBot/
-│
-├── bot.py                        # Entry point for the bot
-├── .env                         # Contains the DISCORD_TOKEN
-├── cogs/                        # All cog modules
-│   ├── info.py                  # Bot info, server info, user info
-│   ├── leveling.py             # Leveling system & role assignments
-│   ├── tickets.py              # Ticket system using threads
-│   ├── moderation.py           # Moderation commands
-│   ├── autorole.py             # Autorole and reaction roles
-│   └── logging.py              # Logs events to logging channel
-│
-├── utils/                       # Utility modules
-│   └── db_manager.py           # Database handling (async-based)
-│
-└── data/                        # Data storage
-    └── database.sqlite3         # SQLite database
-```
-
-## Commands
-
-### Leveling
-- `/level [user]` - Check your or another user's level
-- `/set-xp-rate <amount>` - Set XP rate (Admin only)
-- `/set-xp-cooldown <seconds>` - Set XP cooldown (Admin only)
-
-### Tickets
-- `/ticket <reason>` - Create a support ticket
-- `/close-ticket` - Close current ticket
-- `/add-to-ticket <user>` - Add user to ticket (Staff only)
-- `/remove-from-ticket <user>` - Remove user from ticket (Staff only)
-
-### Moderation
-- `/kick <user> [reason]` - Kick a user
-- `/ban <user> [reason] [delete_days]` - Ban a user
-- `/timeout <user> <duration> <unit> [reason]` - Timeout a user
-- `/clear <amount> [user]` - Clear messages
-- `/warn <user> <reason>` - Warn a user
-
-### Role Management
-- `/setautorole <role>` - Set automatic role for new members
-- `/removeautorole` - Disable automatic role
-- `/bind_reaction_role <message_id> <emoji> <role>` - Create reaction role
-
-### Logging
-- `/setlogchannel <channel>` - Set logging channel
-
-## Database Schema
-
-The bot uses SQLite with the following main tables:
-- `leveling` - User XP and levels
-- `tickets` - Support ticket tracking
-- `auto_role` - Autorole configuration
+The bot uses Replit Database with the following collections:
+- `logging_config` - Logging settings
+- `auto_roles` - Autorole settings
 - `reaction_roles` - Reaction role bindings
-- `logs` - Server event logs
-- `logging_config` - Logging channel settings
+- `tickets` - Ticket data
+- `levels` - XP/level data
+- `moderation_config` - Moderation settings
+- `logs` - Event & mod logs
 
 ## Contributing
 

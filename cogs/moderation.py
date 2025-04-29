@@ -134,44 +134,52 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(description="Timeout (mute) a member")
     @commands.has_permissions(moderate_members=True)
-    async def timeout(self, ctx, member: discord.Member, duration: int, unit: str, reason: str = None):
+    async def timeout(self, ctx, member: discord.Member, *, reason: str = None):
         """Timeout (mute) a member"""
         try:
-            # Convert duration to timedelta
-            unit = unit.lower()
-            if unit in ['s', 'sec', 'seconds']:
-                delta = timedelta(seconds=duration)
-            elif unit in ['m', 'min', 'minutes']:
-                delta = timedelta(minutes=duration)
-            elif unit in ['h', 'hr', 'hours']:
-                delta = timedelta(hours=duration)
-            elif unit in ['d', 'day', 'days']:
-                delta = timedelta(days=duration)
+            # Create duration options
+            duration_options = [
+                {"label": "60 seconds", "description": "Timeout for 1 minute", "value": "60:s"},
+                {"label": "5 minutes", "description": "Timeout for 5 minutes", "value": "5:m"},
+                {"label": "10 minutes", "description": "Timeout for 10 minutes", "value": "10:m"},
+                {"label": "1 hour", "description": "Timeout for 1 hour", "value": "1:h"},
+                {"label": "1 day", "description": "Timeout for 24 hours", "value": "1:d"},
+                {"label": "1 week", "description": "Timeout for 7 days", "value": "7:d"},
+                {"label": "Custom", "description": "Set custom duration", "value": "custom"}
+            ]
+
+            view = self.ui.CommandSelectView(
+                options=duration_options,
+                placeholder="Select timeout duration"
+            )
+
+            embed = self.ui.mod_embed(
+                "Select Timeout Duration",
+                f"Choose how long to timeout {member.mention}"
+            )
+            
+            msg = await ctx.send(embed=embed, view=view)
+            selection = await view.get_result()
+
+            if selection == "custom":
+                # Show a modal for custom duration
+                # ...implement custom duration input...
+                pass
             else:
-                embed = self.ui.mod_embed(
-                    "Invalid Unit",
-                    "Use s/m/h/d for seconds/minutes/hours/days",
-                )
-                await ctx.send(embed=embed, ephemeral=True)
-                return
+                duration, unit = selection.split(":")
+                duration = int(duration)
 
-            if delta > timedelta(days=28):  # Discord's maximum timeout duration
-                embed = self.ui.mod_embed(
-                    "Invalid Duration",
-                    "Timeout duration cannot exceed 28 days!",
-                )
-                await ctx.send(embed=embed, ephemeral=True)
-                return
+                # Convert to timedelta
+                if unit == 's':
+                    delta = timedelta(seconds=duration)
+                elif unit == 'm':
+                    delta = timedelta(minutes=duration)
+                elif unit == 'h':
+                    delta = timedelta(hours=duration)
+                elif unit == 'd':
+                    delta = timedelta(days=duration)
 
-            # Check hierarchy
-            if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
-                embed = self.ui.mod_embed(
-                    "Permission Error",
-                    "You cannot timeout someone with a higher or equal role!",
-                )
-                await ctx.send(embed=embed, ephemeral=True)
-                return
-
+            # Apply timeout
             await member.timeout(delta, reason=f"Timeout by {ctx.author}: {reason}")
             
             # Log the action to database

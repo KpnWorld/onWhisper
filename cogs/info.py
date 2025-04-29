@@ -24,11 +24,26 @@ class Info(commands.Cog):
                 if not cmd:
                     raise commands.CommandNotFound(f"Command '{command}' not found.")
 
+                # Add aliases if any exist
+                aliases = ""
+                if cmd.aliases:
+                    aliases = f"\n**Aliases:** {', '.join(cmd.aliases)}"
+                
+                # Add group commands if it's a group
+                subcommands = ""
+                if isinstance(cmd, commands.Group):
+                    subs = [f"• /{cmd.qualified_name} {subcmd.name} {subcmd.signature}" 
+                           for subcmd in cmd.commands]
+                    if subs:
+                        subcommands = "\n\n**Subcommands:**\n" + "\n".join(subs)
+
                 description = (
                     f"**Description:** {cmd.description or cmd.help or 'No description available'}\n"
                     f"**Usage:**\n"
                     f"• Slash: /{cmd.qualified_name} {cmd.signature}\n"
                     f"• Prefix: !{cmd.qualified_name} {cmd.signature}"
+                    f"{aliases}"
+                    f"{subcommands}"
                 )
                 
                 embed = self.ui.info_embed(
@@ -42,51 +57,48 @@ class Info(commands.Cog):
                     await ctx.send(embed=embed)
                     
             else:
-                # Get all commands grouped by cogs
+                # Group commands by category
+                categories = {
+                    "🛠️ Configuration": ["config", "setlogs"],
+                    "🔨 Moderation": ["kick", "ban", "timeout", "warn", "clear", "lock", "unlock", "slowmode", "snipe"],
+                    "⭐ Leveling": ["level", "leaderboard"],
+                    "🎫 Tickets": ["ticket"],
+                    "👥 Roles": ["setautorole", "removeautorole", "bindreactionrole", "unbindreactionrole"],
+                    "ℹ️ Information": ["help", "botinfo", "serverinfo", "userinfo", "uptime"],
+                    "🔍 Debug": ["dbcheck", "dblookup", "dbstats", "guilddata", "dblist"]
+                }
+
                 pages = []
-                current_page = []
-                commands_per_page = 10
                 total_commands = 0
 
-                # First page with overview
-                info_embed = self.ui.info_embed(
+                # Create overview page
+                overview = self.ui.info_embed(
                     "Help System",
-                    f"Use `/help <command>` or `!help <command>` for detailed information about a specific command.\n\n"
-                    f"**Navigation:**\n"
-                    f"• Use the buttons below to navigate pages\n"
-                    f"• Each page shows {commands_per_page} commands\n"
-                    f"• Both slash and prefix versions are shown"
+                    "Use `/help <command>` or `!help <command>` for detailed information about a specific command.\n\n"
+                    "**Categories:**\n" + "\n".join(f"• {cat}" for cat in categories.keys())
                 )
-                pages.append(info_embed)
+                pages.append(overview)
 
-                # Group commands by cog
-                for cog_name, cog in self.bot.cogs.items():
-                    cog_commands = [cmd for cmd in cog.get_commands() if not cmd.hidden]
-                    if not cog_commands:
-                        continue
+                # Create category pages
+                for category, cmd_list in categories.items():
+                    description = []
+                    for cmd_name in cmd_list:
+                        cmd = self.bot.get_command(cmd_name)
+                        if cmd and not cmd.hidden:
+                            total_commands += 1
+                            description.append(
+                                f"**/{cmd_name}**\n"
+                                f"↳ {cmd.description or cmd.help or 'No description'}\n"
+                            )
 
-                    # Start new page for each cog
-                    current_page = []
-                    current_page.append(f"**{cog_name} Commands**\n")
-
-                    for cmd in cog_commands:
-                        command_info = (
-                            f"**{cmd.qualified_name}**\n"
-                            f"• Slash: /{cmd.qualified_name} {cmd.signature}\n"
-                            f"• Prefix: !{cmd.qualified_name} {cmd.signature}\n"
-                            f"• *{cmd.description or cmd.help or 'No description'}*\n"
+                    if description:
+                        embed = self.ui.info_embed(
+                            category,
+                            "\n".join(description)
                         )
-                        current_page.append(command_info)
-                        total_commands += 1
+                        pages.append(embed)
 
-                    # Add cog commands to pages
-                    embed = self.ui.info_embed(
-                        f"📚 {cog_name} Commands",
-                        "\n".join(current_page)
-                    )
-                    pages.append(embed)
-
-                # Update first page with total commands
+                # Update overview with command count
                 pages[0].description = f"Total Commands: {total_commands}\n\n" + pages[0].description
 
                 # Send paginated help
@@ -97,7 +109,7 @@ class Info(commands.Cog):
                         ephemeral=True
                     )
                 else:
-                    msg = await ctx.send(
+                    await ctx.send(
                         embed=pages[0],
                         view=self.ui.Paginator(pages=pages)
                     )

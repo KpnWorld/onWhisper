@@ -283,3 +283,38 @@ class UIManager:
         await interaction.response.send_message(embed=embed, view=view, ephemeral=ephemeral)
         await view.wait()
         return view.value
+
+    class CommandSelect(discord.ui.Select):
+        def __init__(self, options: list, placeholder: str = "Select an option"):
+            super().__init__(
+                placeholder=placeholder,
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label=option.get("label", ""),
+                        description=option.get("description", ""),
+                        value=option.get("value", ""),
+                        emoji=option.get("emoji", None)
+                    ) for option in options
+                ]
+            )
+
+        async def callback(self, interaction: discord.Interaction):
+            await interaction.response.defer()
+            self.view.result = self.values[0]
+            self.view.stop()
+
+    class CommandSelectView(discord.ui.View):
+        def __init__(self, options: list, placeholder: str = "Select an option", timeout: int = 180):
+            super().__init__(timeout=timeout)
+            self.result = None
+            self.message = None
+            self.add_item(CommandSelect(options, placeholder))
+
+        async def on_timeout(self) -> None:
+            if self.message:
+                await self.message.edit(view=None)
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            return True

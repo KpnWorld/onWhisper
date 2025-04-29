@@ -28,9 +28,39 @@ class Tickets(commands.Cog):
         self.db_manager = DBManager()
         self.ui = self.bot.ui_manager
 
+    class TicketModal(discord.ui.Modal):
+        def __init__(self):
+            super().__init__(title="Create Support Ticket")
+            self.add_item(discord.ui.TextInput(
+                label="Issue Summary",
+                placeholder="Brief description of your issue",
+                style=discord.TextStyle.short,
+                required=True,
+                max_length=100
+            ))
+            self.add_item(discord.ui.TextInput(
+                label="Details",
+                placeholder="Please provide more details about your issue",
+                style=discord.TextStyle.paragraph,
+                required=False,
+                max_length=1000
+            ))
+
+        async def on_submit(self, interaction: discord.Interaction):
+            self.interaction = interaction
+            self.summary = self.children[0].value
+            self.details = self.children[1].value
+
     @commands.hybrid_command(description="Create a support ticket")
-    async def ticket(self, ctx, *, reason: str = None):
-        """Create a support ticket"""
+    async def ticket(self, ctx):
+        """Create a support ticket using a form"""
+        modal = self.TicketModal()
+        await ctx.interaction.response.send_modal(modal)
+        await modal.wait()
+        
+        # Use the form data to create the ticket
+        reason = f"{modal.summary}\n\n{modal.details}"
+
         try:
             # Verify bot permissions
             required_permissions = [

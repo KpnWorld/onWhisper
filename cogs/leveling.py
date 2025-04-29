@@ -193,5 +193,32 @@ class Leveling(commands.Cog):
         else:
             await ctx.send("No leaderboard data available yet!")
 
+    @commands.hybrid_command(description="Set level role rewards")
+    @commands.has_permissions(manage_roles=True)
+    async def setreward(self, ctx):
+        """Set role rewards for reaching levels"""
+        try:
+            # Create level options
+            level_options = [
+                {"label": f"Level {i}", "description": f"Set reward for reaching level {i}", "value": str(i)}
+                for i in [5, 10, 15, 20, 25, 30, 50, 75, 100]
+            ]
+
+            view = self.ui.CommandSelectView(
+                options=level_options,
+                placeholder="Select level for reward"
+            )
+
+            embed = self.ui.admin_embed(
+                "Level Rewards",
+                "Select which level to set a role reward for"
+            )
+
+            await ctx.send(embed=embed, view=view)
+            # Handle role selection and saving...
+
+        except Exception as e:
+            print(f"Error in setting level rewards: {e}")
+
 async def setup(bot):
     await bot.add_cog(Leveling(bot))

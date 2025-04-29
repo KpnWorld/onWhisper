@@ -72,9 +72,11 @@ class Logging(commands.Cog):
         """Send a log embed to the guild's logging channel"""
         try:
             # Verify DB connection first
-            if not self.db_manager.db:
-                print("Database connection not available")
-                return
+            if not hasattr(self.db_manager, 'db') or not self.db_manager.db:
+                print("Database connection not available, attempting to reconnect...")
+                if not await self.db_manager.initialize():
+                    print("Failed to reconnect to database")
+                    return
 
             channel = await self.get_log_channel(guild.id)
             if not channel:
@@ -101,6 +103,8 @@ class Logging(commands.Cog):
             print(f"Failed to send log message in {guild.name}: {e}")
         except Exception as e:
             print(f"Failed to log to channel: {e}")
+            if not hasattr(self.db_manager, 'db'):
+                print("Database connection lost")
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
