@@ -325,7 +325,7 @@ class Moderation(commands.Cog):
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Lock a channel")
-    @commands.has_permissions(manage_guild=True)  # Changed from manage_channels to manage_guild
+    @commands.has_permissions(manage_guild=True)
     async def lock(self, ctx, channel: discord.TextChannel = None, reason: str = None):
         """Lock a channel to prevent messages from non-moderators"""
         try:
@@ -350,9 +350,17 @@ class Moderation(commands.Cog):
                 return
 
             # Store current permissions and update
+            # Allow administrators to still send messages
             overwrites = channel.overwrites_for(ctx.guild.default_role)
             overwrites.send_messages = False
             await channel.set_permissions(ctx.guild.default_role, overwrite=overwrites)
+
+            # Set permissions for administrators
+            admin_role = discord.utils.get(ctx.guild.roles, permissions=discord.Permissions(administrator=True))
+            if admin_role:
+                admin_overwrites = channel.overwrites_for(admin_role)
+                admin_overwrites.send_messages = True
+                await channel.set_permissions(admin_role, overwrite=admin_overwrites)
             
             self.locked_channels.add(channel.id)
             
@@ -367,7 +375,8 @@ class Moderation(commands.Cog):
             description = (
                 f"Channel: {channel.mention}\n"
                 f"Reason: {reason or 'No reason provided'}\n"
-                f"Locked by: {ctx.author.mention}"
+                f"Locked by: {ctx.author.mention}\n"
+                f"Note: Administrators can still send messages"
             )
             
             embed = self.ui.mod_embed(
@@ -381,7 +390,7 @@ class Moderation(commands.Cog):
             await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Unlock a locked channel")
-    @commands.has_permissions(manage_guild=True)  # Changed from manage_channels to manage_guild
+    @commands.has_permissions(manage_guild=True)
     async def unlock(self, ctx, channel: discord.TextChannel = None):
         """Unlock a previously locked channel"""
         try:
