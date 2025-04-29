@@ -16,11 +16,16 @@ class DBManager:
             # Test write operation
             test_key = f"{self.prefix}test"
             self.db[test_key] = "test"
+            read_value = self.db[test_key]
             del self.db[test_key]
             
+            if read_value != "test":
+                raise Exception("Database read/write verification failed")
+                
             return True
         except Exception as e:
             print(f"Database initialization error: {e}")
+            self.db = None
             return False
 
     async def check_connection(self) -> bool:

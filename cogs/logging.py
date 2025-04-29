@@ -19,25 +19,34 @@ class Logging(commands.Cog):
             await self.bot.wait_until_ready()
             
             # Wait for database to be ready
-            retries = 0
-            while not self.db_manager.db and retries < 5:
-                await asyncio.sleep(1)
-                retries += 1
+            max_retries = 5
+            retry_delay = 2  # seconds
+            
+            for attempt in range(max_retries):
+                if self.db_manager.db:
+                    break
+                    
+                print(f"Waiting for database... Attempt {attempt + 1}/{max_retries}")
+                await asyncio.sleep(retry_delay)
             
             if not self.db_manager.db:
-                print("Failed to load log channels: Database not available")
+                print("Database not available after max retries")
                 return
+                
+            # Get all guilds with logging enabled
+            guild_ids = [str(guild.id) for guild in self.bot.guilds]
             
-            # Get all guild configs that have logging enabled
-            prefix = f"{self.db_manager.prefix}logging_config:"
-            for key in self.db_manager.db.keys():
-                if key.startswith(prefix):
-                    guild_id = key.split(':')[-1]
-                    config = await self.db_manager.get_data('logging_config', guild_id)
+            for guild_id in guild_ids:
+                try:
+                    guild_data = await self.db_manager.get_guild_data(int(guild_id))
+                    logs_config = guild_data.get('logs_config', {})
                     
-                    if config and 'channel_id' in config:
-                        self.log_channels[int(guild_id)] = config['channel_id']
-                        
+                    if logs_config.get('enabled', True) and logs_config.get('channel_id'):
+                        self.log_channels[int(guild_id)] = logs_config['channel_id']
+                except Exception as e:
+                    print(f"Error loading log channels for guild {guild_id}: {e}")
+                    continue
+                    
             print(f"Loaded {len(self.log_channels)} logging channels")
 
         except Exception as e:
