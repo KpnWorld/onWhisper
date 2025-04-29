@@ -51,29 +51,8 @@ A feature-rich Discord bot built with py-cord that includes leveling, tickets, m
 - `/config xp rate <amount>` - Set XP per message
 - `/config xp cooldown <seconds>` - Set XP gain cooldown
 - `/config xp toggle` - Toggle XP system
-- `/config tickets category <category>` - Set ticket category
-- `/config tickets support <role>` - Set support team role
-- `/config logging channel <channel>` - Set log channel
-- `/config moderation muterole <role>` - Set muted role
-- `/config moderation modrole <role>` - Set mod role
-- `/config moderation warnexpire <days>` - Set warning expiration
-- `/config autorole set <role>` - Set auto-role
-- `/config autorole toggle` - Toggle auto-role
-
-### Moderation
-- `/kick <member> [reason]` - Kick a member
-- `/ban <member> [reason] [delete_days]` - Ban a member
-- `/timeout <member> <duration> <unit> [reason]` - Timeout member
-- `/warn <member> <reason>` - Warn a member
-- `/clear <amount> [user]` - Clear messages
-- `/lock [channel] [reason]` - Lock channel
-- `/unlock [channel]` - Unlock channel
-- `/slowmode <seconds> [channel]` - Set slowmode
-- `/snipe [channel]` - Show deleted message
-
-### Leveling
-- `/level [user]` - Show level info
-- `/leaderboard` - Show XP leaderboard
+- `/config levels role <level> <role>` - Set role reward for level
+- `/config levels roles` - View all level role rewards
 
 ### Tickets
 - `/ticket <reason>` - Create ticket

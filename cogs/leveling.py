@@ -4,6 +4,7 @@ from typing import Optional
 import math
 from datetime import datetime, timedelta
 from utils.db_manager import DBManager
+import json
 
 class LeaderboardView(discord.ui.View):
     def __init__(self, pages, timeout=60):
@@ -98,6 +99,8 @@ class Leveling(commands.Cog):
                         description
                     )
                     await message.channel.send(embed=embed)
+                    # Add this after updating XP and level
+                    await self.check_level_roles(message.author, new_level)
             
             except Exception as e:
                 print(f"Error in leveling system: {e}")
@@ -193,32 +196,33 @@ class Leveling(commands.Cog):
         else:
             await ctx.send("No leaderboard data available yet!")
 
-    @commands.hybrid_command(description="Set level role rewards")
-    @commands.has_permissions(manage_roles=True)
-    async def setreward(self, ctx):
-        """Set role rewards for reaching levels"""
+    async def check_level_roles(self, member: discord.Member, new_level: int):
+        """Check and assign any level roles the member should have"""
         try:
-            # Create level options
-            level_options = [
-                {"label": f"Level {i}", "description": f"Set reward for reaching level {i}", "value": str(i)}
-                for i in [5, 10, 15, 20, 25, 30, 50, 75, 100]
-            ]
-
-            view = self.ui.CommandSelectView(
-                options=level_options,
-                placeholder="Select level for reward"
-            )
-
-            embed = self.ui.admin_embed(
-                "Level Rewards",
-                "Select which level to set a role reward for"
-            )
-
-            await ctx.send(embed=embed, view=view)
-            # Handle role selection and saving...
-
+            # Get all level roles for this guild
+            prefix = f"{self.db_manager.prefix}level_roles:{member.guild.id}:"
+            for key in self.db_manager.db.keys():
+                if key.startswith(prefix):
+                    data = json.loads(self.db_manager.db[key])
+                    if data['level'] <= new_level:  # Member qualifies for this role
+                        role = member.guild.get_role(data['role_id'])
+                        if role and role not in member.roles:
+                            try:
+                                await member.add_roles(role, reason=f"Reached level {new_level}")
+                                # Optionally notify the member
+                                embed = self.ui.success_embed(
+                                    "New Role Unlocked!",
+                                    f"You received the {role.mention} role for reaching level {new_level}!"
+                                )
+                                try:
+                                    await member.send(embed=embed)
+                                except:
+                                    pass  # Ignore if DM fails
+                            except discord.Forbidden:
+                                print(f"Cannot assign level role {role.name} to {member}")
+                                
         except Exception as e:
-            print(f"Error in setting level rewards: {e}")
+            print(f"Error checking level roles: {e}")
 
 async def setup(bot):
     await bot.add_cog(Leveling(bot))

@@ -445,5 +445,86 @@ class Admin(commands.Cog):
             error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
 
+    @config.group(name="levels")
+    @commands.has_permissions(administrator=True)
+    async def config_levels(self, ctx):
+        """Configure level system settings"""
+        if ctx.invoked_subcommand is None:
+            embed = self.ui.admin_embed(
+                "Level Configuration",
+                "Available commands:\n"
+                "• /config levels role <level> <role> - Set role reward for level\n"
+                "• /config levels roles - View all level role rewards\n"
+                "• /config levels xp <amount> - Set XP per message\n"
+                "• /config levels cooldown <seconds> - Set XP cooldown"
+            )
+            await ctx.send(embed=embed)
+
+    @config_levels.command(name="role")
+    async def levels_role(self, ctx, level: int, role: discord.Role):
+        """Set a role reward for reaching a specific level"""
+        try:
+            if role >= ctx.guild.me.top_role:
+                embed = self.ui.error_embed(
+                    "Permission Error",
+                    "I cannot assign roles that are higher than my highest role!"
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
+
+            # Store level role configuration
+            await self.db_manager.set_data('level_roles', f"{ctx.guild.id}:{level}", {
+                'role_id': role.id,
+                'level': level
+            })
+            
+            embed = self.ui.admin_embed(
+                "Level Role Set",
+                f"Members will receive {role.mention} when reaching level {level}"
+            )
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @config_levels.command(name="roles")
+    async def levels_roles(self, ctx):
+        """Show all configured level roles"""
+        try:
+            # Get all level roles for this guild
+            prefix = f"{self.db_manager.prefix}level_roles:{ctx.guild.id}:"
+            roles_data = []
+            
+            for key in self.db_manager.db.keys():
+                if key.startswith(prefix):
+                    data = json.loads(self.db_manager.db[key])
+                    roles_data.append((data['level'], data['role_id']))
+            
+            if not roles_data:
+                embed = self.ui.info_embed(
+                    "Level Roles",
+                    "No level roles configured yet"
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            # Sort by level
+            roles_data.sort(key=lambda x: x[0])
+            
+            description = "**Current Level Roles:**\n\n"
+            for level, role_id in roles_data:
+                role = ctx.guild.get_role(role_id)
+                if role:
+                    description += f"Level {level}: {role.mention}\n"
+            
+            embed = self.ui.info_embed(
+                "Level Roles",
+                description
+            )
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
 async def setup(bot):
     await bot.add_cog(Admin(bot))
