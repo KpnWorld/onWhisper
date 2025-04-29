@@ -18,34 +18,43 @@ class Logging(commands.Cog):
         try:
             await self.bot.wait_until_ready()
             
-            # Wait for database to be ready
+            # Wait for database with exponential backoff
             max_retries = 5
-            retry_delay = 2  # seconds
+            base_delay = 2  # seconds
             
             for attempt in range(max_retries):
                 if self.db_manager.db:
-                    break
-                    
+                    if await self.db_manager.check_connection():
+                        break
+                        
+                delay = base_delay * (2 ** attempt)
                 print(f"Waiting for database... Attempt {attempt + 1}/{max_retries}")
-                await asyncio.sleep(retry_delay)
+                await asyncio.sleep(delay)
             
-            if not self.db_manager.db:
+            if not self.db_manager.db or not await self.db_manager.check_connection():
                 print("Database not available after max retries")
                 return
                 
             # Get all guilds with logging enabled
-            guild_ids = [str(guild.id) for guild in self.bot.guilds]
+            guild_data_tasks = [
+                self.db_manager.get_guild_data(guild.id) 
+                for guild in self.bot.guilds
+            ]
             
-            for guild_id in guild_ids:
-                try:
-                    guild_data = await self.db_manager.get_guild_data(int(guild_id))
-                    logs_config = guild_data.get('logs_config', {})
-                    
-                    if logs_config.get('enabled', True) and logs_config.get('channel_id'):
-                        self.log_channels[int(guild_id)] = logs_config['channel_id']
-                except Exception as e:
-                    print(f"Error loading log channels for guild {guild_id}: {e}")
+            # Wait for all guild data to load
+            guild_data_results = await asyncio.gather(*guild_data_tasks, return_exceptions=True)
+            
+            for guild, data in zip(self.bot.guilds, guild_data_results):
+                if isinstance(data, Exception):
+                    print(f"Error loading data for guild {guild.id}: {data}")
                     continue
+                    
+                if not data:
+                    continue
+                    
+                logs_config = data.get('logs_config', {})
+                if logs_config.get('enabled', True) and logs_config.get('channel_id'):
+                    self.log_channels[guild.id] = logs_config['channel_id']
                     
             print(f"Loaded {len(self.log_channels)} logging channels")
 

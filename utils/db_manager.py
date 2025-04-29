@@ -432,3 +432,57 @@ class DBManager:
         except Exception as e:
             print(f"Error getting leaderboard: {e}")
             raise
+
+    async def get_data(self, collection: str, key: str) -> dict:
+        """Get data from a collection"""
+        try:
+            if not self.db:
+                await self.initialize()
+                if not self.db:
+                    return None
+                    
+            db_key = f"{self.prefix}{collection}:{key}"
+            if db_key not in self.db:
+                return None
+                
+            return json.loads(self.db[db_key])
+        except Exception as e:
+            print(f"Error getting data: {e}")
+            return None
+
+    async def set_data(self, collection: str, key: str, data: dict):
+        """Set data in a collection"""
+        try:
+            if not self.db:
+                await self.initialize()
+                if not self.db:
+                    raise Exception("Database not available")
+                    
+            db_key = f"{self.prefix}{collection}:{key}"
+            self.db[db_key] = json.dumps(data)
+        except Exception as e:
+            print(f"Error setting data: {e}")
+            raise
+
+    async def log_event(self, guild_id: int, user_id: int, event_type: str, details: str, **kwargs):
+        """Log an event with additional metadata"""
+        try:
+            if not self.db:
+                await self.initialize()
+                if not self.db:
+                    return
+                    
+            event_data = {
+                'guild_id': guild_id,
+                'user_id': user_id,
+                'action': event_type,
+                'details': details,
+                'timestamp': datetime.utcnow().isoformat(),
+                **kwargs
+            }
+            
+            key = f"{self.prefix}logs:{guild_id}:{int(datetime.utcnow().timestamp())}"
+            self.db[key] = json.dumps(event_data)
+            
+        except Exception as e:
+            print(f"Error logging event: {e}")
