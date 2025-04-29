@@ -43,19 +43,63 @@ class Admin(commands.Cog):
             )
             await ctx.send(embed=embed)
 
-    @config_xp.command(name="rate")
+    async def save_settings(self, guild_id: str, collection: str, data: dict):
+        """Save settings with metadata"""
+        try:
+            current = await self.db_manager.get_data(collection, guild_id) or {}
+            
+            # Add metadata
+            data.update({
+                'last_updated': datetime.utcnow().isoformat(),
+                'updated_by': str(self.bot.user.id),
+                'version': current.get('version', 0) + 1
+            })
+            
+            # Save settings
+            await self.db_manager.set_data(collection, guild_id, data)
+            
+            # Log the update
+            await self.db_manager.log_event(
+                int(guild_id),
+                self.bot.user.id,
+                "settings_update",
+                f"Updated {collection} settings"
+            )
+            
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+            raise
+
+    @config_xp.command(name="rate") 
     async def xp_rate(self, ctx, amount: int):
         """Set the amount of XP earned per message"""
-        if amount < 1 or amount > 100:
-            await ctx.send("XP rate must be between 1 and 100")
-            return
+        try:
+            if amount < 1 or amount > 100:
+                await ctx.send("XP rate must be between 1 and 100")
+                return
             
-        await self.db_manager.set_data('xp_config', str(ctx.guild.id), {'rate': amount})
-        embed = self.ui.admin_embed(
-            "XP Rate Updated",
-            f"Members will now earn {amount} XP per message"
-        )
-        await ctx.send(embed=embed)
+            # Get current config
+            config = await self.db_manager.get_data('xp_config', str(ctx.guild.id)) or {}
+            
+            # Update config
+            config.update({
+                'rate': amount,
+                'enabled': config.get('enabled', True),
+                'cooldown': config.get('cooldown', 60)
+            })
+            
+            # Save with metadata
+            await self.save_settings(str(ctx.guild.id), 'xp_config', config)
+            
+            embed = self.ui.admin_embed(
+                "XP Rate Updated",
+                f"Members will now earn {amount} XP per message"
+            )
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     @config_xp.command(name="cooldown")
     async def xp_cooldown(self, ctx, seconds: int):
@@ -143,7 +187,7 @@ class Admin(commands.Cog):
         except Exception as e:
             await self.bot.on_command_error(ctx, e)
 
-    @config_logging.command(name="channel")
+    @config_logging.command(name="channel")  
     async def logging_channel(self, ctx, channel: discord.TextChannel):
         """Set the channel for server logs"""
         try:
@@ -168,20 +212,27 @@ class Admin(commands.Cog):
             if not self.db_manager.db:
                 raise Exception("Database connection not available")
                 
-            await self.db_manager.set_data('logging_config', str(ctx.guild.id), {
+            # Get current config
+            config = await self.db_manager.get_data('logging_config', str(ctx.guild.id)) or {}
+            
+            # Update config
+            config.update({
                 'channel_id': channel.id,
-                'setup_by': ctx.author.id,
-                'setup_at': datetime.utcnow().isoformat()
+                'message_logs': config.get('message_logs', True),
+                'member_logs': config.get('member_logs', True),
+                'mod_logs': config.get('mod_logs', True),
+                'server_logs': config.get('server_logs', True)
             })
             
+            # Save with metadata
+            await self.save_settings(str(ctx.guild.id), 'logging_config', config)
+            
             embed = self.ui.admin_embed(
-                "Logging Channel Set",
+                "Logging Channel Set", 
                 f"Server logs will now be sent to {channel.mention}"
             )
             await ctx.send(embed=embed)
             
-        except discord.Forbidden:
-            await ctx.send("I don't have permission to manage that channel!", ephemeral=True)
         except Exception as e:
             error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)
@@ -305,6 +356,7 @@ class Admin(commands.Cog):
     @commands.hybrid_command(name="settings", description="View all server settings")
     @commands.has_permissions(administrator=True)
     async def view_settings(self, ctx):
+        """View all server configuration settings"""
         try:
             # Get all configuration data
             guild_id = str(ctx.guild.id)
@@ -348,7 +400,7 @@ class Admin(commands.Cog):
                 f"Max Warnings: {mod_config.get('max_warnings', 3)}"
             )
             
-            # Format logging settings
+            # Format logging settings with last update time
             log_settings = (
                 f"Channel: {ctx.guild.get_channel(logging_config.get('channel_id', 0)).mention if logging_config.get('channel_id') else '❌ Not set'}\n"
                 f"Message Logs: {'🟢 Enabled' if logging_config.get('message_logs', True) else '🔴 Disabled'}\n"
@@ -356,7 +408,15 @@ class Admin(commands.Cog):
                 f"Mod Logs: {'🟢 Enabled' if logging_config.get('mod_logs', True) else '🔴 Disabled'}\n"
                 f"Server Logs: {'🟢 Enabled' if logging_config.get('server_logs', True) else '🔴 Disabled'}"
             )
-            
+            if logging_config.get('last_updated'):
+                updated_ts = int(datetime.fromisoformat(logging_config['last_updated']).timestamp())
+                log_settings += f"\nLast Updated: <t:{updated_ts}:R>"
+                
+            # Format XP settings with last update time    
+            if xp_config.get('last_updated'):
+                updated_ts = int(datetime.fromisoformat(xp_config['last_updated']).timestamp())
+                xp_settings += f"\nLast Updated: <t:{updated_ts}:R>"
+
             description = (
                 "**XP System:**\n"
                 f"{xp_settings}\n\n"
