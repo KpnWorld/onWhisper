@@ -354,3 +354,19 @@ class DBManager:
         except Exception as e:
             print(f"Guild data retrieval error: {e}")
             raise
+
+    async def update_config(self, collection: str, guild_id: str, updates: dict):
+        """Update configuration while preserving existing values"""
+        try:
+            # Get existing config
+            current_config = await self.get_data(collection, guild_id) or {}
+            
+            # Update with new values
+            current_config.update(updates)
+            
+            # Save back to database
+            await self.set_data(collection, guild_id, current_config)
+            
+        except Exception as e:
+            print(f"Config update error: {e}")
+            raise

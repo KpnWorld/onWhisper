@@ -71,29 +71,52 @@ class Logging(commands.Cog):
     async def log_to_channel(self, guild: discord.Guild, title: str, description: str, color: discord.Color = None):
         """Send a log embed to the guild's logging channel"""
         try:
-            # Verify DB connection first
-            if not hasattr(self.db_manager, 'db') or not self.db_manager.db:
-                print("Database connection not available, attempting to reconnect...")
-                if not await self.db_manager.initialize():
-                    print("Failed to reconnect to database")
-                    return
-
             channel = await self.get_log_channel(guild.id)
             if not channel:
                 return
 
-            # Verify bot permissions
-            if not channel.permissions_for(guild.me).send_messages:
-                print(f"Missing send message permissions in log channel for {guild.name}")
+            # Verify all required permissions
+            required_permissions = [
+                'view_channel',
+                'send_messages',
+                'embed_links',
+                'attach_files',
+                'read_message_history'
+            ]
+
+            # Check bot permissions in the channel
+            missing_perms = []
+            channel_perms = channel.permissions_for(guild.me)
+            
+            for perm in required_permissions:
+                if not getattr(channel_perms, perm, False):
+                    missing_perms.append(perm)
+
+            if missing_perms:
+                print(f"Missing permissions in log channel ({channel.name}): {', '.join(missing_perms)}")
+                
+                # Try to notify in system channel or first available text channel
+                notify_channel = guild.system_channel
+                if not notify_channel:
+                    notify_channel = next((c for c in guild.text_channels 
+                                        if c.permissions_for(guild.me).send_messages), None)
+                
+                if notify_channel:
+                    error_embed = self.ui.error_embed(
+                        "Logging Channel Permission Error",
+                        f"I need the following permissions in {channel.mention}:\n" +
+                        "\n".join(f"• {perm}" for perm in missing_perms)
+                    )
+                    try:
+                        await notify_channel.send(embed=error_embed)
+                    except:
+                        pass
                 return
 
-            embed = self.ui.system_embed(
-                title,
-                description
-            )
+            # Create and send embed if we have permissions
+            embed = self.ui.system_embed(title, description)
             if color:
                 embed.color = color
-
             embed.timestamp = datetime.utcnow()
             await channel.send(embed=embed)
 
@@ -103,8 +126,6 @@ class Logging(commands.Cog):
             print(f"Failed to send log message in {guild.name}: {e}")
         except Exception as e:
             print(f"Failed to log to channel: {e}")
-            if not hasattr(self.db_manager, 'db'):
-                print("Database connection lost")
 
     @commands.Cog.listener()
     async def on_member_join(self, member):

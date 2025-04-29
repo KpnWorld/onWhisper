@@ -227,11 +227,20 @@ class Admin(commands.Cog):
             # Save with metadata
             await self.save_settings(str(ctx.guild.id), 'logging_config', config)
             
+            # Send success message to command channel
             embed = self.ui.admin_embed(
                 "Logging Channel Set", 
                 f"Server logs will now be sent to {channel.mention}"
             )
             await ctx.send(embed=embed)
+            
+            # Send test message to logging channel
+            test_embed = self.ui.system_embed(
+                "🔔 Logging Channel Test",
+                f"This channel has been set as the logging channel by {ctx.author.mention}\n"
+                f"If you see this message, logging is working correctly!"
+            )
+            await channel.send(embed=test_embed)
             
         except Exception as e:
             error_embed = self.ui.error_embed("Error", str(e))
@@ -256,22 +265,46 @@ class Admin(commands.Cog):
     @config_moderation.command(name="muterole")
     async def mod_muterole(self, ctx, role: discord.Role):
         """Set the muted role"""
-        await self.db_manager.set_data('moderation_config', str(ctx.guild.id), {'muted_role_id': role.id})
-        embed = self.ui.admin_embed(
-            "Muted Role Set",
-            f"Muted members will now receive the {role.mention} role"
-        )
-        await ctx.send(embed=embed)
+        try:
+            # Get existing config
+            config = await self.db_manager.get_data('moderation_config', str(ctx.guild.id)) or {}
+            
+            # Update only the muted role while preserving other settings
+            config['muted_role_id'] = role.id
+            
+            await self.db_manager.set_data('moderation_config', str(ctx.guild.id), config)
+            
+            embed = self.ui.admin_embed(
+                "Muted Role Set",
+                f"Muted members will now receive the {role.mention} role"
+            )
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     @config_moderation.command(name="modrole")
     async def mod_modrole(self, ctx, role: discord.Role):
         """Set the moderator role"""
-        await self.db_manager.set_data('moderation_config', str(ctx.guild.id), {'mod_role_id': role.id})
-        embed = self.ui.admin_embed(
-            "Moderator Role Set",
-            f"Members with {role.mention} will have access to moderation commands"
-        )
-        await ctx.send(embed=embed)
+        try:
+            # Get existing config
+            config = await self.db_manager.get_data('moderation_config', str(ctx.guild.id)) or {}
+            
+            # Update only the mod role while preserving other settings
+            config['mod_role_id'] = role.id
+            
+            await self.db_manager.set_data('moderation_config', str(ctx.guild.id), config)
+            
+            embed = self.ui.admin_embed(
+                "Moderator Role Set",
+                f"Members with {role.mention} will have access to moderation commands"
+            )
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     @config_moderation.command(name="warnexpire")
     async def mod_warnexpire(self, ctx, days: int):
