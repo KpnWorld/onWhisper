@@ -6,11 +6,56 @@ class DBManager:
     def __init__(self, name='bot'):
         self.name = name
         self.prefix = f"{name}:"
+        self.db = None
+        
+    async def initialize(self) -> bool:
+        """Initialize database connection and verify structure"""
         try:
             self.db = db
+            
+            # Test write operation
+            test_key = f"{self.prefix}test"
+            self.db[test_key] = "test"
+            del self.db[test_key]
+            
+            return True
         except Exception as e:
-            print(f"Failed to initialize database connection: {e}")
+            print(f"Database initialization error: {e}")
+            return False
+
+    async def check_connection(self) -> bool:
+        """Verify database connection is working"""
+        try:
+            if not self.db:
+                return False
+                
+            # Test read/write
+            test_key = f"{self.prefix}healthcheck"
+            test_value = datetime.utcnow().isoformat()
+            self.db[test_key] = test_value
+            read_value = self.db[test_key]
+            del self.db[test_key]
+            
+            return read_value == test_value
+        except Exception as e:
+            print(f"Database health check error: {e}")
+            return False
+
+    async def reconnect(self) -> bool:
+        """Attempt to reconnect to database"""
+        try:
+            self.db = db
+            return await self.check_connection()
+        except Exception as e:
+            print(f"Database reconnection error: {e}")
+            return False
+
+    async def close(self):
+        """Close database connection"""
+        try:
             self.db = None
+        except Exception as e:
+            print(f"Error closing database: {e}")
 
     async def get_guild_data(self, guild_id: int) -> dict:
         """Get all data for a guild, creating default structure if needed"""

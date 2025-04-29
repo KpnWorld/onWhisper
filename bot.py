@@ -39,26 +39,63 @@ class Bot(commands.Bot):
 
     async def setup_hook(self):
         """This is called when the bot starts, sets up the database and loads cogs"""
-        await self.db_manager.initialize()
-        for filename in os.listdir('./cogs'):
-            if filename.endswith('.py'):
-                try:
-                    await self.load_extension(f'cogs.{filename[:-3]}')
-                    print(f"{filename[:-3]} cog initialized")
-                except Exception as e:
-                    print(f"Failed to load extension {filename}: {e}")
-
-        # Sync commands
-        print("Syncing commands...")
+        # Initialize database
+        print("Initializing database...")
         try:
-            synced = await self.tree.sync()
-            print(f"Synced {len(synced)} command(s)")
+            if not await self.db_manager.initialize():
+                print("❌ Failed to initialize database")
+                await self.close()
+                return
+            print("✅ Database initialized")
+            
+            # Verify database connection
+            if not await self.db_manager.check_connection():
+                print("❌ Database connection check failed") 
+                await self.close()
+                return
+            print("✅ Database connection verified")
+
+            # Load cogs
+            for filename in os.listdir('./cogs'):
+                if filename.endswith('.py'):
+                    try:
+                        await self.load_extension(f'cogs.{filename[:-3]}')
+                        print(f"✅ Loaded {filename[:-3]}")
+                    except Exception as e:
+                        print(f"❌ Failed to load {filename}: {e}")
+
+            # Sync commands
+            try:
+                synced = await self.tree.sync()
+                print(f"✅ Synced {len(synced)} command(s)")
+            except Exception as e:
+                print(f"❌ Failed to sync commands: {e}")
+
         except Exception as e:
-            print(f"Failed to sync commands: {e}")
+            print(f"❌ Critical setup error: {e}")
+            await self.close()
+            return
 
         # Start background tasks
         self.bg_task = self.loop.create_task(self._periodic_db_cleanup())
         self.bg_task = self.loop.create_task(self._periodic_db_optimize())
+        self.bg_task = self.loop.create_task(self._periodic_db_health_check())
+
+    async def _periodic_db_health_check(self):
+        """Periodically check database health"""
+        try:
+            while not self.is_closed():
+                await asyncio.sleep(300)  # Check every 5 minutes
+                if not await self.db_manager.check_connection():
+                    print("⚠️ Database health check failed")
+                    if await self.db_manager.initialize():
+                        print("✅ Database connection restored")
+                    else:
+                        print("❌ Database recovery failed")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"Health check error: {e}")
 
     async def close(self):
         await self.db_manager.close()
@@ -210,44 +247,11 @@ class Bot(commands.Bot):
                 else:
                     print(f"HTTP error in {event_method}: {error.status} - {error.text}")
                     
-            elif isinstance(error, discord.errors.GatewayNotFound):
-                print("Discord gateway not found. Retrying in 30 seconds...")
-                await asyncio.sleep(30)
-                self._session_valid = False
-                
-            elif isinstance(error, discord.errors.ConnectionClosed):
-                print(f"Connection closed unexpectedly. Code: {error.code}, Reason: {error.reason}")
-                self._session_valid = False
-                
-            else:
-                print(f"Unexpected error in {event_method}: {error.__class__.__name__}: {str(error)}")
-                
-            # Reset rate limit counter on non-rate-limit errors
-            if not isinstance(error, discord.errors.HTTPException) or error.status != 429:
-                self._rate_limit_retries = 0
-                
-        except Exception as e:
-            print(f"Critical error in error handler: {str(e)}")
-
-    async def on_shard_ready(self, shard_id): print(f"Shard {shard_id} ready")
-    async def on_shard_connect(self, shard_id): print(f"Shard {shard_id} connected")
-    async def on_shard_disconnect(self, shard_id): print(f"Shard {shard_id} disconnected")
-    async def on_shard_resumed(self, shard_id): print(f"Shard {shard_id} resumed"); self._session_valid = True
-    async def on_disconnect(self): print("Bot disconnected")
-    async def on_resumed(self): print("Session resumed"); self._session_valid = True
-    async def on_connect(self): print("Connected to Discord"); self._session_valid = True
-
-    async def _periodic_db_cleanup(self):
-        try:
-            while not self.is_closed():
-                await asyncio.sleep(86400)
-                print("Starting database cleanup")
-                try:
                     await self.db_manager.cleanup_old_data(days=30)
-                except Exception as e:
-                    print(f"Error during cleanup: {e}")
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
         except Exception as e:
             print(f"Cleanup loop error: {e}")
 
@@ -276,6 +280,7 @@ def run_bot():
     retries = 0
     max_retries = 5
     base_delay = 5
+    bot = Bot()
 
     while retries < max_retries:
         try:
@@ -283,23 +288,19 @@ def run_bot():
             bot._reconnect_attempts = 0
             asyncio.run(bot.start(TOKEN))
             break
-        except discord.errors.HTTPException as e:
-            if e.status == 429:
-                retries += 1
-                delay = min(1800, base_delay * (2 ** retries))
-                print(f"Startup rate limit. Attempt {retries}/{max_retries}. Waiting {delay}s...")
-                time.sleep(delay)
-            else:
-                raise
-        except discord.errors.GatewayNotFound:
-            print("Discord gateway not found.")
-            break
-        except discord.errors.ConnectionClosed:
+        except Exception as e:
             retries += 1
             delay = min(1800, base_delay * (2 ** retries))
-            print(f"Connection closed. Attempt {retries}/{max_retries}. Waiting {delay}s...")
+            print(f"Error: {e}")
+            print(f"Startup error. Attempt {retries}/{max_retries}. Waiting {delay}s...")
             time.sleep(delay)
+            
+            # Try to cleanup
+            try:
+                if not bot.is_closed():
+                    asyncio.run(bot.close())
+            except:
+                pass
 
 if __name__ == "__main__":
-    bot = Bot()
     run_bot()
