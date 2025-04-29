@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from typing import Optional, List
 from utils.db_manager import DBManager
+from datetime import datetime
 
 class AutoRole(commands.Cog):
     def __init__(self, bot):
@@ -16,44 +17,21 @@ class AutoRole(commands.Cog):
             if member.bot:
                 return
 
-            # Verify bot permissions
-            if not member.guild.me.guild_permissions.manage_roles:
+            # Get guild data
+            guild_data = await self.db_manager.get_guild_data(member.guild.id)
+            autorole_settings = guild_data.get('autorole', {})
+            
+            if not autorole_settings.get('enabled', False):
                 return
 
-            # Check database connection with error handling
-            try:
-                auto_role = await self.db_manager.get_auto_role(member.guild.id)
-            except Exception as e:
-                print(f"DB Error in autorole: {e}")
+            role_id = autorole_settings.get('role_id')
+            if not role_id:
                 return
 
-            if not auto_role or not auto_role[1]:
-                return
-
-            role_id = auto_role[0]
             role = member.guild.get_role(role_id)
-
-            if role:
-                # Verify role hierarchy
-                if role.position >= member.guild.me.top_role.position:
-                    print(f"Cannot assign role {role.name} - higher than bot's role")
-                    return
-
+            if role and role < member.guild.me.top_role:
                 await member.add_roles(role, reason="Auto Role")
-                
-                # Log with error handling
-                try:
-                    await self.db_manager.log_event(
-                        member.guild.id,
-                        member.id,
-                        "autorole",
-                        f"Auto role {role.name} assigned to {member}"
-                    )
-                except Exception as e:
-                    print(f"Failed to log autorole event: {e}")
 
-        except discord.Forbidden:
-            print(f"Missing permissions to assign roles in {member.guild.name}")
         except Exception as e:
             print(f"Error in autorole: {e}")
 
@@ -61,15 +39,16 @@ class AutoRole(commands.Cog):
     @commands.has_permissions(manage_roles=True)
     async def setautorole(self, ctx, role: discord.Role):
         try:
-            if role >= ctx.guild.me.top_role:
-                embed = self.ui.error_embed(
-                    "Permission Error",
-                    "I cannot assign roles that are higher than or equal to my highest role!"
-                )
-                await ctx.send(embed=embed, ephemeral=True)
-                return
-
-            await self.db_manager.set_auto_role(ctx.guild.id, role.id, True)
+            # Update to use guild_data path
+            await self.db_manager.update_guild_data(
+                ctx.guild.id,
+                {
+                    'role_id': role.id,
+                    'enabled': True,
+                    'last_updated': datetime.utcnow().isoformat()
+                },
+                ['autorole']
+            )
             
             embed = self.ui.admin_embed(
                 "Auto Role Set",
@@ -85,7 +64,16 @@ class AutoRole(commands.Cog):
     @commands.has_permissions(manage_roles=True)
     async def removeautorole(self, ctx):
         try:
-            await self.db_manager.set_auto_role(ctx.guild.id, None, False)
+            # Update to use guild_data path
+            await self.db_manager.update_guild_data(
+                ctx.guild.id,
+                {
+                    'role_id': None,
+                    'enabled': False,
+                    'last_updated': datetime.utcnow().isoformat()
+                },
+                ['autorole']
+            )
             
             embed = self.ui.admin_embed(
                 "Auto Role Disabled",

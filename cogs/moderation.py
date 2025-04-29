@@ -283,12 +283,25 @@ class Moderation(commands.Cog):
     async def warn(self, ctx, member: discord.Member, reason: str):
         """Warn a member"""
         try:
-            # Log the warning to database
-            await self.db_manager.log_event(
+            # Get guild data
+            guild_data = await self.db_manager.get_guild_data(ctx.guild.id)
+            mod_actions = guild_data.get('mod_actions', [])
+            
+            # Add warning
+            warning = {
+                'user_id': member.id,
+                'mod_id': ctx.author.id,
+                'action': 'warn',
+                'reason': reason,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            
+            mod_actions.append(warning)
+            
+            # Update database
+            await self.db_manager.update_guild_data(
                 ctx.guild.id,
-                member.id,
-                "warn",
-                f"Warned by {ctx.author} for: {reason}"
+                {'mod_actions': mod_actions}
             )
             
             description = (
@@ -326,13 +339,16 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(description="Lock a channel")
     @commands.has_permissions(manage_guild=True)
-    async def lock(self, ctx, channel: discord.TextChannel = None, reason: str = None):
-        """Lock a channel to prevent messages from non-moderators"""
+    @commands.bot_has_permissions(manage_roles=True, manage_channels=True)
+    async def lock(self, ctx, channel: discord.TextChannel = None, *, reason: str = None):
+        """Lock a channel to prevent messages from non-admins"""
         try:
             channel = channel or ctx.channel
+            bot_member = ctx.guild.me
             
-            # Check if user has required permissions
-            if not (ctx.author.guild_permissions.administrator or ctx.author.guild_permissions.manage_guild):
+            # Permission check
+            if not (ctx.author.guild_permissions.administrator or 
+                   ctx.author.guild_permissions.manage_guild):
                 embed = self.ui.error_embed(
                     "Missing Permissions",
                     "You need Administrator or Manage Server permission to use this command!"
@@ -340,31 +356,59 @@ class Moderation(commands.Cog):
                 await ctx.send(embed=embed, ephemeral=True)
                 return
 
-            # Don't lock if already locked
+            # Check if already locked
             if channel.id in self.locked_channels:
                 embed = self.ui.mod_embed(
                     "Channel Already Locked",
-                    f"{channel.mention} is already locked!",
+                    f"{channel.mention} is already locked!"
                 )
                 await ctx.send(embed=embed)
                 return
 
-            # Store current permissions and update
-            # Allow administrators to still send messages
-            overwrites = channel.overwrites_for(ctx.guild.default_role)
-            overwrites.send_messages = False
-            await channel.set_permissions(ctx.guild.default_role, overwrite=overwrites)
+            # Track affected roles for logging
+            affected_roles = []
+            failed_roles = []
 
-            # Set permissions for administrators
-            admin_role = discord.utils.get(ctx.guild.roles, permissions=discord.Permissions(administrator=True))
-            if admin_role:
-                admin_overwrites = channel.overwrites_for(admin_role)
-                admin_overwrites.send_messages = True
-                await channel.set_permissions(admin_role, overwrite=admin_overwrites)
-            
+            # Process each role
+            for role in ctx.guild.roles:
+                # Skip if role is higher than bot's role
+                if role >= bot_member.top_role:
+                    continue
+                    
+                # Skip admin roles
+                if role.permissions.administrator:
+                    continue
+
+                try:
+                    # Check current permissions
+                    role_perms = channel.permissions_for(role)
+                    if role_perms.send_messages:
+                        # Create or update overwrite
+                        overwrites = channel.overwrites_for(role)
+                        overwrites.send_messages = False
+                        await channel.set_permissions(
+                            role, 
+                            overwrite=overwrites,
+                            reason=f"Channel lock by {ctx.author}"
+                        )
+                        affected_roles.append(role.name)
+                except discord.Forbidden:
+                    failed_roles.append(role.name)
+                except Exception as e:
+                    print(f"Error setting permissions for {role.name}: {e}")
+                    failed_roles.append(role.name)
+
+            # Add to locked channels set
             self.locked_channels.add(channel.id)
             
-            # Log the action to database
+            # Create status message
+            status = []
+            if affected_roles:
+                status.append(f"✅ Modified roles: {', '.join(affected_roles)}")
+            if failed_roles:
+                status.append(f"❌ Failed roles: {', '.join(failed_roles)}")
+
+            # Log the action
             await self.db_manager.log_event(
                 ctx.guild.id,
                 ctx.author.id,
@@ -375,7 +419,8 @@ class Moderation(commands.Cog):
             description = (
                 f"Channel: {channel.mention}\n"
                 f"Reason: {reason or 'No reason provided'}\n"
-                f"Locked by: {ctx.author.mention}\n"
+                f"Locked by: {ctx.author.mention}\n\n"
+                f"**Details:**\n{chr(10).join(status)}\n\n"
                 f"Note: Administrators can still send messages"
             )
             
@@ -385,19 +430,23 @@ class Moderation(commands.Cog):
             )
             await ctx.send(embed=embed)
             
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to manage this channel!", ephemeral=True)
         except Exception as e:
-            error_embed = self.ui.error_embed("Error", str(e))
-            await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
     @commands.hybrid_command(description="Unlock a locked channel")
     @commands.has_permissions(manage_guild=True)
+    @commands.bot_has_permissions(manage_roles=True, manage_channels=True)
     async def unlock(self, ctx, channel: discord.TextChannel = None):
         """Unlock a previously locked channel"""
         try:
             channel = channel or ctx.channel
+            bot_member = ctx.guild.me
             
-            # Check if user has required permissions
-            if not (ctx.author.guild_permissions.administrator or ctx.author.guild_permissions.manage_guild):
+            # Permission check
+            if not (ctx.author.guild_permissions.administrator or 
+                   ctx.author.guild_permissions.manage_guild):
                 embed = self.ui.error_embed(
                     "Missing Permissions",
                     "You need Administrator or Manage Server permission to use this command!"
@@ -405,22 +454,63 @@ class Moderation(commands.Cog):
                 await ctx.send(embed=embed, ephemeral=True)
                 return
 
+            # Check if channel is locked
             if channel.id not in self.locked_channels:
                 embed = self.ui.mod_embed(
                     "Channel Not Locked",
-                    f"{channel.mention} is not locked!",
+                    f"{channel.mention} is not locked!"
                 )
                 await ctx.send(embed=embed)
                 return
 
-            # Restore permissions
-            overwrites = channel.overwrites_for(ctx.guild.default_role)
-            overwrites.send_messages = None
-            await channel.set_permissions(ctx.guild.default_role, overwrite=overwrites)
-            
+            # Track roles for logging
+            restored_roles = []
+            failed_roles = []
+
+            # Process each role
+            for role in ctx.guild.roles:
+                # Skip if role is higher than bot's role
+                if role >= bot_member.top_role:
+                    continue
+                    
+                # Skip admin roles
+                if role.permissions.administrator:
+                    continue
+
+                try:
+                    overwrites = channel.overwrites_for(role)
+                    if overwrites.send_messages is False:  # Only reset if explicitly False
+                        overwrites.send_messages = None
+                        if overwrites.is_empty():
+                            await channel.set_permissions(
+                                role, 
+                                overwrite=None,
+                                reason=f"Channel unlock by {ctx.author}"
+                            )
+                        else:
+                            await channel.set_permissions(
+                                role, 
+                                overwrite=overwrites,
+                                reason=f"Channel unlock by {ctx.author}"
+                            )
+                        restored_roles.append(role.name)
+                except discord.Forbidden:
+                    failed_roles.append(role.name)
+                except Exception as e:
+                    print(f"Error restoring permissions for {role.name}: {e}")
+                    failed_roles.append(role.name)
+
+            # Remove from locked channels set
             self.locked_channels.remove(channel.id)
             
-            # Log the action to database
+            # Create status message
+            status = []
+            if restored_roles:
+                status.append(f"✅ Restored roles: {', '.join(restored_roles)}")
+            if failed_roles:
+                status.append(f"❌ Failed roles: {', '.join(failed_roles)}")
+
+            # Log the action
             await self.db_manager.log_event(
                 ctx.guild.id,
                 ctx.author.id,
@@ -428,18 +518,22 @@ class Moderation(commands.Cog):
                 f"Channel {channel.name} unlocked by {ctx.author}"
             )
             
+            description = (
+                f"Channel: {channel.mention}\n"
+                f"Unlocked by: {ctx.author.mention}\n\n"
+                f"**Details:**\n{chr(10).join(status)}"
+            )
+            
             embed = self.ui.mod_embed(
                 "🔓 Channel Unlocked",
-                f"Channel {channel.mention} has been unlocked."
+                description
             )
             await ctx.send(embed=embed)
             
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to manage this channel!", ephemeral=True)
         except Exception as e:
-            error_embed = self.ui.mod_embed(
-                "Error",
-                str(e),
-            )
-            await ctx.send(embed=error_embed, ephemeral=True)
+            await self.bot.on_command_error(ctx, e)
 
     @commands.hybrid_command(description="Show recently deleted messages")
     @commands.has_permissions(manage_messages=True)

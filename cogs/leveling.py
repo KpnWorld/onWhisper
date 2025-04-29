@@ -47,64 +47,67 @@ class Leveling(commands.Cog):
             if message.author.bot or not message.guild:
                 return
 
-            # Verify bot permissions first
-            if not message.guild.me.guild_permissions.send_messages:
+            # Get guild data
+            guild_data = await self.db_manager.get_guild_data(message.guild.id)
+            xp_settings = guild_data.get('xp_settings', {})
+            
+            # Check if leveling is enabled
+            if not xp_settings.get('enabled', True):
                 return
 
-            # Check if leveling is enabled with DB error handling
-            try:
-                config = await self.db_manager.get_data('xp_config', str(message.guild.id)) or {}
-            except Exception as e:
-                print(f"DB Error in leveling: {e}")
-                return
-
-            if not config.get('enabled', True):
-                return
+            # Get XP rate and cooldown from settings
+            base_xp = xp_settings.get('rate', self.base_xp)
+            cooldown = xp_settings.get('cooldown', self.cooldown)
 
             # Check cooldown
-            user_id = message.author.id
-            guild_id = message.guild.id
+            cooldown_key = f"{message.author.id}-{message.guild.id}"
             current_time = datetime.utcnow()
-            cooldown_key = f"{user_id}-{guild_id}"
-
             if cooldown_key in self.xp_cooldown:
                 if current_time < self.xp_cooldown[cooldown_key]:
                     return
             
-            # Award XP
-            try:
-                # Get current level and XP
-                current_data = await self.db_manager.get_user_leveling(user_id, guild_id)
-                current_level, current_xp = current_data if current_data else (0, 0)
-                
-                # Add XP
-                new_xp = current_xp + self.base_xp
-                new_level = self.calculate_level(new_xp)
-                
-                # Update database
-                await self.db_manager.add_user_leveling(user_id, guild_id, new_level, new_xp)
-                
-                # Set cooldown
-                self.xp_cooldown[cooldown_key] = current_time + timedelta(seconds=self.cooldown)
-                
-                # Level up notification
-                if new_level > current_level:
-                    description = (
-                        f"Congratulations {message.author.mention}!\n"
-                        f"You've reached level {new_level}!\n\n"
-                        f"Total XP: {new_xp:,}"
-                    )
-                    embed = self.ui.user_embed(
-                        "🎉 Level Up!",
-                        description
-                    )
-                    await message.channel.send(embed=embed)
-                    # Add this after updating XP and level
-                    await self.check_level_roles(message.author, new_level)
+            # Get user's current XP data
+            xp_users = guild_data.get('xp_users', {})
+            user_data = xp_users.get(str(message.author.id), {'level': 0, 'xp': 0})
+            current_level = user_data['level']
+            current_xp = user_data['xp']
             
-            except Exception as e:
-                print(f"Error in leveling system: {e}")
+            # Add XP
+            new_xp = current_xp + base_xp
+            new_level = self.calculate_level(new_xp)
+            
+            # Update user data
+            user_data.update({
+                'level': new_level,
+                'xp': new_xp,
+                'last_xp': current_time.isoformat()
+            })
+            
+            # Save back to database
+            await self.db_manager.update_guild_data(
+                message.guild.id,
+                user_data,
+                ['xp_users', str(message.author.id)]
+            )
 
+            # Set cooldown
+            self.xp_cooldown[cooldown_key] = current_time + timedelta(seconds=cooldown)
+            
+            # Level up notification
+            if new_level > current_level:
+                description = (
+                    f"Congratulations {message.author.mention}!\n"
+                    f"You've reached level {new_level}!\n\n"
+                    f"Total XP: {new_xp:,}"
+                )
+                embed = self.ui.user_embed(
+                    "🎉 Level Up!",
+                    description
+                )
+                await message.channel.send(embed=embed)
+                # Add this after updating XP and level
+                await self.check_level_roles(message.author, new_level)
+        
         except Exception as e:
             print(f"Error in leveling: {e}")
 

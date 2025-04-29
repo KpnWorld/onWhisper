@@ -98,14 +98,78 @@ python bot.py
 
 ## Database Structure
 
-The bot uses Replit Database with the following collections:
-- `logging_config` - Logging settings
-- `auto_roles` - Autorole settings
-- `reaction_roles` - Reaction role bindings
-- `tickets` - Ticket data
-- `levels` - XP/level data
-- `moderation_config` - Moderation settings
-- `logs` - Event & mod logs
+The bot uses Replit Database with nested JSON structures. Each guild has its own data namespace.
+
+### Guild Data Structure (`{botname}:guild:{guild_id}`)
+```json
+{
+    "xp_settings": {
+        "rate": 15,
+        "cooldown": 60,
+        "enabled": true
+    },
+    "xp_users": {
+        "user_id": {
+            "level": number,
+            "xp": number,
+            "last_xp": "ISO datetime"
+        }
+    },
+    "level_roles": {
+        "level": "role_id"
+    },
+    "tickets": {
+        "open_tickets": [
+            {
+                "channel_id": number,
+                "user_id": number,
+                "created_at": "ISO datetime",
+                "closed_at": "ISO datetime or null"
+            }
+        ],
+        "logs": []
+    },
+    "mod_actions": [
+        {
+            "action": "string",
+            "user_id": number,
+            "details": "string",
+            "timestamp": "ISO datetime"
+        }
+    ],
+    "reaction_roles": {
+        "message_id": {
+            "emoji": "role_id"
+        }
+    },
+    "logs_config": {
+        "mod_channel": null,
+        "join_channel": null,
+        "enabled": true
+    }
+}
+```
+
+### Configuration Collections
+- `logging_config`: Logging channel settings and filters
+- `tickets_config`: Ticket category and support role settings
+- `moderation_config`: Moderation roles and warning settings
+- `xp_config`: XP gain rate and cooldown settings
+- `level_roles`: Level-based role reward mappings
+
+### Event Logs
+Event logs are stored with automatic cleanup after 30 days:
+- Message edits/deletions
+- Member joins/leaves
+- Role changes
+- Channel updates
+- Moderation actions
+- Ticket activity
+
+### Data Management
+- Automatic cleanup of old logs and closed tickets (30 days)
+- Optimization of database structure weekly
+- Backup system for critical data (coming soon)
 
 ## Contributing
 

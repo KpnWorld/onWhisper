@@ -33,26 +33,21 @@ class Logging(commands.Cog):
             print(f"Error loading log channels: {e}")
 
     async def get_log_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
-        """Get the logging channel for a guild, using cache first"""
+        """Get the logging channel for a guild"""
         try:
-            # Check cache first
-            channel_id = self.log_channels.get(guild_id)
-            if channel_id:
-                channel = self.bot.get_channel(channel_id)
-                if channel:
-                    return channel
+            # Get guild data
+            guild_data = await self.db_manager.get_guild_data(guild_id)
+            logs_config = guild_data.get('logs_config', {})
+            
+            if not logs_config.get('enabled', True):
+                return None
 
-            # If not in cache or channel not found, check database
-            config = await self.db_manager.get_data('logging_config', str(guild_id))
-            if config and 'channel_id' in config:
-                channel = self.bot.get_channel(config['channel_id'])
-                if channel:
-                    # Update cache
-                    self.log_channels[guild_id] = config['channel_id']
-                    return channel
-                    
-            return None
-
+            channel_id = logs_config.get('channel_id')
+            if not channel_id:
+                return None
+                
+            channel = self.bot.get_channel(channel_id)
+            return channel
         except Exception as e:
             print(f"Error getting log channel: {e}")
             return None
@@ -60,29 +55,17 @@ class Logging(commands.Cog):
     @commands.hybrid_command(description="Set the logging channel for the server")
     @commands.has_permissions(administrator=True)
     async def setlogs(self, ctx, channel: discord.TextChannel):
-        """Set the channel for logging events"""
         try:
-            # Verify bot permissions in the channel
-            perms = channel.permissions_for(ctx.guild.me)
-            required_perms = ['view_channel', 'send_messages', 'embed_links']
-            
-            missing = [p for p in required_perms if not getattr(perms, p)]
-            if missing:
-                embed = self.ui.error_embed(
-                    "Missing Permissions",
-                    f"I need the following permissions in {channel.mention}:\n" +
-                    "\n".join(f"• {p}" for p in missing)
-                )
-                await ctx.send(embed=embed, ephemeral=True)
-                return
-
-            # Save to both cache and database
-            self.log_channels[ctx.guild.id] = channel.id
-            await self.db_manager.update_config('logging_config', str(ctx.guild.id), {
-                'channel_id': channel.id,
-                'enabled': True,
-                'last_updated': datetime.utcnow().isoformat()
-            })
+            # Update logs config
+            await self.db_manager.update_guild_data(
+                ctx.guild.id,
+                {
+                    'channel_id': channel.id,
+                    'enabled': True,
+                    'last_updated': datetime.utcnow().isoformat()
+                },
+                ['logs_config']
+            )
             
             embed = self.ui.admin_embed(
                 "Logging Channel Set",

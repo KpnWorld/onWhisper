@@ -5,152 +5,118 @@ import json
 class DBManager:
     def __init__(self, name='bot'):
         self.name = name
-        self.prefix = f"{name}:"  # Use prefix for namespacing
+        self.prefix = f"{name}:"
         try:
             self.db = db
         except Exception as e:
             print(f"Failed to initialize database connection: {e}")
             self.db = None
 
-    async def initialize(self):
-        """Initialize database tables"""
+    async def get_guild_data(self, guild_id: int) -> dict:
+        """Get all data for a guild, creating default structure if needed"""
         try:
-            # Verify db connection
-            if not self.db:
-                self.db = db
+            key = f"{self.prefix}guild:{guild_id}"
+            if key not in self.db:
+                default_data = {
+                    "xp_settings": {
+                        "rate": 15,
+                        "cooldown": 60,
+                        "enabled": True
+                    },
+                    "xp_users": {},
+                    "level_roles": {},
+                    "tickets": {
+                        "open_tickets": [],
+                        "logs": []
+                    },
+                    "mod_actions": [],
+                    "reaction_roles": {},
+                    "logs_config": {
+                        "mod_channel": None,
+                        "join_channel": None,
+                        "enabled": True
+                    }
+                }
+                self.db[key] = json.dumps(default_data)
+                return default_data
+            return json.loads(self.db[key])
+        except Exception as e:
+            print(f"Error getting guild data: {e}")
+            raise
 
-            # Initialize default collections
-            collections = [
-                'guilds',
-                'logging_config', 
-                'auto_roles',
-                'reaction_roles',
-                'tickets',
-                'levels',
-                'logs'
-            ]
+    async def update_guild_data(self, guild_id: int, updates: dict, path: list = None):
+        """Update guild data at specific path"""
+        try:
+            data = await self.get_guild_data(guild_id)
             
-            for collection in collections:
-                key = f"{self.prefix}{collection}"
-                if key not in self.db:
-                    self.db[key] = {}
+            if path:
+                # Navigate to the correct nested location
+                current = data
+                for key in path[:-1]:
+                    if key not in current:
+                        current[key] = {}
+                    current = current[key]
+                current[path[-1]] = updates
+            else:
+                # Update root level
+                data.update(updates)
+
+            # Save back to database
+            self.db[f"{self.prefix}guild:{guild_id}"] = json.dumps(data)
             
-            return True
-            
         except Exception as e:
-            print(f"Database initialization error: {e}")
-            self.db = None
-            return False
-
-    async def close(self):
-        """No need to close connection with Replit db"""
-        pass
-
-    def _make_key(self, collection: str, id: str) -> str:
-        """Create a composite key for the collection"""
-        return f"{self.prefix}{collection}:{id}"
-
-    async def set_data(self, collection: str, id: str, data: dict):
-        """Set data in a collection"""
-        try:
-            key = self._make_key(collection, id)
-            self.db[key] = json.dumps(data)
-        except Exception as e:
-            print(f"Data set error: {e}")
+            print(f"Error updating guild data: {e}")
             raise
 
-    async def get_data(self, collection: str, id: str) -> dict:
-        """Get data from a collection"""
+    async def add_user_leveling(self, user_id: int, guild_id: int, level: int, xp: int):
+        """Add or update user level information"""
         try:
-            key = self._make_key(collection, id)
-            if key in self.db:
-                return json.loads(self.db[key])
-            return None
+            await self.update_guild_data(
+                guild_id,
+                {
+                    str(user_id): {
+                        "level": level,
+                        "xp": xp,
+                        "last_xp": datetime.utcnow().isoformat()
+                    }
+                },
+                ["xp_users"]
+            )
         except Exception as e:
-            print(f"Data get error: {e}")
+            print(f"Level update error: {e}")
             raise
 
-    async def delete_data(self, collection: str, id: str):
-        """Delete data from a collection"""
+    async def get_user_leveling(self, user_id: int, guild_id: int):
+        """Get user level information"""
         try:
-            key = self._make_key(collection, id)
-            if key in self.db:
-                del self.db[key]
+            data = await self.get_guild_data(guild_id)
+            user_data = data.get("xp_users", {}).get(str(user_id))
+            if user_data:
+                return (user_data["level"], user_data["xp"])
+            return (0, 0)
         except Exception as e:
-            print(f"Data delete error: {e}")
+            print(f"Level get error: {e}")
             raise
 
-    async def ensure_guild_exists(self, guild_id: int, name: str):
-        """Ensure guild exists in database"""
+    async def set_level_role(self, guild_id: int, level: int, role_id: int):
+        """Set a level role reward"""
         try:
-            guild_data = await self.get_data('guilds', str(guild_id))
-            if not guild_data:
-                await self.set_data('guilds', str(guild_id), {
-                    'name': name,
-                    'joined_at': datetime.utcnow().isoformat()
-                })
+            await self.update_guild_data(
+                guild_id,
+                {str(level): role_id},
+                ["level_roles"]
+            )
         except Exception as e:
-            print(f"Guild creation error: {e}")
+            print(f"Level role set error: {e}")
             raise
 
-    async def set_auto_role(self, guild_id: int, role_id: int, enabled: bool):
-        """Set or update auto role configuration"""
+    async def get_level_role(self, guild_id: int, level: int):
+        """Get role ID for a specific level"""
         try:
-            await self.set_data('auto_roles', str(guild_id), {
-                'role_id': role_id,
-                'enabled': enabled
-            })
+            data = await self.get_guild_data(guild_id)
+            return data.get("level_roles", {}).get(str(level))
         except Exception as e:
-            print(f"Auto role set error: {e}")
-            raise
-
-    async def get_auto_role(self, guild_id: int):
-        """Get auto role configuration"""
-        try:
-            data = await self.get_data('auto_roles', str(guild_id))
-            if data:
-                return (data['role_id'], data['enabled'])
-            return None
-        except Exception as e:
-            print(f"Auto role get error: {e}")
-            raise
-
-    async def add_reaction_role(self, message_id: int, emoji: str, role_id: int):
-        """Add a reaction role binding"""
-        try:
-            key = f"{message_id}:{emoji}"
-            await self.set_data('reaction_roles', key, {
-                'role_id': role_id
-            })
-        except Exception as e:
-            print(f"Reaction role add error: {e}")
-            raise
-
-    async def get_reaction_roles(self, message_id: int):
-        """Get reaction role bindings for a message"""
-        try:
-            prefix = f"{self.prefix}reaction_roles:{message_id}:"
-            bindings = []
-            for key in self.db.keys():
-                if key.startswith(prefix):
-                    emoji = key.split(':')[-1]
-                    data = json.loads(self.db[key])
-                    bindings.append((emoji, data['role_id']))
-            return bindings
-        except Exception as e:
-            print(f"Reaction roles get error: {e}")
-            raise
-
-    async def remove_reaction_role(self, message_id: int, emoji: str) -> bool:
-        """Remove a reaction role binding. Returns True if binding existed."""
-        try:
-            key = f"{self.prefix}reaction_roles:{message_id}:{emoji}"
-            if key in self.db:
-                del self.db[key]
-                return True
-            return False
-        except Exception as e:
-            print(f"Reaction role remove error: {e}")
+            print(f"Get level role error: {e}")
             raise
 
     async def create_ticket(self, guild_id: int, channel_id: int, user_id: int):
@@ -163,107 +129,122 @@ class DBManager:
                 'created_at': datetime.utcnow().isoformat(),
                 'closed_at': None
             }
-            await self.set_data('tickets', str(channel_id), ticket_data)
+            await self.update_guild_data(
+                guild_id,
+                ticket_data,
+                ["tickets", "open_tickets"]
+            )
         except Exception as e:
             print(f"Ticket creation error: {e}")
             raise
 
-    async def close_ticket(self, channel_id: int):
+    async def close_ticket(self, guild_id: int, channel_id: int):
         """Close a ticket"""
         try:
-            ticket = await self.get_data('tickets', str(channel_id))
+            ticket = await self.get_ticket_by_channel(guild_id, channel_id)
             if ticket:
                 ticket['closed_at'] = datetime.utcnow().isoformat()
-                await self.set_data('tickets', str(channel_id), ticket)
+                await self.update_guild_data(
+                    guild_id,
+                    ticket,
+                    ["tickets", "open_tickets"]
+                )
         except Exception as e:
             print(f"Ticket close error: {e}")
             raise
 
-    async def get_ticket_by_channel(self, channel_id: int):
+    async def get_ticket_by_channel(self, guild_id: int, channel_id: int):
         """Get ticket information by channel ID"""
         try:
-            return await self.get_data('tickets', str(channel_id))
+            data = await self.get_guild_data(guild_id)
+            open_tickets = data.get("tickets", {}).get("open_tickets", [])
+            for ticket in open_tickets:
+                if ticket.get("channel_id") == channel_id:
+                    return ticket
+            return None
         except Exception as e:
             print(f"Ticket get error: {e}")
             raise
 
-    async def get_open_ticket(self, user_id: int, guild_id: int):
+    async def check_open_ticket(self, guild_id: int, user_id: int):
         """Check if user has an open ticket"""
         try:
-            prefix = f"{self.prefix}tickets:"
-            for key in self.db.keys():
-                if key.startswith(prefix):
-                    ticket = json.loads(self.db[key])
-                    if (ticket['user_id'] == user_id and 
-                        ticket['guild_id'] == guild_id and 
-                        ticket['closed_at'] is None):
-                        return ticket
+            data = await self.get_guild_data(guild_id)
+            open_tickets = data.get("tickets", {}).get("open_tickets", [])
+            for ticket in open_tickets:
+                if ticket.get("user_id") == user_id:
+                    return ticket
             return None
         except Exception as e:
             print(f"Open ticket check error: {e}")
             raise
 
-    async def add_user_leveling(self, user_id: int, guild_id: int, level: int, xp: int):
-        """Add or update user level information"""
+    async def add_mod_action(self, guild_id: int, action: str, user_id: int, details: str = None):
+        """Log a moderation action"""
         try:
-            key = f"{guild_id}:{user_id}"
-            await self.set_data('levels', key, {
-                'level': level,
-                'xp': xp,
-                'last_xp': datetime.utcnow().isoformat()
-            })
-        except Exception as e:
-            print(f"Level update error: {e}")
-            raise
-
-    async def get_user_leveling(self, user_id: int, guild_id: int):
-        """Get user level information"""
-        try:
-            key = f"{guild_id}:{user_id}"
-            data = await self.get_data('levels', key)
-            if data:
-                return (data['level'], data['xp'])
-            return (0, 0)
-        except Exception as e:
-            print(f"Level get error: {e}")
-            raise
-
-    async def get_leaderboard(self, guild_id: int, limit: int = 10):
-        """Get guild leaderboard"""
-        try:
-            prefix = f"{self.prefix}levels:{guild_id}:"
-            all_levels = []
-            
-            for key in self.db.keys():
-                if key.startswith(prefix):
-                    user_id = int(key.split(':')[-1])
-                    data = json.loads(self.db[key])
-                    all_levels.append((user_id, data['level'], data['xp']))
-            
-            # Sort by XP and take top entries
-            return sorted(all_levels, key=lambda x: x[2], reverse=True)[:limit]
-        except Exception as e:
-            print(f"Leaderboard get error: {e}")
-            raise
-
-    async def log_event(self, guild_id: int, user_id: int, action: str, details: str = None, **kwargs):
-        """Log an event with optional additional data"""
-        try:
-            timestamp = datetime.utcnow().isoformat()
-            log_id = f"{guild_id}:{timestamp}"
-            
-            log_data = {
-                'guild_id': guild_id,
-                'user_id': user_id,
-                'action': action,
-                'details': details,
-                'timestamp': timestamp,
-                **kwargs  # Include any additional data like channel_id
+            action_data = {
+                "action": action,
+                "user_id": user_id,
+                "details": details,
+                "timestamp": datetime.utcnow().isoformat()
             }
-            
-            await self.set_data('logs', log_id, log_data)
+            await self.update_guild_data(
+                guild_id,
+                action_data,
+                ["mod_actions"]
+            )
         except Exception as e:
-            print(f"Event log error: {e}")
+            print(f"Add mod action error: {e}")
+            raise
+
+    async def get_mod_actions(self, guild_id: int):
+        """Get moderation actions log"""
+        try:
+            data = await self.get_guild_data(guild_id)
+            return data.get("mod_actions", [])
+        except Exception as e:
+            print(f"Get mod actions error: {e}")
+            raise
+
+    async def add_reaction_role(self, guild_id: int, message_id: int, emoji: str, role_id: int):
+        """Add a reaction role binding"""
+        try:
+            await self.update_guild_data(
+                guild_id,
+                role_id,
+                ["reaction_roles", str(message_id), emoji]
+            )
+        except Exception as e:
+            print(f"Reaction role add error: {e}")
+            raise
+
+    async def get_reaction_roles(self, guild_id: int, message_id: int):
+        """Get reaction role bindings for a message"""
+        try:
+            data = await self.get_guild_data(guild_id)
+            return data.get("reaction_roles", {}).get(str(message_id), {})
+        except Exception as e:
+            print(f"Reaction roles get error: {e}")
+            raise
+
+    async def remove_reaction_role(self, guild_id: int, message_id: int, emoji: str) -> bool:
+        """Remove a reaction role binding. Returns True if binding existed."""
+        try:
+            data = await self.get_guild_data(guild_id)
+            reaction_roles = data.get("reaction_roles", {})
+            message_roles = reaction_roles.get(str(message_id), {})
+            if emoji in message_roles:
+                del message_roles[emoji]
+                # If no more roles for this message, remove the message entry
+                if not message_roles:
+                    del reaction_roles[str(message_id)]
+                else:
+                    reaction_roles[str(message_id)] = message_roles
+                await self.update_guild_data(guild_id, reaction_roles, ["reaction_roles"])
+                return True
+            return False
+        except Exception as e:
+            print(f"Reaction role remove error: {e}")
             raise
 
     async def cleanup_old_data(self, days: int = 30):
@@ -317,56 +298,49 @@ class DBManager:
             return None
 
     async def get_all_guild_data(self, guild_id: int) -> dict:
-        """Get all data related to a specific guild"""
+        """Get all data collections for a guild"""
         try:
-            guild_data = {}
-            str_guild_id = str(guild_id)
+            collections = {}
+            prefix = f"{self.prefix}guild:{guild_id}:"
             
-            # Collections that store guild-specific data
-            guild_collections = {
-                'guilds': str_guild_id,
-                'logging_config': str_guild_id,
-                'auto_roles': str_guild_id,
-                'tickets': lambda k: json.loads(self.db[k]).get('guild_id') == guild_id,
-                'levels': lambda k: k.startswith(f"{self.prefix}levels:{guild_id}:"),
-                'logs': lambda k: json.loads(self.db[k]).get('guild_id') == guild_id
-            }
+            # Get main guild data
+            guild_data = await self.get_guild_data(guild_id)
+            if guild_data:
+                collections['guild'] = guild_data
             
-            for collection, filter_func in guild_collections.items():
-                collection_data = []
-                prefix = f"{self.prefix}{collection}:"
-                
-                for key in self.db.keys():
-                    if not key.startswith(prefix):
+            # Get other collections
+            for key in self.db.keys():
+                if key.startswith(prefix):
+                    collection = key.split(':')[2]  # Get collection name from key
+                    try:
+                        data = json.loads(self.db[key])
+                        if collection not in collections:
+                            collections[collection] = {}
+                        collections[collection][key] = data
+                    except:
                         continue
                         
-                    if callable(filter_func):
-                        if filter_func(key):
-                            collection_data.append(json.loads(self.db[key]))
-                    elif key == f"{prefix}{filter_func}":
-                        collection_data.append(json.loads(self.db[key]))
-                
-                if collection_data:
-                    guild_data[collection] = collection_data
-                    
-            return guild_data
-            
+            return collections
         except Exception as e:
-            print(f"Guild data retrieval error: {e}")
+            print(f"Error getting all guild data: {e}")
             raise
 
-    async def update_config(self, collection: str, guild_id: str, updates: dict):
-        """Update configuration while preserving existing values"""
+    async def get_leaderboard(self, guild_id: int, limit: int = 100) -> list:
+        """Get the XP leaderboard for a guild"""
         try:
-            # Get existing config
-            current_config = await self.get_data(collection, guild_id) or {}
+            guild_data = await self.get_guild_data(guild_id)
+            xp_users = guild_data.get('xp_users', {})
             
-            # Update with new values
-            current_config.update(updates)
+            # Convert to list of tuples (user_id, level, xp)
+            leaderboard = [
+                (int(user_id), data['level'], data['xp'])
+                for user_id, data in xp_users.items()
+            ]
             
-            # Save back to database
-            await self.set_data(collection, guild_id, current_config)
+            # Sort by XP, then by level
+            leaderboard.sort(key=lambda x: (x[2], x[1]), reverse=True)
             
+            return leaderboard[:limit]
         except Exception as e:
-            print(f"Config update error: {e}")
+            print(f"Error getting leaderboard: {e}")
             raise

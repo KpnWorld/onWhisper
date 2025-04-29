@@ -1,5 +1,6 @@
-import discord
+import discord 
 from discord.ext import commands
+from datetime import datetime
 from utils.db_manager import DBManager
 
 class CloseButton(discord.ui.View):
@@ -50,52 +51,39 @@ class Tickets(commands.Cog):
             self.interaction = interaction
             self.summary = self.children[0].value
             self.details = self.children[1].value
+            await interaction.response.defer()
 
     @commands.hybrid_command(description="Create a support ticket")
     async def ticket(self, ctx):
         """Create a support ticket using a form"""
-        modal = self.TicketModal()
-        await ctx.interaction.response.send_modal(modal)
-        await modal.wait()
-        
-        # Use the form data to create the ticket
-        reason = f"{modal.summary}\n\n{modal.details}"
-
         try:
-            # Verify bot permissions
-            required_permissions = [
-                'manage_channels',
-                'send_messages',
-                'embed_links',
-                'manage_roles'
-            ]
+            # Show modal first to get ticket details
+            modal = self.TicketModal()
+            await ctx.interaction.response.send_modal(modal)
+            await modal.wait()
             
-            missing_perms = []
-            for perm in required_permissions:
-                if not getattr(ctx.guild.me.guild_permissions, perm):
-                    missing_perms.append(perm)
-                    
-            if missing_perms:
-                await ctx.send(f"I need the following permissions: {', '.join(missing_perms)}")
-                return
+            # Get ticket reason from modal
+            reason = f"{modal.summary}\n\n{modal.details}" if modal.details else modal.summary
 
-            # Check database connection
-            try:
-                existing_ticket = await self.db_manager.get_open_ticket(ctx.author.id, ctx.guild.id)
-            except Exception as e:
-                await ctx.send("Unable to check ticket status. Database error.")
-                print(f"DB Error in tickets: {e}")
-                return
+            # Get guild data
+            guild_data = await self.db_manager.get_guild_data(ctx.guild.id)
+            ticket_settings = guild_data.get('tickets', {})
+            
+            # Check existing tickets
+            open_tickets = ticket_settings.get('open_tickets', [])
+            user_ticket = next(
+                (t for t in open_tickets if t['user_id'] == ctx.author.id and not t.get('closed_at')),
+                None
+            )
 
-            # Check if user already has an open ticket
-            if existing_ticket:
-                channel = ctx.guild.get_channel(existing_ticket['channel_id'])
+            if user_ticket:
+                channel = ctx.guild.get_channel(user_ticket['channel_id'])
                 if channel:
-                    embed = self.ui.user_embed(
+                    embed = self.ui.error_embed(
                         "Ticket Already Open",
-                        f"You already have an open ticket: {channel.mention}",
+                        f"You already have an open ticket: {channel.mention}"
                     )
-                    await ctx.send(embed=embed, ephemeral=True)
+                    await modal.interaction.followup.send(embed=embed, ephemeral=True)
                     return
 
             # Get ticket settings
@@ -105,7 +93,7 @@ class Tickets(commands.Cog):
                     "Tickets Not Configured",
                     "The ticket system has not been set up yet!",
                 )
-                await ctx.send(embed=embed, ephemeral=True)
+                await modal.interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             category = ctx.guild.get_channel(settings.get('category_id'))
@@ -116,10 +104,11 @@ class Tickets(commands.Cog):
                     "Configuration Error",
                     "The ticket system is not properly configured!",
                 )
-                await ctx.send(embed=embed, ephemeral=True)
+                await modal.interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             # Create the ticket channel
+            channel_name = f"ticket-{ctx.author.name}-{len(open_tickets) + 1}"
             overwrites = {
                 ctx.guild.default_role: discord.PermissionOverwrite(view_channel=False),
                 ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True),
@@ -128,16 +117,33 @@ class Tickets(commands.Cog):
             }
 
             channel = await ctx.guild.create_text_channel(
-                f"ticket-{ctx.author.name}",
+                channel_name,
                 category=category,
                 overwrites=overwrites
+            )
+
+            # Create ticket data
+            ticket_data = {
+                'channel_id': channel.id,
+                'user_id': ctx.author.id,
+                'created_at': datetime.utcnow().isoformat(),
+                'reason': reason,
+                'closed_at': None
+            }
+            
+            # Add to open tickets
+            open_tickets.append(ticket_data)
+            await self.db_manager.update_guild_data(
+                ctx.guild.id,
+                {'open_tickets': open_tickets},
+                ['tickets']
             )
 
             # Create the initial message
             description = (
                 f"Support will be with you shortly.\n\n"
                 f"User: {ctx.author.mention}\n"
-                f"Reason: {reason or 'No reason provided'}"
+                f"Reason: {reason}"
             )
 
             embed = self.ui.user_embed(
@@ -145,23 +151,16 @@ class Tickets(commands.Cog):
                 description
             )
 
-            # Add close button
+            # Add close button and send initial message
             view = CloseButton()
             await channel.send(embed=embed, view=view)
-
-            # Store ticket in database
-            await self.db_manager.create_ticket(
-                ctx.guild.id,
-                channel.id,
-                ctx.author.id
-            )
 
             # Send confirmation
             confirm_embed = self.ui.user_embed(
                 "Ticket Created",
                 f"Your ticket has been created: {channel.mention}",
             )
-            await ctx.send(embed=confirm_embed, ephemeral=True)
+            await modal.interaction.followup.send(embed=confirm_embed, ephemeral=True)
 
         except discord.Forbidden:
             await ctx.send("I don't have the required permissions to create tickets.")
