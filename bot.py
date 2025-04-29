@@ -252,6 +252,20 @@ class Bot(commands.Bot):
             pass
         except Exception as e:
             print(f"Error during cleanup: {e}")
+
+    async def _periodic_db_cleanup(self):
+        """Periodically clean up old database entries"""
+        try:
+            while not self.is_closed():
+                await asyncio.sleep(86400)  # Run daily
+                print("Starting database cleanup")
+                try:
+                    await self.db_manager.cleanup_old_data(days=30)
+                    print("✅ Database cleanup completed")
+                except Exception as e:
+                    print(f"❌ Error during cleanup: {e}")
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             print(f"Cleanup loop error: {e}")
 
@@ -277,30 +291,19 @@ async def change_activity(bot):
     await bot.change_presence(activity=random.choice(ACTIVITIES))
 
 def run_bot():
-    retries = 0
-    max_retries = 5
-    base_delay = 5
-    bot = Bot()
-
-    while retries < max_retries:
+    while True:  # Keep trying to reconnect
         try:
-            bot._session_valid = True
-            bot._reconnect_attempts = 0
+            bot = Bot()
             asyncio.run(bot.start(TOKEN))
-            break
         except Exception as e:
-            retries += 1
-            delay = min(1800, base_delay * (2 ** retries))
             print(f"Error: {e}")
-            print(f"Startup error. Attempt {retries}/{max_retries}. Waiting {delay}s...")
-            time.sleep(delay)
-            
-            # Try to cleanup
             try:
                 if not bot.is_closed():
                     asyncio.run(bot.close())
             except:
                 pass
+            print("Restarting bot in 30 seconds...")
+            time.sleep(30)
 
 if __name__ == "__main__":
     run_bot()
