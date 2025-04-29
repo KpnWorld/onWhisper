@@ -284,9 +284,14 @@ class UIManager:
         await view.wait()
         return view.value
 
-    class CommandSelect(discord.ui.Select):
-        def __init__(self, options: list, placeholder: str = "Select an option"):
-            super().__init__(
+    class CommandSelectView(discord.ui.View):
+        def __init__(self, options: list, placeholder: str = "Select an option", timeout: int = 180):
+            super().__init__(timeout=timeout)
+            self.result = None
+            self.message = None
+            
+            # Create select menu directly in view
+            select_menu = discord.ui.Select(
                 placeholder=placeholder,
                 min_values=1,
                 max_values=1,
@@ -299,22 +304,21 @@ class UIManager:
                     ) for option in options
                 ]
             )
-
-        async def callback(self, interaction: discord.Interaction):
-            await interaction.response.defer()
-            self.view.result = self.values[0]
-            self.view.stop()
-
-    class CommandSelectView(discord.ui.View):
-        def __init__(self, options: list, placeholder: str = "Select an option", timeout: int = 180):
-            super().__init__(timeout=timeout)
-            self.result = None
-            self.message = None
-            self.add_item(CommandSelect(options, placeholder))
+            
+            async def select_callback(interaction: discord.Interaction):
+                await interaction.response.defer()
+                self.result = select_menu.values[0]
+                self.stop()
+            
+            select_menu.callback = select_callback
+            self.add_item(select_menu)
 
         async def on_timeout(self) -> None:
             if self.message:
-                await self.message.edit(view=None)
+                try:
+                    await self.message.edit(view=None)
+                except:
+                    pass
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             return True

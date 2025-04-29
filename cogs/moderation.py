@@ -158,26 +158,35 @@ class Moderation(commands.Cog):
                 f"Choose how long to timeout {member.mention}"
             )
             
-            msg = await ctx.send(embed=embed, view=view)
-            selection = await view.get_result()
+            view.message = await ctx.send(embed=embed, view=view)
+            await view.wait()
 
-            if selection == "custom":
-                # Show a modal for custom duration
-                # ...implement custom duration input...
-                pass
-            else:
-                duration, unit = selection.split(":")
-                duration = int(duration)
+            if not view.result:
+                await view.message.edit(
+                    embed=self.ui.error_embed("Timeout", "No duration selected"),
+                    view=None
+                )
+                return
 
-                # Convert to timedelta
-                if unit == 's':
-                    delta = timedelta(seconds=duration)
-                elif unit == 'm':
-                    delta = timedelta(minutes=duration)
-                elif unit == 'h':
-                    delta = timedelta(hours=duration)
-                elif unit == 'd':
-                    delta = timedelta(days=duration)
+            if view.result == "custom":
+                await view.message.edit(
+                    embed=self.ui.error_embed("Custom Duration", "Custom duration not yet implemented"),
+                    view=None
+                )
+                return
+                
+            duration, unit = view.result.split(":")
+            duration = int(duration)
+
+            # Convert to timedelta
+            if unit == 's':
+                delta = timedelta(seconds=duration)
+            elif unit == 'm':
+                delta = timedelta(minutes=duration)
+            elif unit == 'h':
+                delta = timedelta(hours=duration)
+            elif unit == 'd':
+                delta = timedelta(days=duration)
 
             # Apply timeout
             await member.timeout(delta, reason=f"Timeout by {ctx.author}: {reason}")
