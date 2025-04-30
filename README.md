@@ -48,35 +48,64 @@ A feature-rich Discord bot built with py-cord that includes leveling, tickets, m
 ## Commands
 
 ### Configuration (`/config`)
-- `/config xp rate <amount>` - Set XP per message
+- `/config xp rate <amount>` - Set XP per message (1-100)
 - `/config xp cooldown <seconds>` - Set XP gain cooldown
 - `/config xp toggle` - Toggle XP system
-- `/config levels role <level> <role>` - Set role reward for level
-- `/config levels roles` - View all level role rewards
 
-### Tickets
-- `/ticket <reason>` - Create ticket
-- Close button in ticket channels
+- `/config level add <level> <role>` - Set role reward for level
+- `/config level remove <level>` - Remove level reward
+- `/config level list` - List all level rewards
 
-### Roles
-- `/setautorole <role>` - Set auto-role
-- `/removeautorole` - Remove auto-role
-- `/bindreactionrole <message_id> <emoji> <role>` - Create reaction role
-- `/unbindreactionrole <message_id>` - Remove reaction role (shows selection menu)
+- `/config logs set <type> <channel>` - Set log channel (mod/member/message/server)
+- `/config logs toggle` - Enable/disable logging
+
+- `/config tickets category <channel>` - Set tickets category
+- `/config tickets staff <role>` - Set support staff role
+
+- `/config autorole set <role>` - Set auto-role for new members
+- `/config autorole remove` - Disable auto-role
+
+### Create Commands (`/create`)
+- `/create ticket-panel <channel> <message>` - Generate a support ticket panel
+- `/create reaction-role <channel> <emoji> <role> <message>` - Create a reaction role message
+- `/create log-channel <type> <channel>` - Auto-setup a log channel
+- `/create welcome-message <channel> <message>` - Preview/set welcome message
+- `/create level-message <channel> <message>` - Preview/set level-up message
+
+### Role Management (`/roles`)
+- `/roles auto set <role>` - Enable auto-role
+- `/roles auto remove` - Disable auto-role
+
+- `/roles react bind <message_id> <emoji> <role>` - Bind emoji to role on message
+- `/roles react unbind <message_id>` - Remove all reactions/roles from message
+- `/roles react list` - Show all reaction role bindings
+
+- `/roles bulk add <role> <users...>` - Assign role to multiple users
+- `/roles bulk remove <role> <users...>` - Remove role from multiple users
+
+### Moderation
+- `/warn <user> <reason>` - Issue a warning
+- `/warnings <user>` - View a user's warnings
+- `/kick <user> [reason]` - Kick a member
+- `/ban <user> [reason]` - Ban a member
+- `/timeout <user> <duration> [reason]` - Temporarily mute a user
+- `/purge <amount>` - Bulk delete messages (1-100)
+- `/lockdown [channel] [duration]` - Lock a channel temporarily
+- `/slowmode <seconds> [channel]` - Set slowmode in a channel
+- `/snipe` - Retrieve last deleted message
 
 ### Information
-- `/help [command]` - Show help
-- `/botinfo` - Show bot stats
-- `/serverinfo` - Show server info
-- `/userinfo [user]` - Show user info
-- `/uptime` - Show bot uptime
+- `/info help [command]` - Show help for a command
+- `/info bot` - Show bot stats and ping
+- `/info server` - Show server information
+- `/info user [user]` - Show user information
+- `/info role <role>` - Display role details
+- `/info uptime` - Show bot uptime
 
 ### Debug (Owner Only)
-- `!dbcheck [key]` - Check database
-- `!dblookup <collection> <key> <field>` - Look up data
-- `!dbstats` - Show database stats
-- `!guilddata [collection]` - Show guild data
-- `!dblist [filter]` - List database entries
+- `/debug sync` - Sync application commands
+- `/debug reload <cog>` - Reload a cog
+- `/debug cleanup [limit]` - Clean up bot messages
 
 ## Setup & Configuration
 

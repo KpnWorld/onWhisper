@@ -3,6 +3,7 @@ from discord.ext import commands
 import json
 from datetime import datetime, timedelta
 import asyncio
+from replit import db  # Add database backend import
 
 class DBManager:
     _shared_state = {
@@ -48,6 +49,14 @@ class DBManager:
             return False
         finally:
             self.initializing = False
+
+    async def close(self):
+        """Close the database connection"""
+        try:
+            self.initialized = False
+            self.db = None
+        except Exception as e:
+            print(f"Error closing database connection: {e}")
 
     async def ensure_connection(self) -> bool:
         """Ensure database is connected and initialized"""
