@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import asyncio
+from typing import Optional
 
 class Create(commands.Cog):
     """Panel and message generation commands"""
@@ -136,15 +137,28 @@ class Create(commands.Cog):
             await ctx.send(f"Error: {e}", ephemeral=True)
 
     @create.command(name="level-message")
-    async def create_level_message(self, ctx, channel: discord.TextChannel, *, message: str):
-        """Preview/set a level-up message"""
+    @commands.has_permissions(administrator=True)
+    async def create_level_message(self, ctx, channel: discord.TextChannel, duration: Optional[int] = 0, *, message: str):
+        """Preview/set a level-up message
+        
+        Parameters
+        ----------
+        channel : The channel to show this preview in (level-up messages will show in the channel where user levels up)
+        duration : How long the message should stay (in seconds, 0 for permanent)
+        message : The message to show. Use {user} for the user mention and {level} for the level number
+        """
         try:
+            # Validate duration
+            if duration < 0:
+                await ctx.send("Duration must be 0 or greater (0 means permanent)", ephemeral=True)
+                return
+
             # Save level-up message config
             await self.db_manager.update_guild_data(
                 ctx.guild.id,
                 {
-                    'channel_id': channel.id,
                     'message': message,
+                    'duration': duration,
                     'enabled': True
                 },
                 ['level_up']
@@ -156,9 +170,18 @@ class Create(commands.Cog):
             
             embed = self.ui.info_embed(
                 "Level-Up Message Preview",
-                preview
+                f"{preview}\n\n" + (
+                    f"Message will be deleted after {duration} seconds"
+                    if duration > 0 else
+                    "Message will stay permanently"
+                )
             )
-            await ctx.send(f"Level-up messages will be sent to {channel.mention}:", embed=embed)
+            preview_msg = await ctx.send(embed=embed)
+            
+            # Delete preview after duration if set
+            if duration > 0:
+                await preview_msg.delete(delay=duration)
+                
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)
 

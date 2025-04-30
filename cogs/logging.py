@@ -13,7 +13,6 @@ class Logging(commands.Cog):
         self.ui = self.bot.ui_manager
         self._ready = asyncio.Event()
         self.bot.loop.create_task(self.setup())
-        self.snipe_messages = {}
 
     async def setup(self):
         """Ensure cog is properly initialized"""
@@ -79,12 +78,12 @@ class Logging(commands.Cog):
         if message.author.bot:
             return
 
-        # Store for snipe command
-        self.snipe_messages[message.channel.id] = {
+        # Store in database for snipe command
+        await self.db_manager.log_deleted_message(message.channel.id, {
             'content': message.content,
             'author_id': message.author.id,
             'timestamp': datetime.utcnow().isoformat()
-        }
+        })
 
         embed = self.ui.log_embed("Message Deleted")
         embed.add_field(name="Author", value=message.author.mention)

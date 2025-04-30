@@ -227,6 +227,19 @@ class DBManager:
             print(f"Error setting data: {e}")
             raise
 
+    async def delete_data(self, collection: str, key: str):
+        """Delete data from a collection"""
+        try:
+            if not await self.ensure_connection():
+                raise Exception("Database not available")
+                
+            db_key = f"{self.prefix}{collection}:{key}"
+            if db_key in self.db:
+                del self.db[db_key]
+        except Exception as e:
+            print(f"Error deleting data: {e}")
+            raise
+
     async def log_event(self, guild_id: int, user_id: int, event_type: str, details: str, **kwargs):
         """Log an event with additional metadata"""
         try:
@@ -458,3 +471,37 @@ class DBManager:
         except Exception as e:
             print(f"Error getting level rewards: {e}")
             return []
+
+    async def add_reaction_role(self, message_id: int, emoji: str, role_id: int):
+        """Add a reaction role binding to a message"""
+        try:
+            data = await self.get_data('reaction_roles', str(message_id)) or {}
+            data[emoji] = role_id
+            await self.set_data('reaction_roles', str(message_id), data)
+        except Exception as e:
+            print(f"Error adding reaction role: {e}")
+            raise
+
+    async def remove_reaction_role(self, message_id: int, emoji: str):
+        """Remove a reaction role binding from a message"""
+        try:
+            data = await self.get_data('reaction_roles', str(message_id))
+            if data and emoji in data:
+                del data[emoji]
+                if data:
+                    await self.set_data('reaction_roles', str(message_id), data)
+                else:
+                    await self.delete_data('reaction_roles', str(message_id))
+                return True
+            return False
+        except Exception as e:
+            print(f"Error removing reaction role: {e}")
+            return False
+
+    async def get_reaction_roles(self, message_id: int) -> dict:
+        """Get all reaction role bindings for a message"""
+        try:
+            return await self.get_data('reaction_roles', str(message_id)) or {}
+        except Exception as e:
+            print(f"Error getting reaction roles: {e}")
+            return {}

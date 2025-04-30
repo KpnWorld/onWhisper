@@ -1,8 +1,36 @@
 import discord
 from discord.ext import commands
+from typing import Optional
 import asyncio
 from datetime import datetime, timedelta
-from typing import Optional
+
+class DurationSelect(discord.ui.View):
+    def __init__(self, user: discord.Member, mod: discord.Member, reason: Optional[str]):
+        super().__init__(timeout=60)
+        self.user = user
+        self.mod = mod
+        self.reason = reason
+        self.duration = None
+
+    @discord.ui.select(
+        placeholder="Select timeout duration",
+        options=[
+            discord.SelectOption(label="60 seconds", value="60s", description="1 minute timeout"),
+            discord.SelectOption(label="5 minutes", value="5m", description="5 minute timeout"),
+            discord.SelectOption(label="10 minutes", value="10m", description="10 minute timeout"),
+            discord.SelectOption(label="1 hour", value="1h", description="1 hour timeout"),
+            discord.SelectOption(label="6 hours", value="6h", description="6 hour timeout"),
+            discord.SelectOption(label="12 hours", value="12h", description="12 hour timeout"),
+            discord.SelectOption(label="1 day", value="1d", description="1 day timeout"),
+            discord.SelectOption(label="1 week", value="7d", description="1 week timeout"),
+            discord.SelectOption(label="2 weeks", value="14d", description="2 week timeout"),
+            discord.SelectOption(label="28 days", value="28d", description="Maximum timeout (28 days)")
+        ]
+    )
+    async def duration_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.duration = select.values[0]
+        self.stop()
+        await interaction.response.defer()
 
 class Moderation(commands.Cog):
     """Admin & mod tools"""
@@ -193,11 +221,30 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="timeout")
     @commands.has_permissions(moderate_members=True)
     @commands.bot_has_permissions(moderate_members=True)
-    async def timeout(self, ctx, user: discord.Member, duration: str, *, reason: Optional[str] = None):
-        """Temporarily mute a user"""
+    async def timeout(self, ctx, user: discord.Member, *, reason: Optional[str] = None):
+        """Temporarily mute a user
+        
+        Parameters
+        ----------
+        user : The user to timeout
+        reason : The reason for the timeout (optional)
+        """
         try:
             if user.top_role >= ctx.author.top_role:
                 await ctx.send("You cannot timeout members with higher roles!", ephemeral=True)
+                return
+
+            if user.top_role >= ctx.guild.me.top_role:
+                await ctx.send("I cannot timeout members with roles higher than mine!", ephemeral=True)
+                return
+
+            # Show duration selection
+            view = DurationSelect(user, ctx.author, reason)
+            await ctx.send(f"Select timeout duration for {user.mention}:", view=view)
+            await view.wait()
+
+            if not view.duration:
+                await ctx.send("Timeout cancelled - no duration selected.", ephemeral=True)
                 return
 
             # Parse duration
@@ -207,26 +254,18 @@ class Moderation(commands.Cog):
                 'h': 3600,
                 'd': 86400
             }
-            amount = int(''.join(filter(str.isdigit, duration)))
-            unit = duration[-1].lower()
-            
-            if unit not in units:
-                await ctx.send("Invalid duration format! Use s, m, h, or d.", ephemeral=True)
-                return
-                
+            amount = int(''.join(filter(str.isdigit, view.duration)))
+            unit = view.duration[-1].lower()
             seconds = amount * units[unit]
-            if seconds > 2419200:  # 28 days
-                await ctx.send("Timeout cannot exceed 28 days!", ephemeral=True)
-                return
 
             # Apply timeout
-            until = datetime.utcnow() + timedelta(seconds=seconds)
+            until = discord.utils.utcnow() + timedelta(seconds=seconds)
             await user.timeout(until, reason=f"Timed out by {ctx.author}: {reason}")
 
             embed = self.ui.mod_embed(
                 "Member Timed Out",
                 f"**User:** {user.mention}\n"
-                f"**Duration:** {duration}\n"
+                f"**Duration:** {view.duration}\n"
                 f"**Reason:** {reason or 'No reason provided'}"
             )
             await ctx.send(embed=embed)
@@ -234,7 +273,7 @@ class Moderation(commands.Cog):
             await self.log_mod_action(
                 ctx.guild,
                 "Timeout",
-                f"{user.mention} was timed out for {duration} by {ctx.author.mention}\nReason: {reason}"
+                f"{user.mention} was timed out for {view.duration} by {ctx.author.mention}\nReason: {reason}"
             )
 
         except Exception as e:

@@ -1,5 +1,29 @@
 import discord
+from discord.ext import commands
+from typing import List, Dict, Any
 from datetime import datetime
+
+class CommandMultiSelectView(discord.ui.View):
+    def __init__(self, options: List[Dict[str, Any]], placeholder: str, min_values: int = 1, max_values: int = 1):
+        super().__init__(timeout=60)
+        self.add_item(discord.ui.Select(
+            placeholder=placeholder,
+            min_values=min_values,
+            max_values=max_values,
+            options=[discord.SelectOption(**opt) for opt in options]
+        ))
+        self.values = []
+        self.message = None
+
+    @discord.ui.select()
+    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.values = select.values
+        self.stop()
+
+    async def on_timeout(self):
+        if self.message:
+            await self.message.edit(view=None)
+        self.stop()
 
 class UIManager:
     def __init__(self, bot):
@@ -61,48 +85,58 @@ class UIManager:
 
         return embed
 
-    def success_embed(self, title=None, description=None, **kwargs):
-        """Shortcut for a green success embed."""
-        return self.make_embed(
+    def info_embed(self, title: str, description: str) -> discord.Embed:
+        """Create an info embed"""
+        embed = discord.Embed(
             title=title,
             description=description,
-            color=self.colors["success"]
+            color=0x3498db
         )
+        return embed
 
-    def error_embed(self, title=None, description=None, **kwargs):
-        """Shortcut for a red error embed."""
-        return self.make_embed(
+    def error_embed(self, title: str, description: str) -> discord.Embed:
+        """Create an error embed"""
+        embed = discord.Embed(
             title=title,
             description=description,
-            color=self.colors["error"]
+            color=0xe74c3c
         )
+        return embed
 
-    def info_embed(self, title=None, description=None, **kwargs):
-        """Shortcut for a blurple info embed."""
-        return self.make_embed(
+    def success_embed(self, title: str, description: str) -> discord.Embed:
+        """Create a success embed"""
+        embed = discord.Embed(
             title=title,
             description=description,
-            command_type="user"
+            color=0x2ecc71
         )
+        return embed
 
-    def admin_embed(self, title=None, description=None, **kwargs):
-        """Shortcut for an administrative command embed."""
-        kwargs.pop('command_type', None)  # Remove command_type if present
-        return self.make_embed(
+    def admin_embed(self, title: str, description: str) -> discord.Embed:
+        """Create an admin command embed"""
+        embed = discord.Embed(
             title=title,
             description=description,
-            command_type="admin",
-            **kwargs
+            color=0x9b59b6
         )
+        return embed
 
-    def mod_embed(self, title=None, description=None, **kwargs):
-        """Shortcut for a moderation command embed."""
-        return self.make_embed(
+    def mod_embed(self, title: str, description: str) -> discord.Embed:
+        """Create a moderation command embed"""
+        embed = discord.Embed(
             title=title,
             description=description,
-            command_type="mod",
-            **kwargs
+            color=0xe67e22
         )
+        return embed
+
+    def log_embed(self, title: str) -> discord.Embed:
+        """Create a logging embed"""
+        embed = discord.Embed(
+            title=title,
+            color=0x95a5a6
+        )
+        return embed
 
     def user_embed(self, title=None, description=None, **kwargs):
         """Shortcut for a user command embed."""
@@ -127,13 +161,7 @@ class UIManager:
         await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
 
     class Paginator(discord.ui.View):
-        def __init__(
-            self,
-            pages: list[discord.Embed],
-            *,
-            timeout: int = 180,
-            show_page_indicator: bool = True
-        ):
+        def __init__(self, pages: list[discord.Embed], *, timeout: int = 180, show_page_indicator: bool = True):
             super().__init__(timeout=timeout)
             self.pages = pages
             self.current_page = 0
@@ -295,14 +323,12 @@ class UIManager:
                 placeholder=placeholder,
                 min_values=1,
                 max_values=1,
-                options=[
-                    discord.SelectOption(
-                        label=option.get("label", ""),
-                        description=option.get("description", ""),
-                        value=option.get("value", ""),
-                        emoji=option.get("emoji", None)
-                    ) for option in options
-                ]
+                options=[discord.SelectOption(
+                    label=option.get("label", ""),
+                    description=option.get("description", ""),
+                    value=option.get("value", ""),
+                    emoji=option.get("emoji", None)
+                ) for option in options]
             )
             
             async def select_callback(interaction: discord.Interaction):
@@ -322,3 +348,104 @@ class UIManager:
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             return True
+
+    class HelpMenuView(discord.ui.View):
+        def __init__(self, bot, ui_manager):
+            super().__init__(timeout=180)
+            self.bot = bot
+            self.ui = ui_manager
+            self.message = None
+            
+            # Create the select menu
+            select_menu = discord.ui.Select(
+                placeholder="Select a category",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label="Leveling",
+                        description="XP and level-related commands",
+                        value="leveling",
+                        emoji="📊"
+                    ),
+                    discord.SelectOption(
+                        label="Moderation",
+                        description="Server moderation commands",
+                        value="moderation", 
+                        emoji="🛡️"
+                    ),
+                    discord.SelectOption(
+                        label="Configuration",
+                        description="Server configuration commands",
+                        value="config",
+                        emoji="⚙️"
+                    ),
+                    discord.SelectOption(
+                        label="Roles",
+                        description="Role management commands",
+                        value="roles",
+                        emoji="👥"
+                    ),
+                    discord.SelectOption(
+                        label="Tickets",
+                        description="Ticket system commands",
+                        value="tickets",
+                        emoji="🎫"
+                    ),
+                    discord.SelectOption(
+                        label="Information",
+                        description="Bot and server info commands",
+                        value="info",
+                        emoji="ℹ️"
+                    )
+                ]
+            )
+            
+            async def select_callback(interaction: discord.Interaction):
+                # Get commands for selected category
+                category = select_menu.values[0]
+                commands = []
+                
+                for command in self.bot.commands:
+                    if command.hidden:
+                        continue
+                        
+                    if category == "leveling" and command.cog_name in ["Leveling"]:
+                        commands.append(command)
+                    elif category == "moderation" and command.cog_name in ["Moderation"]:
+                        commands.append(command)
+                    elif category == "config" and command.cog_name in ["Admin"]:
+                        commands.append(command)
+                    elif category == "roles" and command.cog_name in ["Roles", "AutoRole"]:
+                        commands.append(command)
+                    elif category == "tickets" and command.cog_name in ["Tickets"]:
+                        commands.append(command)
+                    elif category == "info" and command.cog_name in ["Info"]:
+                        commands.append(command)
+
+                # Create embed for category
+                embed = self.ui.info_embed(
+                    f"{select_menu.values[0].title()} Commands",
+                    "Use `/help <command>` for detailed information about a specific command."
+                )
+
+                # Add commands to embed
+                if commands:
+                    value = "\n".join(f"• `/{cmd.qualified_name}` - {cmd.help}" for cmd in sorted(commands, key=lambda x: x.qualified_name))
+                    if len(value) > 1024:
+                        value = value[:1021] + "..."
+                    embed.add_field(name="Available Commands", value=value, inline=False)
+                else:
+                    embed.add_field(name="Available Commands", value="No commands found for this category", inline=False)
+
+                await interaction.response.edit_message(embed=embed, view=self)
+
+            select_menu.callback = select_callback
+            self.add_item(select_menu)
+
+        async def on_timeout(self):
+            if self.message:
+                try:
+                    await self.message.edit(view=None)
+                except:
+                    pass

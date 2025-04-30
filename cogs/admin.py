@@ -221,24 +221,77 @@ class Admin(commands.Cog):
             await ctx.send(embed=embed)
 
     @config_logs.command(name="set")
-    async def logs_set(self, ctx, log_type: str, channel: discord.TextChannel):
-        """Assign log channel"""
-        valid_types = ['mod', 'member', 'message', 'server']
-        try:
-            if log_type.lower() not in valid_types:
-                await ctx.send(f"Invalid log type. Must be one of: {', '.join(valid_types)}", ephemeral=True)
-                return
+    async def logs_set(self, ctx, channel: discord.TextChannel):
+        """Set up logging channels with type selection"""
+        valid_types = {
+            'mod': '🛡️ Moderation Logs',
+            'member': '👥 Member Events',
+            'message': '💬 Message Logs',
+            'server': '⚙️ Server Events'
+        }
 
-            # Update logging config
+        try:
+            # Get current config
             config = await self.db_manager.get_data('logging_config', str(ctx.guild.id)) or {}
-            config[f'{log_type.lower()}_channel'] = channel.id
-            await self.db_manager.set_data('logging_config', str(ctx.guild.id), config)
+            
+            # Create select menu options
+            options = []
+            for type_id, label in valid_types.items():
+                is_active = channel.id == config.get(f'{type_id}_channel')
+                options.append({
+                    'label': label,
+                    'value': type_id,
+                    'emoji': label.split()[0],
+                    'default': is_active
+                })
+
+            view = self.ui.CommandMultiSelectView(
+                options=options,
+                placeholder="Select log types for this channel",
+                min_values=1,
+                max_values=len(valid_types)
+            )
 
             embed = self.ui.admin_embed(
-                "Log Channel Set",
-                f"Set {log_type} logs to {channel.mention}"
+                "Log Channel Setup",
+                f"Select which types of logs to send to {channel.mention}\n\n"
+                "Log Types:\n"
+                "🛡️ Moderation - Bans, kicks, mutes, etc.\n"
+                "👥 Member - Joins, leaves, role changes\n"
+                "💬 Message - Edits, deletions\n"
+                "⚙️ Server - Channel/role updates"
             )
-            await ctx.send(embed=embed)
+
+            sent = await ctx.send(embed=embed, view=view)
+            view.message = sent
+
+            # Wait for selection
+            await view.wait()
+            if view.values:
+                # Update config with selected types
+                for type_id in valid_types.keys():
+                    if type_id in view.values:
+                        config[f'{type_id}_channel'] = channel.id
+                        config[f'{type_id}_logs'] = True
+                    elif config.get(f'{type_id}_channel') == channel.id:
+                        config[f'{type_id}_channel'] = None
+                        config[f'{type_id}_logs'] = False
+
+                await self.db_manager.set_data('logging_config', str(ctx.guild.id), config)
+
+                enabled_types = [valid_types[t].split(' - ')[0] for t in view.values]
+                result_embed = self.ui.admin_embed(
+                    "Log Channel Updated",
+                    f"Channel: {channel.mention}\n"
+                    f"Enabled Types: {' '.join(enabled_types)}"
+                )
+                await sent.edit(embed=result_embed, view=None)
+            else:
+                await sent.edit(
+                    embed=self.ui.error_embed("Setup Cancelled", "No log types were selected"),
+                    view=None
+                )
+
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)
 

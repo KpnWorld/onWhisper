@@ -39,7 +39,7 @@ class Info(commands.Cog):
 
     @info.command(name="help")
     async def info_help(self, ctx, command: Optional[str] = None):
-        """Get help for a specific command"""
+        """Get help with bot commands"""
         try:
             if command:
                 cmd = self.bot.get_command(command)
@@ -54,37 +54,30 @@ class Info(commands.Cog):
 
                 # Add usage if available
                 if cmd.usage:
-                    embed.add_field(name="Usage", value=f"`{ctx.prefix}{cmd.usage}`")
+                    embed.add_field(name="Usage", value=f"`{ctx.prefix}{cmd.usage}`", inline=False)
 
                 # Add examples if available
                 if hasattr(cmd, 'examples'):
                     examples = "\n".join(f"`{ctx.prefix}{ex}`" for ex in cmd.examples)
-                    embed.add_field(name="Examples", value=examples)
+                    embed.add_field(name="Examples", value=examples, inline=False)
 
                 await ctx.send(embed=embed)
             else:
-                # Show command categories
-                categories = {}
-                for cmd in self.bot.commands:
-                    if not cmd.hidden:
-                        category = cmd.cog_name or "Uncategorized"
-                        if category not in categories:
-                            categories[category] = []
-                        categories[category].append(cmd.name)
-
+                # Show category selection menu
                 embed = self.ui.info_embed(
-                    "Command Help",
-                    "Use `/info help <command>` for detailed help"
+                    "Command Categories",
+                    "Select a category below to view available commands."
                 )
-
-                for category, commands in sorted(categories.items()):
-                    embed.add_field(
-                        name=category,
-                        value=", ".join(f"`{cmd}`" for cmd in sorted(commands)),
-                        inline=False
-                    )
-
-                await ctx.send(embed=embed)
+                embed.add_field(
+                    name="Need help?",
+                    value="Use `/help <command>` to get detailed information about a specific command.",
+                    inline=False
+                )
+                
+                # Create and send view with dropdown
+                view = self.ui.HelpMenuView(self.bot, self.ui)
+                msg = await ctx.send(embed=embed, view=view)
+                view.message = msg  # Store message for timeout handling
 
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)

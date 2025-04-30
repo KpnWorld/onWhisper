@@ -103,9 +103,9 @@ class Leveling(commands.Cog):
             xp_rate = xp_settings.get('rate', self.base_xp)
             cooldown = xp_settings.get('cooldown', self.cooldown)
 
-            # Check cooldown
+            # Check cooldown using aware datetime
             key = f"{message.author.id}-{message.guild.id}"
-            now = datetime.utcnow()
+            now = discord.utils.utcnow()
             if key in self.xp_cooldown:
                 if now < self.xp_cooldown[key]:
                     return
@@ -125,10 +125,10 @@ class Leveling(commands.Cog):
                 message.author.id,
                 new_xp,
                 new_level,
-                datetime.utcnow()
+                now  # Use aware datetime
             )
 
-            # Set cooldown
+            # Set cooldown using aware datetime
             self.xp_cooldown[key] = now + timedelta(seconds=cooldown)
 
             # Handle level up
@@ -136,14 +136,19 @@ class Leveling(commands.Cog):
                 # Get level up message settings
                 levelup_settings = settings.get('level_up', {})
                 if levelup_settings.get('enabled', True):
-                    channel_id = levelup_settings.get('channel_id')
                     msg_format = levelup_settings.get('message', "{user} reached level {level}!")
+                    msg_duration = levelup_settings.get('duration', 0)  # 0 means permanent
                     
+                    # Replace placeholders
                     msg = msg_format.replace("{user}", message.author.mention)
                     msg = msg.replace("{level}", str(new_level))
                     
-                    channel = message.guild.get_channel(channel_id) if channel_id else message.channel
-                    await channel.send(msg)
+                    # Send in the channel where user leveled up
+                    sent = await message.channel.send(msg)
+                    
+                    # Delete after duration if set
+                    if msg_duration > 0:
+                        await sent.delete(delay=msg_duration)
 
                 # Check for role rewards
                 await self.check_level_roles(message.author, new_level)
