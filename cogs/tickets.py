@@ -100,8 +100,31 @@ class Tickets(commands.Cog):
 
             # Get guild data
             guild_data = await self.db_manager.get_guild_data(ctx.guild.id)
-            ticket_settings = guild_data.get('tickets', {})
+            ticket_settings = guild_data.get('tickets', {}).get('settings', {})
             
+            category_id = ticket_settings.get('category_id')
+            support_role_id = ticket_settings.get('support_role_id')
+            
+            category = ctx.guild.get_channel(category_id) if category_id else None
+            support_role = ctx.guild.get_role(support_role_id) if support_role_id else None
+
+            if not category or not support_role:
+                missing = []
+                if not category:
+                    missing.append("Category")
+                if not support_role:
+                    missing.append("Support Role")
+                    
+                embed = self.ui.error_embed(
+                    "Setup Required",
+                    f"Missing configuration: {', '.join(missing)}\n"
+                    "An admin must set these using:\n"
+                    "• `/config tickets category #category`\n"
+                    "• `/config tickets support @role`"
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
+
             # Check existing tickets
             open_tickets = ticket_settings.get('open_tickets', [])
             user_ticket = next(
@@ -127,17 +150,6 @@ class Tickets(commands.Cog):
                     "The ticket system has not been set up yet!"
                 )
                 await followup.send(embed=embed, ephemeral=True)
-                return
-
-            category = ctx.guild.get_channel(settings.get('category_id'))
-            support_role = ctx.guild.get_role(settings.get('support_role_id'))
-
-            if not category or not support_role:
-                embed = self.ui.user_embed(
-                    "Configuration Error",
-                    "The ticket system is not properly configured!",
-                )
-                await modal.interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             # Create the ticket channel

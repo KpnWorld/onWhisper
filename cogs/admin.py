@@ -173,22 +173,48 @@ class Admin(commands.Cog):
     @config_tickets.command(name="category")
     async def tickets_category(self, ctx, category: discord.CategoryChannel):
         """Set the category for ticket channels"""
-        await self.db_manager.set_data('tickets_config', str(ctx.guild.id), {'category_id': category.id})
-        embed = self.ui.admin_embed(
-            "Ticket Category Set",
-            f"New tickets will be created in {category.mention}"
-        )
-        await ctx.send(embed=embed)
+        try:
+            await self.db_manager.update_guild_data(
+                ctx.guild.id,
+                {
+                    'category_id': category.id,
+                    'last_updated': datetime.utcnow().isoformat()
+                },
+                ['tickets', 'settings']
+            )
+            
+            embed = self.ui.admin_embed(
+                "Ticket Category Set",
+                f"New tickets will be created in category {category.mention}"
+            )
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     @config_tickets.command(name="support")
     async def tickets_support(self, ctx, role: discord.Role):
         """Set the support team role"""
-        await self.db_manager.set_data('tickets_config', str(ctx.guild.id), {'support_role_id': role.id})
-        embed = self.ui.admin_embed(
-            "Support Role Set",
-            f"Members with {role.mention} will now have access to tickets"
-        )
-        await ctx.send(embed=embed)
+        try:
+            await self.db_manager.update_guild_data(
+                ctx.guild.id,
+                {
+                    'support_role_id': role.id,
+                    'last_updated': datetime.utcnow().isoformat()
+                },
+                ['tickets', 'settings']
+            )
+            
+            embed = self.ui.admin_embed(
+                "Support Role Set",
+                f"Members with {role.mention} will now have access to tickets"
+            )
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     # Logging Config Group
     @config.group(name="logging")
