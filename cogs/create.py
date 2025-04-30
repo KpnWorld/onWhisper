@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 from typing import Optional
+from cogs.tickets import CreateTicketButton
 
 class Create(commands.Cog):
     """Panel and message generation commands"""
@@ -53,13 +54,7 @@ class Create(commands.Cog):
                 "Support Tickets",
                 message or "Click the button below to create a support ticket"
             )
-            view = discord.ui.View(timeout=None)
-            view.add_item(discord.ui.Button(
-                label="Create Ticket",
-                custom_id="create_ticket",
-                style=discord.ButtonStyle.primary,
-                emoji="🎫"
-            ))
+            view = CreateTicketButton()
             await channel.send(embed=embed, view=view)
             await ctx.send("✅ Ticket panel created!", ephemeral=True)
         except Exception as e:

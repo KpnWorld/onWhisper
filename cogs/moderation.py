@@ -230,17 +230,30 @@ class Moderation(commands.Cog):
         reason : The reason for the timeout (optional)
         """
         try:
-            if user.top_role >= ctx.author.top_role:
-                await ctx.send("You cannot timeout members with higher roles!", ephemeral=True)
+            # Check if the target is the bot itself
+            if user == ctx.guild.me:
+                await ctx.send("I cannot timeout myself!", ephemeral=True)
                 return
 
-            if user.top_role >= ctx.guild.me.top_role:
-                await ctx.send("I cannot timeout members with roles higher than mine!", ephemeral=True)
+            # Check if user is trying to timeout themselves
+            if user == ctx.author:
+                await ctx.send("You cannot timeout yourself!", ephemeral=True)
+                return
+
+            # Check role hierarchy - command user vs target
+            if not ctx.author.top_role > user.top_role and ctx.author != ctx.guild.owner:
+                await ctx.send("You can only timeout members with roles lower than yours!", ephemeral=True)
+                return
+
+            # Check role hierarchy - bot vs target
+            if not ctx.guild.me.top_role > user.top_role:
+                await ctx.send("I can only timeout members with roles lower than mine!", ephemeral=True)
                 return
 
             # Show duration selection
             view = DurationSelect(user, ctx.author, reason)
-            await ctx.send(f"Select timeout duration for {user.mention}:", view=view)
+            sent = await ctx.send(f"Select timeout duration for {user.mention}:", view=view)
+            view.message = sent
             await view.wait()
 
             if not view.duration:
@@ -273,11 +286,13 @@ class Moderation(commands.Cog):
             await self.log_mod_action(
                 ctx.guild,
                 "Timeout",
-                f"{user.mention} was timed out for {view.duration} by {ctx.author.mention}\nReason: {reason}"
+                f"{user.mention} was timed out for {view.duration} by {ctx.author.mention}\nReason: {reason or 'No reason provided'}"
             )
 
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to timeout this user! Make sure I have the 'Moderate Members' permission and my role is above the target user.", ephemeral=True)
         except Exception as e:
-            await ctx.send(f"Error: {e}", ephemeral=True)
+            await ctx.send(f"An error occurred while trying to timeout the user: {str(e)}", ephemeral=True)
 
     @commands.hybrid_command(name="purge")
     @commands.has_permissions(manage_messages=True)
@@ -289,21 +304,46 @@ class Moderation(commands.Cog):
                 await ctx.send("Amount must be between 1 and 100!", ephemeral=True)
                 return
 
-            deleted = await ctx.channel.purge(limit=amount + 1)  # +1 to include command
+            # Defer the response since this might take a while
+            if isinstance(ctx.interaction, discord.Interaction):
+                await ctx.defer(ephemeral=True)
             
-            embed = self.ui.mod_embed(
-                "Messages Purged",
-                f"Deleted {len(deleted) - 1} messages"
-            )
-            confirmation = await ctx.send(embed=embed)
-            await asyncio.sleep(5)
-            await confirmation.delete()
-
+            # For text commands, we need to account for the command message
+            if not isinstance(ctx.interaction, discord.Interaction):
+                amount += 1  # Add 1 to include command message
+            
+            # Purge messages
+            deleted = await ctx.channel.purge(limit=amount)
+            actual_count = len(deleted)
+            
+            # Adjust count for text commands to not include command message
+            if not isinstance(ctx.interaction, discord.Interaction):
+                actual_count -= 1
+            
+            # Log the action
             await self.log_mod_action(
                 ctx.guild,
                 "Purge",
-                f"{ctx.author.mention} purged {len(deleted) - 1} messages in {ctx.channel.mention}"
+                f"{ctx.author.mention} purged {actual_count} messages in {ctx.channel.mention}"
             )
+
+            # Send confirmation
+            embed = self.ui.mod_embed(
+                "Messages Purged",
+                f"Successfully deleted {actual_count} messages"
+            )
+            
+            # For slash commands, edit the deferred response
+            if isinstance(ctx.interaction, discord.Interaction):
+                await ctx.send(embed=embed, ephemeral=True)
+            else:
+                # For text commands, send and delete after delay
+                confirmation = await ctx.send(embed=embed)
+                await asyncio.sleep(5)
+                try:
+                    await confirmation.delete()
+                except discord.NotFound:
+                    pass
 
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)

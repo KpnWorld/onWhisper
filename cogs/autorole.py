@@ -59,25 +59,189 @@ class AutoRole(commands.Cog):
 
     @commands.hybrid_command(description="Set the automatic role for new members")
     @commands.has_permissions(manage_roles=True)
-    async def setautorole(self, ctx, role: discord.Role):
+    async def setautorole(self, ctx):
+        """Set the automatic role for new members interactively"""
         try:
-            # Update to use guild_data path
+            # Get available roles that can be managed
+            available_roles = [role for role in ctx.guild.roles 
+                             if role < ctx.guild.me.top_role and role != ctx.guild.default_role]
+
+            if not available_roles:
+                embed = self.ui.error_embed(
+                    "No Roles Available",
+                    "No roles are available for auto-role assignment"
+                )
+                await ctx.send(embed=embed, ephemeral=True)
+                return
+
+            # Create role selection menu
+            role_options = [{
+                'label': role.name,
+                'description': f'Set as auto-role for new members',
+                'value': str(role.id),
+                'emoji': '🎭'
+            } for role in available_roles]
+
+            role_view = self.ui.CommandSelectView(
+                options=role_options,
+                placeholder="Select auto-role for new members"
+            )
+
+            embed = self.ui.admin_embed(
+                "Auto-Role Setup",
+                "Please select the role that will be automatically assigned to new members"
+            )
+
+            sent = await ctx.send(embed=embed, view=role_view)
+            role_view.message = sent
+
+            # Wait for selection
+            await role_view.wait()
+            if not role_view.result:
+                await sent.edit(embed=self.ui.error_embed("Setup Cancelled", "No role selected"), view=None)
+                return
+
+            selected_role = ctx.guild.get_role(int(role_view.result))
+
+            # Update auto-role settings
             await self.db_manager.update_guild_data(
                 ctx.guild.id,
                 {
-                    'role_id': role.id,
+                    'role_id': selected_role.id,
                     'enabled': True,
                     'last_updated': datetime.utcnow().isoformat()
                 },
                 ['autorole']
             )
             
-            embed = self.ui.admin_embed(
-                "Auto Role Set",
-                f"New members will now automatically receive the {role.mention} role."
+            success_embed = self.ui.admin_embed(
+                "Auto-Role Set",
+                f"New members will now automatically receive the {selected_role.mention} role."
             )
-            await ctx.send(embed=embed)
+            await sent.edit(embed=success_embed, view=None)
+                
+        except Exception as e:
+            error_embed = self.ui.error_embed("Error", str(e))
+            await ctx.send(embed=error_embed, ephemeral=True)
+
+    @commands.hybrid_command(description="List and manage current auto-role settings")
+    @commands.has_permissions(manage_roles=True)
+    async def autorole(self, ctx):
+        """List and manage current auto-role settings"""
+        try:
+            # Get current auto-role settings
+            guild_data = await self.db_manager.get_guild_data(ctx.guild.id)
+            autorole_settings = guild_data.get('autorole', {})
             
+            role_id = autorole_settings.get('role_id')
+            enabled = autorole_settings.get('enabled', False)
+            
+            # Create options for the select menu
+            options = [{
+                'label': "View Current Settings",
+                'description': "Show current auto-role configuration",
+                'value': "view",
+                'emoji': '👀'
+            }, {
+                'label': "Change Auto-Role",
+                'description': "Select a different role for auto-assignment",
+                'value': "change",
+                'emoji': '🔄'
+            }]
+
+            if enabled:
+                options.append({
+                    'label': "Disable Auto-Role",
+                    'description': "Stop automatically assigning roles to new members",
+                    'value': "disable",
+                    'emoji': '⛔'
+                })
+            else:
+                options.append({
+                    'label': "Enable Auto-Role",
+                    'description': "Start automatically assigning roles to new members",
+                    'value': "enable",
+                    'emoji': '✅'
+                })
+
+            view = self.ui.CommandSelectView(
+                options=options,
+                placeholder="Select an action"
+            )
+
+            # Create initial embed showing current status
+            current_role = ctx.guild.get_role(role_id) if role_id else None
+            status = "Enabled" if enabled else "Disabled"
+            role_text = f"Role: {current_role.mention}" if current_role else "No role set"
+            
+            embed = self.ui.admin_embed(
+                "Auto-Role Management",
+                f"Status: {status}\n{role_text}\n\nSelect an action below to manage auto-role settings."
+            )
+
+            sent = await ctx.send(embed=embed, view=view)
+            view.message = sent
+
+            # Wait for selection
+            await view.wait()
+            if not view.result:
+                await sent.edit(embed=self.ui.error_embed("Operation Cancelled", "No action selected"), view=None)
+                return
+
+            action = view.result
+
+            if action == "view":
+                # Just update the embed with more detailed information
+                description = (
+                    f"**Status:** {status}\n"
+                    f"**Current Role:** {current_role.mention if current_role else 'None'}\n"
+                    f"**Last Updated:** {autorole_settings.get('last_updated', 'Never')}"
+                )
+                result_embed = self.ui.info_embed("Auto-Role Settings", description)
+                await sent.edit(embed=result_embed, view=None)
+
+            elif action == "change":
+                # Trigger the setautorole command
+                await sent.delete()
+                await ctx.invoke(self.setautorole)
+
+            elif action == "disable":
+                # Disable auto-role
+                await self.db_manager.update_guild_data(
+                    ctx.guild.id,
+                    {
+                        'enabled': False,
+                        'last_updated': datetime.utcnow().isoformat()
+                    },
+                    ['autorole']
+                )
+                result_embed = self.ui.admin_embed(
+                    "Auto-Role Disabled",
+                    "New members will no longer receive an automatic role."
+                )
+                await sent.edit(embed=result_embed, view=None)
+
+            elif action == "enable":
+                if not current_role:
+                    # If no role is set, trigger the setautorole command
+                    await sent.delete()
+                    await ctx.invoke(self.setautorole)
+                else:
+                    # Enable existing role
+                    await self.db_manager.update_guild_data(
+                        ctx.guild.id,
+                        {
+                            'enabled': True,
+                            'last_updated': datetime.utcnow().isoformat()
+                        },
+                        ['autorole']
+                    )
+                    result_embed = self.ui.admin_embed(
+                        "Auto-Role Enabled",
+                        f"New members will now receive the {current_role.mention} role automatically."
+                    )
+                    await sent.edit(embed=result_embed, view=None)
+
         except Exception as e:
             error_embed = self.ui.error_embed("Error", str(e))
             await ctx.send(embed=error_embed, ephemeral=True)

@@ -49,6 +49,7 @@ class Logging(commands.Cog):
 
     def build_changes_embed(self, title: str, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel) -> Optional[discord.Embed]:
         """Build embed for channel changes"""
+        embed = self.ui.log_embed(title)
         changes = []
         
         if before.name != after.name:
@@ -60,16 +61,39 @@ class Logging(commands.Cog):
                 changes.append(f"Topic: {before.topic} → {after.topic}")
             if before.slowmode_delay != after.slowmode_delay:
                 changes.append(f"Slowmode: {before.slowmode_delay}s → {after.slowmode_delay}s")
-        
-        if not changes:
-            return None
             
-        embed = self.ui.log_embed(title)
-        embed.description = "\n".join(changes)
+            # Check permission overrides
+            all_targets = set(before.overwrites.keys()) | set(after.overwrites.keys())
+            for target in all_targets:
+                before_overwrite = before.overwrites_for(target)
+                after_overwrite = after.overwrites_for(target)
+                
+                if before_overwrite._values != after_overwrite._values:
+                    field_value = []
+                    for perm, new_value in after_overwrite._values.items():
+                        old_value = before_overwrite._values.get(perm)
+                        if old_value != new_value:
+                            perm_name = perm.replace('_', ' ').title()
+                            if new_value is True:
+                                field_value.append(f"⬜ ➜ ✅ {perm_name}")
+                            elif new_value is False:
+                                field_value.append(f"⬜ ➜ ❌ {perm_name}")
+                            elif new_value is None:
+                                field_value.append(f"{'✅' if old_value else '❌'} ➜ ⬜ {perm_name}")
+                    
+                    if field_value:
+                        embed.add_field(
+                            name=f"Overwrites for {target.name}",
+                            value="\n".join(field_value),
+                            inline=False
+                        )
+        
+        if changes:
+            embed.description = "\n".join(changes)
         embed.add_field(name="Channel", value=after.mention)
         embed.timestamp = datetime.utcnow()
         
-        return embed
+        return embed if changes or len(embed.fields) > 1 else None
 
     # Event Handlers
     @commands.Cog.listener()
@@ -124,8 +148,34 @@ class Logging(commands.Cog):
         embed = self.ui.log_embed("Channel Created")
         embed.add_field(name="Name", value=channel.mention)
         embed.add_field(name="Type", value=str(channel.type))
+        
+        if isinstance(channel, discord.TextChannel):
+            if channel.category:
+                embed.add_field(name="Category", value=channel.category.name, inline=False)
+            
+            # Log permission overrides
+            for target, overwrite in channel.overwrites.items():
+                allow, deny = [], []
+                for perm, value in overwrite._values.items():
+                    if value is True:
+                        allow.append(perm.replace('_', ' ').title())
+                    elif value is False:
+                        deny.append(perm.replace('_', ' ').title())
+                
+                field_value = ""
+                if allow:
+                    field_value += "✅ " + "\n✅ ".join(allow) + "\n"
+                if deny:
+                    field_value += "❌ " + "\n❌ ".join(deny)
+                
+                if field_value:
+                    embed.add_field(
+                        name=f"Role override for {target.name}",
+                        value=field_value,
+                        inline=False
+                    )
+        
         embed.timestamp = datetime.utcnow()
-
         await self.send_log(channel.guild, 'server', embed)
 
     @commands.Cog.listener()

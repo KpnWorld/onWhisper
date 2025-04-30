@@ -83,17 +83,13 @@ class Roles(commands.Cog):
             await ctx.send_help(ctx.command)
 
     @roles_react.command(name="bind")
-    async def react_bind(self, ctx, message_id: str, emoji: str, role: discord.Role):
-        """Bind emoji to role on message"""
+    async def react_bind(self, ctx, message_id: str):
+        """Bind emoji and role to a message interactively"""
         try:
             try:
                 message_id = int(message_id)
             except ValueError:
                 await ctx.send("Invalid message ID!", ephemeral=True)
-                return
-
-            if role >= ctx.guild.me.top_role:
-                await ctx.send("I cannot manage roles higher than my highest role", ephemeral=True)
                 return
 
             # Find message
@@ -103,25 +99,76 @@ class Roles(commands.Cog):
                 await ctx.send("Message not found in this channel!", ephemeral=True)
                 return
 
-            # Add reaction
-            try:
-                await message.add_reaction(emoji)
-            except discord.HTTPException:
-                await ctx.send("Invalid emoji!", ephemeral=True)
+            # Get available roles that can be managed
+            available_roles = [role for role in ctx.guild.roles 
+                             if role < ctx.guild.me.top_role and role != ctx.guild.default_role]
+
+            if not available_roles:
+                await ctx.send("No roles available to bind!", ephemeral=True)
                 return
 
-            # Save binding
-            await self.db_manager.update_guild_data(
-                ctx.guild.id,
-                {emoji: role.id},
-                ['reaction_roles', str(message_id)]
+            # Create role selection menu
+            role_options = [{
+                'label': role.name,
+                'description': f'Bind this role to a reaction',
+                'value': str(role.id),
+                'emoji': '🎭'
+            } for role in available_roles]
+
+            role_view = self.ui.CommandSelectView(
+                options=role_options,
+                placeholder="Select a role to bind"
             )
-            
+
             embed = self.ui.admin_embed(
-                "Reaction Role Bound",
-                f"React with {emoji} to get {role.mention}"
+                "Reaction Role Setup",
+                "Please select the role you want to bind to a reaction"
             )
-            await ctx.send(embed=embed)
+
+            sent = await ctx.send(embed=embed, view=role_view)
+            role_view.message = sent
+
+            # Wait for role selection
+            await role_view.wait()
+            if not role_view.result:
+                await sent.edit(embed=self.ui.error_embed("Setup Cancelled", "No role selected"), view=None)
+                return
+
+            selected_role = ctx.guild.get_role(int(role_view.result))
+
+            # Now ask for emoji
+            embed = self.ui.admin_embed(
+                "Reaction Role Setup",
+                f"Role selected: {selected_role.mention}\nPlease react to this message with the emoji you want to bind"
+            )
+            await sent.edit(embed=embed, view=None)
+
+            def check(reaction, user):
+                return user == ctx.author and reaction.message.id == sent.id
+
+            try:
+                reaction, _ = await self.bot.wait_for('reaction_add', timeout=60.0, check=check)
+                emoji = str(reaction.emoji)
+
+                # Save binding
+                await self.db_manager.update_guild_data(
+                    ctx.guild.id,
+                    {emoji: selected_role.id},
+                    ['reaction_roles', str(message_id)]
+                )
+                
+                # Add the reaction to the target message
+                await message.add_reaction(emoji)
+
+                success_embed = self.ui.admin_embed(
+                    "Reaction Role Bound",
+                    f"Role: {selected_role.mention}\nEmoji: {emoji}\nMessage: [Jump]({message.jump_url})"
+                )
+                await sent.edit(embed=success_embed)
+
+            except asyncio.TimeoutError:
+                await sent.edit(embed=self.ui.error_embed("Setup Cancelled", "No emoji selected within 60 seconds"))
+
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)
 
@@ -201,78 +248,152 @@ class Roles(commands.Cog):
             await ctx.send_help(ctx.command)
 
     @roles_bulk.command(name="add")
-    async def bulk_add(self, ctx, role: discord.Role, users: commands.Greedy[discord.Member]):
-        """Assign role to multiple users"""
+    async def bulk_add(self, ctx, role: discord.Role):
+        """Assign role to multiple users interactively"""
         try:
-            if not users:
-                await ctx.send("No users specified!", ephemeral=True)
-                return
-
             if role >= ctx.guild.me.top_role:
                 await ctx.send("I cannot manage roles higher than my highest role", ephemeral=True)
+                return
+
+            # Get eligible members (those who don't have the role)
+            eligible_members = [m for m in ctx.guild.members 
+                              if not m.bot and role not in m.roles]
+
+            if not eligible_members:
+                await ctx.send("No eligible members found to add this role to!", ephemeral=True)
+                return
+
+            # Create member selection menu
+            member_options = [{
+                'label': member.display_name,
+                'description': f'ID: {member.id}',
+                'value': str(member.id),
+                'emoji': '👤'
+            } for member in eligible_members]
+
+            member_view = self.ui.CommandSelectView(
+                options=member_options,
+                placeholder="Select members to add role to",
+                min_values=1,
+                max_values=min(len(member_options), 25)  # Discord's max select menu options
+            )
+
+            embed = self.ui.admin_embed(
+                "Bulk Role Assignment",
+                f"Select members to receive the {role.mention} role\n"
+                "You can select multiple members at once."
+            )
+
+            sent = await ctx.send(embed=embed, view=member_view)
+            member_view.message = sent
+
+            # Wait for selection
+            await member_view.wait()
+            if not member_view.values:
+                await sent.edit(embed=self.ui.error_embed("Operation Cancelled", "No members selected"), view=None)
                 return
 
             success = []
             failed = []
 
-            for user in users:
-                try:
-                    if role not in user.roles:
-                        await user.add_roles(role)
-                        success.append(user)
-                except:
-                    failed.append(user)
+            # Process selections
+            for member_id in member_view.values:
+                member = ctx.guild.get_member(int(member_id))
+                if member:
+                    try:
+                        await member.add_roles(role)
+                        success.append(member)
+                    except:
+                        failed.append(member)
 
             # Create status message
             description = ""
             if success:
-                description += f"✅ Added to {len(success)} users\n"
+                description += f"✅ Added {role.mention} to {len(success)} members\n"
             if failed:
-                description += f"❌ Failed for {len(failed)} users"
+                description += f"❌ Failed for {len(failed)} members"
 
-            embed = self.ui.admin_embed(
-                "Bulk Role Assignment",
+            result_embed = self.ui.admin_embed(
+                "Bulk Role Assignment Complete",
                 description
             )
-            await ctx.send(embed=embed)
+            await sent.edit(embed=result_embed, view=None)
+
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)
 
     @roles_bulk.command(name="remove")
-    async def bulk_remove(self, ctx, role: discord.Role, users: commands.Greedy[discord.Member]):
-        """Remove role from multiple users"""
+    async def bulk_remove(self, ctx, role: discord.Role):
+        """Remove role from multiple users interactively"""
         try:
-            if not users:
-                await ctx.send("No users specified!", ephemeral=True)
-                return
-
             if role >= ctx.guild.me.top_role:
                 await ctx.send("I cannot manage roles higher than my highest role", ephemeral=True)
+                return
+
+            # Get members with the role
+            members_with_role = [m for m in ctx.guild.members 
+                               if not m.bot and role in m.roles]
+
+            if not members_with_role:
+                await ctx.send("No members found with this role!", ephemeral=True)
+                return
+
+            # Create member selection menu
+            member_options = [{
+                'label': member.display_name,
+                'description': f'ID: {member.id}',
+                'value': str(member.id),
+                'emoji': '👤'
+            } for member in members_with_role]
+
+            member_view = self.ui.CommandSelectView(
+                options=member_options,
+                placeholder="Select members to remove role from",
+                min_values=1,
+                max_values=min(len(member_options), 25)  # Discord's max select menu options
+            )
+
+            embed = self.ui.admin_embed(
+                "Bulk Role Removal",
+                f"Select members to remove the {role.mention} role from\n"
+                "You can select multiple members at once."
+            )
+
+            sent = await ctx.send(embed=embed, view=member_view)
+            member_view.message = sent
+
+            # Wait for selection
+            await member_view.wait()
+            if not member_view.values:
+                await sent.edit(embed=self.ui.error_embed("Operation Cancelled", "No members selected"), view=None)
                 return
 
             success = []
             failed = []
 
-            for user in users:
-                try:
-                    if role in user.roles:
-                        await user.remove_roles(role)
-                        success.append(user)
-                except:
-                    failed.append(user)
+            # Process selections
+            for member_id in member_view.values:
+                member = ctx.guild.get_member(int(member_id))
+                if member:
+                    try:
+                        await member.remove_roles(role)
+                        success.append(member)
+                    except:
+                        failed.append(member)
 
             # Create status message
             description = ""
             if success:
-                description += f"✅ Removed from {len(success)} users\n"
+                description += f"✅ Removed {role.mention} from {len(success)} members\n"
             if failed:
-                description += f"❌ Failed for {len(failed)} users"
+                description += f"❌ Failed for {len(failed)} members"
 
-            embed = self.ui.admin_embed(
-                "Bulk Role Removal",
+            result_embed = self.ui.admin_embed(
+                "Bulk Role Removal Complete",
                 description
             )
-            await ctx.send(embed=embed)
+            await sent.edit(embed=result_embed, view=None)
+
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)
 

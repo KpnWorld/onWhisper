@@ -3,6 +3,33 @@ from discord.ext import commands
 from datetime import datetime, timedelta
 import asyncio
 
+class TicketModal(discord.ui.Modal, title="Create Support Ticket"):
+    def __init__(self):
+        super().__init__()
+        self.reason = discord.ui.TextInput(
+            label="Reason",
+            placeholder="Please describe your issue...",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            max_length=1000
+        )
+        self.add_item(self.reason)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            cog = interaction.client.get_cog("Tickets")
+            await cog.create_ticket(interaction, str(self.reason))
+        except Exception as e:
+            await interaction.response.send_message(f"Error creating ticket: {e}", ephemeral=True)
+
+class CreateTicketButton(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Create Ticket", style=discord.ButtonStyle.primary, custom_id="create_ticket", emoji="🎫")
+    async def create_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TicketModal())
+
 class CloseButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -15,13 +42,10 @@ class CloseButton(discord.ui.View):
                 await interaction.response.send_message("This is not a ticket channel!", ephemeral=True)
                 return
 
-            # Send confirmation
+            # Send closing message
             await interaction.response.send_message("🔒 Closing ticket...")
 
-            # Close and lock the thread
-            await interaction.channel.edit(archived=True, locked=True)
-
-            # Log ticket closure
+            # Log ticket closure before deleting
             try:
                 await interaction.client.db_manager.log_event(
                     interaction.guild.id,
@@ -32,8 +56,14 @@ class CloseButton(discord.ui.View):
             except:
                 pass  # Don't stop execution if logging fails
 
+            # Delete the channel
+            await interaction.channel.delete(reason=f"Ticket closed by {interaction.user}")
+
         except Exception as e:
-            await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+            try:
+                await interaction.followup.send(f"Error: {e}", ephemeral=True)
+            except:
+                pass
 
 class Tickets(commands.Cog):
     """Manage server support tickets"""
@@ -253,6 +283,74 @@ class Tickets(commands.Cog):
 
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)
+
+    async def create_ticket(self, interaction: discord.Interaction, reason: str):
+        """Create a new ticket from interaction"""
+        try:
+            # Get ticket settings
+            settings = await self.db_manager.get_guild_data(interaction.guild_id)
+            ticket_settings = settings.get('tickets', {}).get('settings', {})
+            
+            # Find or create tickets category
+            category_id = ticket_settings.get('category_id')
+            category = interaction.guild.get_channel(category_id) if category_id else None
+            
+            if not category:
+                # Create category if not exists
+                overwrites = {
+                    interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                    interaction.guild.me: discord.PermissionOverwrite(read_messages=True, manage_channels=True)
+                }
+                
+                if 'staff_role_id' in ticket_settings:
+                    support_role = interaction.guild.get_role(ticket_settings['staff_role_id'])
+                    if support_role:
+                        overwrites[support_role] = discord.PermissionOverwrite(read_messages=True)
+                
+                category = await interaction.guild.create_category("Support Tickets", overwrites=overwrites)
+                
+                # Save category
+                ticket_settings['category_id'] = category.id
+                await self.db_manager.update_guild_data(
+                    interaction.guild_id,
+                    ticket_settings,
+                    ['tickets', 'settings']
+                )
+
+            # Create ticket channel
+            channel_name = f"ticket-{interaction.user.name}"
+            channel = await category.create_text_channel(
+                channel_name,
+                topic=f"Support ticket for {interaction.user}"
+            )
+
+            # Add user to ticket channel
+            await channel.set_permissions(interaction.user, read_messages=True, send_messages=True)
+
+            # Send initial message
+            embed = self.ui.info_embed(
+                "Support Ticket Created",
+                f"**User:** {interaction.user.mention}\n**Reason:** {reason}"
+            )
+            view = CloseButton()
+            await channel.send(embed=embed, view=view)
+
+            # Log ticket creation
+            await self.db_manager.log_event(
+                interaction.guild_id,
+                interaction.user.id,
+                "ticket_open",
+                f"Opened ticket: {reason}"
+            )
+
+            # Send confirmation
+            await interaction.response.send_message(
+                f"Your ticket has been created in {channel.mention}", 
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Tickets(bot))
