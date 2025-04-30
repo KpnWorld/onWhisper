@@ -275,20 +275,19 @@ class AutoRole(commands.Cog):
             if not reaction_roles:
                 return
 
-            for emoji, role_id in reaction_roles:
-                if str(payload.emoji) == emoji:
-                    role = payload.member.guild.get_role(role_id)
-                    if role:
-                        await payload.member.add_roles(role, reason="Reaction Role")
-                        
-                        # Log the action
-                        await self.db_manager.log_event(
-                            payload.guild_id,
-                            payload.user_id,
-                            "reaction_role",
-                            f"Role {role.name} added via reaction"
-                        )
-                    break
+            emoji = str(payload.emoji)
+            if emoji in reaction_roles:
+                role_id = reaction_roles[emoji]
+                role = payload.member.guild.get_role(role_id)
+                if role:
+                    await payload.member.add_roles(role, reason="Reaction Role")
+                    # Log the action
+                    await self.db_manager.log_event(
+                        payload.guild_id,
+                        payload.user_id,
+                        "reaction_role",
+                        f"Role {role.name} added via reaction"
+                    )
                     
         except Exception as e:
             print(f"Error in reaction role assignment: {e}")
@@ -310,20 +309,19 @@ class AutoRole(commands.Cog):
             if not reaction_roles:
                 return
 
-            for emoji, role_id in reaction_roles:
-                if str(payload.emoji) == emoji:
-                    role = guild.get_role(role_id)
-                    if role:
-                        await member.remove_roles(role, reason="Reaction Role Removed")
-                        
-                        # Log the action
-                        await self.db_manager.log_event(
-                            payload.guild_id,
-                            payload.user_id,
-                            "reaction_role",
-                            f"Role {role.name} removed via reaction"
-                        )
-                    break
+            emoji = str(payload.emoji)
+            if emoji in reaction_roles:
+                role_id = reaction_roles[emoji]
+                role = guild.get_role(role_id)
+                if role:
+                    await member.remove_roles(role, reason="Reaction Role Removed")
+                    # Log the action
+                    await self.db_manager.log_event(
+                        payload.guild_id,
+                        payload.user_id,
+                        "reaction_role",
+                        f"Role {role.name} removed via reaction"
+                    )
                     
         except Exception as e:
             print(f"Error in reaction role removal: {e}")

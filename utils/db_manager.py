@@ -384,7 +384,8 @@ class DBManager:
             key = f"{self.prefix}reaction_roles:{message_id}"
             if key not in self.db:
                 return {}
-            return json.loads(self.db[key])
+            data = json.loads(self.db[key])
+            return data if isinstance(data, dict) else {}
         except Exception as e:
             print(f"Error getting reaction roles: {e}")
             return {}
