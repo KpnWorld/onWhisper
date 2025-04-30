@@ -408,3 +408,32 @@ class DBManager:
         except Exception as e:
             print(f"Error removing reaction role: {e}")
             return False
+
+    async def get_all_guild_data(self, guild_id: int) -> dict:
+        """Get all data collections for a guild"""
+        try:
+            if not await self.ensure_connection():
+                return {}
+            
+            collections = {}
+            prefix = f"{self.prefix}guild:{guild_id}:"
+            
+            # Get main guild data
+            guild_data = await self.get_guild_data(guild_id)
+            if guild_data:
+                collections.update(guild_data)
+                
+            # Get additional collections
+            for key in self.db.keys():
+                if key.startswith(prefix):
+                    try:
+                        collection_name = key.split(':')[2]
+                        collections[collection_name] = json.loads(self.db[key])
+                    except:
+                        continue
+                        
+            return collections
+            
+        except Exception as e:
+            print(f"Error getting all guild data: {e}")
+            return {}

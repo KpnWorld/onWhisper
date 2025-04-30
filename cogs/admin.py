@@ -174,12 +174,19 @@ class Admin(commands.Cog):
     async def tickets_category(self, ctx, category: discord.CategoryChannel):
         """Set the category for ticket channels"""
         try:
+            # Get current settings to preserve other values
+            guild_data = await self.db_manager.get_guild_data(ctx.guild.id)
+            ticket_settings = guild_data.get('tickets', {}).get('settings', {})
+            
+            # Update category while preserving support role
+            ticket_settings.update({
+                'category_id': category.id,
+                'last_updated': datetime.utcnow().isoformat()
+            })
+            
             await self.db_manager.update_guild_data(
                 ctx.guild.id,
-                {
-                    'category_id': category.id,
-                    'last_updated': datetime.utcnow().isoformat()
-                },
+                ticket_settings,
                 ['tickets', 'settings']
             )
             
@@ -197,12 +204,19 @@ class Admin(commands.Cog):
     async def tickets_support(self, ctx, role: discord.Role):
         """Set the support team role"""
         try:
+            # Get current settings to preserve other values
+            guild_data = await self.db_manager.get_guild_data(ctx.guild.id)
+            ticket_settings = guild_data.get('tickets', {}).get('settings', {})
+            
+            # Update support role while preserving category
+            ticket_settings.update({
+                'support_role_id': role.id,
+                'last_updated': datetime.utcnow().isoformat()
+            })
+            
             await self.db_manager.update_guild_data(
                 ctx.guild.id,
-                {
-                    'support_role_id': role.id,
-                    'last_updated': datetime.utcnow().isoformat()
-                },
+                ticket_settings,
                 ['tickets', 'settings']
             )
             
