@@ -1,32 +1,29 @@
 import discord
 from discord.ext import commands
-from datetime import datetime
 import asyncio
-import platform
+from datetime import datetime
+from typing import Optional
 
 class Info(commands.Cog):
-    """Information and help commands"""
+    """Bot, user, and server info commands"""
     
     def __init__(self, bot):
         self.bot = bot
-        self.db_manager = bot.db_manager  # Use bot's DBManager instance
+        self.db_manager = bot.db_manager
         self.ui = self.bot.ui_manager
-        self.start_time = datetime.utcnow()
         self._ready = asyncio.Event()
         self.bot.loop.create_task(self.setup())
+        self.start_time = datetime.utcnow()
 
     async def setup(self):
         """Ensure cog is properly initialized"""
         await self.bot.wait_until_ready()
-        
         try:
             if not await self.db_manager.ensure_connection():
                 print("❌ Database not available for Info cog")
                 return
-                
             self._ready.set()
             print("✅ Info cog ready")
-            
         except Exception as e:
             print(f"❌ Error setting up Info cog: {e}")
 
@@ -34,298 +31,292 @@ class Info(commands.Cog):
         """Wait for cog to be ready before processing commands"""
         await self._ready.wait()
 
-    @commands.hybrid_command(name="help", description="Shows all available commands")
-    async def help_command(self, ctx, command: str = None):
-        try:
-            if not isinstance(ctx.channel, discord.DMChannel):
-                # Verify bot permissions
-                if not ctx.channel.permissions_for(ctx.guild.me).embed_links:
-                    await ctx.send("I need the 'Embed Links' permission to show help!")
-                    return
+    @commands.hybrid_group(name="info")
+    async def info(self, ctx):
+        """Information commands"""
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help(ctx.command)
 
+    @info.command(name="help")
+    async def info_help(self, ctx, command: Optional[str] = None):
+        """Get help for a specific command"""
+        try:
             if command:
                 cmd = self.bot.get_command(command)
                 if not cmd:
-                    raise commands.CommandNotFound(f"Command '{command}' not found.")
-
-                # Add aliases if any exist
-                aliases = ""
-                if cmd.aliases:
-                    aliases = f"\n**Aliases:** {', '.join(cmd.aliases)}"
-                
-                # Add group commands if it's a group
-                subcommands = ""
-                if isinstance(cmd, commands.Group):
-                    subs = [f"• /{cmd.qualified_name} {subcmd.name} {subcmd.signature}" 
-                           for subcmd in cmd.commands]
-                    if subs:
-                        subcommands = "\n\n**Subcommands:**\n" + "\n".join(subs)
-
-                description = (
-                    f"**Description:** {cmd.description or cmd.help or 'No description available'}\n"
-                    f"**Usage:**\n"
-                    f"• Slash: /{cmd.qualified_name} {cmd.signature}\n"
-                    f"• Prefix: !{cmd.qualified_name} {cmd.signature}"
-                    f"{aliases}"
-                    f"{subcommands}"
-                )
-                
-                embed = self.ui.info_embed(
-                    f"Help: {cmd.qualified_name}",
-                    description
-                )
-
-                if isinstance(ctx, discord.Interaction):
-                    await ctx.response.send_message(embed=embed, ephemeral=True)
-                else:
-                    await ctx.send(embed=embed)
-                    
-            else:
-                # Group commands by category
-                categories = {
-                    "🛠️ Configuration": ["config", "setlogs"],
-                    "🔨 Moderation": ["kick", "ban", "timeout", "warn", "clear", "lock", "unlock", "slowmode", "snipe"],
-                    "⭐ Leveling": ["level", "leaderboard"],
-                    "🎫 Tickets": ["ticket"],
-                    "👥 Roles": ["setautorole", "removeautorole", "bindreactionrole", "unbindreactionrole"],
-                    "ℹ️ Information": ["help", "botinfo", "serverinfo", "userinfo", "uptime"],
-                    "🔍 Debug": ["dbcheck", "dblookup", "dbstats", "guilddata", "dblist"]
-                }
-
-                pages = []
-                total_commands = 0
-
-                # Create overview page
-                overview = self.ui.info_embed(
-                    "Help System",
-                    "Use `/help <command>` or `!help <command>` for detailed information about a specific command.\n\n"
-                    "**Categories:**\n" + "\n".join(f"• {cat}" for cat in categories.keys())
-                )
-                pages.append(overview)
-
-                # Create category pages
-                for category, cmd_list in categories.items():
-                    description = []
-                    for cmd_name in cmd_list:
-                        cmd = self.bot.get_command(cmd_name)
-                        if cmd and not cmd.hidden:
-                            total_commands += 1
-                            description.append(
-                                f"**/{cmd_name}**\n"
-                                f"↳ {cmd.description or cmd.help or 'No description'}\n"
-                            )
-
-                    if description:
-                        embed = self.ui.info_embed(
-                            category,
-                            "\n".join(description)
-                        )
-                        pages.append(embed)
-
-                # Update overview with command count
-                pages[0].description = f"Total Commands: {total_commands}\n\n" + pages[0].description
-
-                # Send paginated help
-                if isinstance(ctx, discord.Interaction):
-                    await ctx.response.send_message(
-                        embed=pages[0],
-                        view=self.ui.Paginator(pages=pages),
-                        ephemeral=True
-                    )
-                else:
-                    await ctx.send(
-                        embed=pages[0],
-                        view=self.ui.Paginator(pages=pages)
-                    )
-
-        except discord.Forbidden:
-            await ctx.send("I don't have permission to send embeds in this channel.")
-        except Exception as e:
-            await self.bot.on_command_error(ctx, e)
-
-    @commands.hybrid_command(description="Get information about the bot")
-    async def botinfo(self, ctx):
-        try:
-            if not isinstance(ctx.channel, discord.DMChannel):
-                # Verify bot permissions
-                if not ctx.channel.permissions_for(ctx.guild.me).embed_links:
-                    await ctx.send("I need the 'Embed Links' permission!")
+                    await ctx.send(f"Command '{command}' not found.", ephemeral=True)
                     return
 
-            uptime = datetime.utcnow() - self.start_time
-            days = uptime.days
-            hours, remainder = divmod(uptime.seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            
-            total_commands = len(set([cmd.qualified_name for cmd in self.bot.walk_commands()]))
-            
-            description = (
-                f"**Uptime:** {days}d {hours}h {minutes}m {seconds}s\n"
-                f"**Servers:** {len(self.bot.guilds):,}\n"
-                f"**Users:** {len(self.bot.users):,}\n"
-                f"**Commands:** {total_commands:,}\n"
-                f"**Python Version:** {platform.python_version()}\n"
-                f"**py-cord Version:** {discord.__version__}"
-            )
-            
-            embed = self.ui.info_embed(
-                "Bot Information",
-                description
-            )
-            
-            if self.bot.user.avatar:
-                embed.set_thumbnail(url=self.bot.user.avatar.url)
-                
-            await ctx.send(embed=embed)
-            
-        except discord.Forbidden:
-            await ctx.send("I don't have permission to send embeds.")
-        except Exception as e:
-            await self.bot.on_command_error(ctx, e)
+                embed = self.ui.info_embed(
+                    f"Command: {cmd.qualified_name}",
+                    cmd.help or "No description available."
+                )
 
-    @commands.hybrid_command(description="Get information about the server")
-    async def serverinfo(self, ctx):
-        """Display information about the current server"""
+                # Add usage if available
+                if cmd.usage:
+                    embed.add_field(name="Usage", value=f"`{ctx.prefix}{cmd.usage}`")
+
+                # Add examples if available
+                if hasattr(cmd, 'examples'):
+                    examples = "\n".join(f"`{ctx.prefix}{ex}`" for ex in cmd.examples)
+                    embed.add_field(name="Examples", value=examples)
+
+                await ctx.send(embed=embed)
+            else:
+                # Show command categories
+                categories = {}
+                for cmd in self.bot.commands:
+                    if not cmd.hidden:
+                        category = cmd.cog_name or "Uncategorized"
+                        if category not in categories:
+                            categories[category] = []
+                        categories[category].append(cmd.name)
+
+                embed = self.ui.info_embed(
+                    "Command Help",
+                    "Use `/info help <command>` for detailed help"
+                )
+
+                for category, commands in sorted(categories.items()):
+                    embed.add_field(
+                        name=category,
+                        value=", ".join(f"`{cmd}`" for cmd in sorted(commands)),
+                        inline=False
+                    )
+
+                await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @info.command(name="bot")
+    async def info_bot(self, ctx):
+        """View bot status & ping"""
+        try:
+            embed = self.ui.info_embed(
+                f"{self.bot.user.name} Info",
+                "A versatile Discord management bot"
+            )
+
+            # Add general stats
+            guild_count = len(self.bot.guilds)
+            member_count = sum(g.member_count for g in self.bot.guilds)
+            channel_count = sum(len(g.channels) for g in self.bot.guilds)
+
+            embed.add_field(
+                name="Stats",
+                value=f"Servers: {guild_count:,}\n"
+                      f"Members: {member_count:,}\n"
+                      f"Channels: {channel_count:,}"
+            )
+
+            # Add version info
+            embed.add_field(
+                name="Version",
+                value=f"Discord.py: {discord.__version__}"
+            )
+
+            # Add latency info
+            latency = round(self.bot.latency * 1000)
+            embed.add_field(
+                name="Latency",
+                value=f"{latency}ms"
+            )
+
+            embed.set_thumbnail(url=self.bot.user.display_avatar.url)
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @info.command(name="server")
+    async def info_server(self, ctx):
+        """Show server information"""
         try:
             guild = ctx.guild
-            
-            text_channels = len([c for c in guild.channels if isinstance(c, discord.TextChannel)])
-            voice_channels = len([c for c in guild.channels if isinstance(c, discord.VoiceChannel)])
-            categories = len(guild.categories)
-            threads = len(guild.threads)
-            
-            total_members = guild.member_count
-            online = len([m for m in guild.members if m.status != discord.Status.offline])
-            bots = len([m for m in guild.members if m.bot])
-            
-            description = (
-                f"**Owner:** {guild.owner.mention}\n"
-                f"**Created:** <t:{int(guild.created_at.timestamp())}:R>\n"
-                f"\n"
-                f"**Members:** {total_members:,}\n"
-                f"• Online: {online:,}\n"
-                f"• Humans: {total_members - bots:,}\n"
-                f"• Bots: {bots:,}\n"
-                f"\n"
-                f"**Channels:** {text_channels + voice_channels + threads:,}\n"
-                f"• Text: {text_channels:,}\n"
-                f"• Voice: {voice_channels:,}\n"
-                f"• Categories: {categories:,}\n"
-                f"• Threads: {threads:,}\n"
-                f"\n"
-                f"**Roles:** {len(guild.roles):,}\n"
-                f"**Emojis:** {len(guild.emojis):,}\n"
-                f"**Boost Level:** {guild.premium_tier}\n"
-                f"**Boosters:** {guild.premium_subscription_count or 0}"
-            )
-            
             embed = self.ui.info_embed(
-                f"{guild.name} Information",
-                description
+                f"{guild.name} Info",
+                guild.description or "No description"
             )
-            
+
+            # General info
+            created_ts = int(guild.created_at.timestamp())
+            general_info = (
+                f"Owner: {guild.owner.mention}\n"
+                f"Created: <t:{created_ts}:R>\n"
+                f"Boost Level: {guild.premium_tier}"
+            )
+            embed.add_field(name="General", value=general_info, inline=False)
+
+            # Member stats
+            member_stats = (
+                f"Total: {guild.member_count:,}\n"
+                f"Humans: {sum(not m.bot for m in guild.members):,}\n"
+                f"Bots: {sum(m.bot for m in guild.members):,}"
+            )
+            embed.add_field(name="Members", value=member_stats)
+
+            # Channel stats
+            channel_stats = (
+                f"Categories: {len(guild.categories):,}\n"
+                f"Text: {len(guild.text_channels):,}\n"
+                f"Voice: {len(guild.voice_channels):,}"
+            )
+            embed.add_field(name="Channels", value=channel_stats)
+
+            # Role stats
+            role_stats = (
+                f"Count: {len(guild.roles):,}\n"
+                f"Highest: {guild.roles[-1].mention}"
+            )
+            embed.add_field(name="Roles", value=role_stats)
+
             if guild.icon:
                 embed.set_thumbnail(url=guild.icon.url)
-                
-            await ctx.send(embed=embed)
-            
-        except Exception as e:
-            await self.bot.on_command_error(ctx, e)
 
-    @commands.hybrid_command(description="Get information about a user")
-    async def userinfo(self, ctx, user: discord.Member = None):
-        """Display information about a user"""
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @info.command(name="user")
+    async def info_user(self, ctx, user: Optional[discord.Member] = None):
+        """Show user info"""
         try:
             user = user or ctx.author
-            
-            roles = [role.mention for role in reversed(user.roles[1:])]  # All roles except @everyone
-            
-            embed = discord.Embed(
-                title=f"User Information",
-                color=discord.Color.blurple(),
-                timestamp=datetime.utcnow()
+            embed = self.ui.info_embed(
+                f"User Info: {user}",
+                f"ID: {user.id}"
             )
+
+            # Join dates
+            joined_ts = int(user.joined_at.timestamp())
+            created_ts = int(user.created_at.timestamp())
             
+            dates = (
+                f"Joined: <t:{joined_ts}:R>\n"
+                f"Created: <t:{created_ts}:R>"
+            )
+            embed.add_field(name="Dates", value=dates, inline=False)
+
+            # Roles
+            roles = [role.mention for role in reversed(user.roles[1:])]  # Exclude @everyone
             embed.add_field(
-                name="User Details",
-                value=f"**ID:** {user.id}\n"
-                      f"**Created:** <t:{int(user.created_at.timestamp())}:R>\n"
-                      f"**Joined:** <t:{int(user.joined_at.timestamp() if user.joined_at else 0)}:R>\n"
-                      f"**Display Name:** {user.display_name}\n"
-                      f"**Bot:** {'Yes' if user.bot else 'No'}",
+                name=f"Roles [{len(roles)}]",
+                value=" ".join(roles) if roles else "None",
                 inline=False
             )
-            
-            permissions = []
+
+            # Permissions
+            key_perms = []
             if user.guild_permissions.administrator:
-                permissions.append("Administrator")
-            else:
-                if user.guild_permissions.manage_guild:
-                    permissions.append("Manage Server")
-                if user.guild_permissions.ban_members:
-                    permissions.append("Ban Members")
-                if user.guild_permissions.kick_members:
-                    permissions.append("Kick Members")
-                if user.guild_permissions.manage_channels:
-                    permissions.append("Manage Channels")
-                if user.guild_permissions.manage_roles:
-                    permissions.append("Manage Roles")
-            
-            embed.add_field(
-                name="Key Permissions",
-                value=', '.join(permissions) or 'None',
-                inline=False
-            )
-            
-            if roles:
+                key_perms.append("Administrator")
+            if user.guild_permissions.manage_guild:
+                key_perms.append("Manage Server")
+            if user.guild_permissions.manage_roles:
+                key_perms.append("Manage Roles")
+            if user.guild_permissions.manage_channels:
+                key_perms.append("Manage Channels")
+            if user.guild_permissions.manage_messages:
+                key_perms.append("Manage Messages")
+            if user.guild_permissions.kick_members:
+                key_perms.append("Kick Members")
+            if user.guild_permissions.ban_members:
+                key_perms.append("Ban Members")
+
+            if key_perms:
                 embed.add_field(
-                    name=f"Roles [{len(roles)}]",
-                    value=' '.join(roles),
+                    name="Key Permissions",
+                    value=", ".join(key_perms),
                     inline=False
                 )
 
-            if user.avatar:
-                embed.set_thumbnail(url=user.avatar.url)
-
-            embed.set_footer(text=f"Command Type • User")
-                
+            embed.set_thumbnail(url=user.display_avatar.url)
             await ctx.send(embed=embed)
-            
-        except Exception as e:
-            await self.bot.on_command_error(ctx, e)
 
-    @commands.hybrid_command(description="Shows how long the bot has been running")
-    async def uptime(self, ctx):
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @info.command(name="role")
+    async def info_role(self, ctx, role: discord.Role):
+        """Display role details"""
         try:
-            if not isinstance(ctx.channel, discord.DMChannel):
-                # Verify bot permissions
-                if not ctx.channel.permissions_for(ctx.guild.me).embed_links:
-                    await ctx.send("I need the 'Embed Links' permission!")
-                    return
-
-            uptime = datetime.utcnow() - self.start_time
-            days = uptime.days
-            hours, rem = divmod(uptime.seconds, 3600)
-            minutes, seconds = divmod(rem, 60)
-            
-            description = (
-                f"I have been running for:\n"
-                f"**{days}** days\n"
-                f"**{hours}** hours\n"
-                f"**{minutes}** minutes\n"
-                f"**{seconds}** seconds"
-            )
-            
             embed = self.ui.info_embed(
-                "🕒 Bot Uptime",
-                description
+                f"Role Info: {role.name}",
+                f"ID: {role.id}"
+            )
+
+            # General info
+            created_ts = int(role.created_at.timestamp())
+            general_info = (
+                f"Created: <t:{created_ts}:R>\n"
+                f"Position: {role.position}\n"
+                f"Color: {role.color}\n"
+                f"Mentionable: {role.mentionable}\n"
+                f"Hoisted: {role.hoist}\n"
+                f"Members: {len(role.members):,}"
+            )
+            embed.add_field(name="General", value=general_info, inline=False)
+
+            # Key permissions
+            key_perms = []
+            if role.permissions.administrator:
+                key_perms.append("Administrator")
+            if role.permissions.manage_guild:
+                key_perms.append("Manage Server")
+            if role.permissions.manage_roles:
+                key_perms.append("Manage Roles")
+            if role.permissions.manage_channels:
+                key_perms.append("Manage Channels")
+            if role.permissions.manage_messages:
+                key_perms.append("Manage Messages")
+            if role.permissions.kick_members:
+                key_perms.append("Kick Members")
+            if role.permissions.ban_members:
+                key_perms.append("Ban Members")
+
+            if key_perms:
+                embed.add_field(
+                    name="Key Permissions",
+                    value=", ".join(key_perms),
+                    inline=False
+                )
+
+            embed.color = role.color
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @info.command(name="uptime")
+    async def info_uptime(self, ctx):
+        """Show bot uptime"""
+        try:
+            now = datetime.utcnow()
+            delta = now - self.start_time
+            
+            # Format uptime
+            days = delta.days
+            hours, remainder = divmod(delta.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            
+            uptime = []
+            if days > 0:
+                uptime.append(f"{days} days")
+            if hours > 0:
+                uptime.append(f"{hours} hours")
+            if minutes > 0:
+                uptime.append(f"{minutes} minutes")
+            uptime.append(f"{seconds} seconds")
+
+            embed = self.ui.info_embed(
+                "Bot Uptime",
+                ", ".join(uptime)
             )
             await ctx.send(embed=embed)
-            
-        except discord.Forbidden:
-            await ctx.send("I don't have permission to send embeds.")
+
         except Exception as e:
-            await self.bot.on_command_error(ctx, e)
+            await ctx.send(f"Error: {e}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Info(bot))

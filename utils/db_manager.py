@@ -1,6 +1,7 @@
-from replit import db
-from datetime import datetime, timedelta
+import discord
+from discord.ext import commands
 import json
+from datetime import datetime, timedelta
 import asyncio
 
 class DBManager:
@@ -289,25 +290,99 @@ class DBManager:
             print(f"Error during optimization: {e}")
             raise
 
-    async def get_auto_role(self, guild_id: int) -> tuple:
-        """Get the auto-role settings for a guild"""
+    async def add_warning(self, guild_id: int, user_id: int, mod_id: int, reason: str, timestamp: datetime):
+        """Add a warning to a user"""
+        try:
+            warning = {
+                'mod_id': mod_id,
+                'reason': reason,
+                'timestamp': timestamp.isoformat()
+            }
+            
+            await self.update_guild_data(
+                guild_id,
+                {'warnings': [warning]},
+                ['moderation', 'users', str(user_id)]
+            )
+        except Exception as e:
+            print(f"Error adding warning: {e}")
+            raise
+
+    async def get_warnings(self, guild_id: int, user_id: int) -> list:
+        """Get all warnings for a user"""
         try:
             guild_data = await self.get_guild_data(guild_id)
-            autorole = guild_data.get('autorole', {}).get('settings', {})
-            return (autorole.get('role_id'), autorole.get('enabled', False))
+            return guild_data.get('moderation', {}).get('users', {}).get(str(user_id), {}).get('warnings', [])
         except Exception as e:
-            print(f"Error getting auto-role: {e}")
-            return (None, False)
+            print(f"Error getting warnings: {e}")
+            return []
+
+    async def update_user_level_data(self, guild_id: int, user_id: int, xp: int, level: int, timestamp: datetime):
+        """Update user XP and level data"""
+        try:
+            await self.update_guild_data(
+                guild_id,
+                {
+                    'xp': xp,
+                    'level': level,
+                    'last_xp': timestamp.isoformat()
+                },
+                ['xp', 'users', str(user_id)]
+            )
+        except Exception as e:
+            print(f"Error updating user level data: {e}")
+            raise
+
+    async def get_user_level_data(self, guild_id: int, user_id: int) -> dict:
+        """Get user XP and level data"""
+        try:
+            guild_data = await self.get_guild_data(guild_id)
+            return guild_data.get('xp', {}).get('users', {}).get(str(user_id), {})
+        except Exception as e:
+            print(f"Error getting user level data: {e}")
+            return {}
+
+    async def get_ticket_logs(self, guild_id: int, user_id: int = None) -> list:
+        """Get ticket logs, optionally filtered by user"""
+        try:
+            guild_data = await self.get_guild_data(guild_id)
+            logs = guild_data.get('tickets', {}).get('logs', [])
+            
+            if user_id:
+                logs = [log for log in logs if log.get('user_id') == user_id]
+                
+            return sorted(logs, key=lambda x: datetime.fromisoformat(x.get('timestamp')), reverse=True)
+        except Exception as e:
+            print(f"Error getting ticket logs: {e}")
+            return []
+
+    async def get_last_deleted(self, channel_id: int) -> dict:
+        """Get last deleted message in a channel"""
+        try:
+            key = f"{self.prefix}snipe:{channel_id}"
+            data = self.db.get(key)
+            return json.loads(data) if data else None
+        except Exception as e:
+            print(f"Error getting last deleted message: {e}")
+            return None
+
+    async def log_deleted_message(self, channel_id: int, message_data: dict):
+        """Store a deleted message for snipe command"""
+        try:
+            key = f"{self.prefix}snipe:{channel_id}"
+            self.db[key] = json.dumps(message_data)
+        except Exception as e:
+            print(f"Error logging deleted message: {e}")
+            raise
 
     async def set_auto_role(self, guild_id: int, role_id: int, enabled: bool = True):
-        """Set the auto-role for a guild"""
+        """Set auto-role for new members"""
         try:
             await self.update_guild_data(
                 guild_id,
                 {
                     'role_id': role_id,
-                    'enabled': enabled,
-                    'last_updated': datetime.utcnow().isoformat()
+                    'enabled': enabled
                 },
                 ['autorole', 'settings']
             )
@@ -315,125 +390,62 @@ class DBManager:
             print(f"Error setting auto-role: {e}")
             raise
 
-    async def toggle_auto_role(self, guild_id: int, enabled: bool):
-        """Toggle auto-role on/off"""
+    async def get_auto_role(self, guild_id: int) -> tuple:
+        """Get auto-role settings"""
         try:
             guild_data = await self.get_guild_data(guild_id)
-            autorole = guild_data.get('autorole', {}).get('settings', {})
-            
-            await self.update_guild_data(
-                guild_id,
-                {
-                    'role_id': autorole.get('role_id'),
-                    'enabled': enabled,
-                    'last_updated': datetime.utcnow().isoformat()
-                },
-                ['autorole', 'settings']
-            )
+            settings = guild_data.get('autorole', {}).get('settings', {})
+            return (settings.get('role_id'), settings.get('enabled', False))
         except Exception as e:
-            print(f"Error toggling auto-role: {e}")
-            raise
+            print(f"Error getting auto-role: {e}")
+            return (None, False)
 
-    async def get_leaderboard(self, guild_id: int, limit: int = 100) -> list:
-        """Get the XP leaderboard for a guild"""
+    async def get_all_levels(self, guild_id: int) -> dict:
+        """Get all user levels in a guild"""
         try:
-            # Get guild data
             guild_data = await self.get_guild_data(guild_id)
-            xp_users = guild_data.get('xp', {}).get('users', {})
-            
-            # Convert to list of tuples (user_id, level, xp)
-            leaderboard_data = [
-                (int(user_id), data.get('level', 0), data.get('xp', 0))
-                for user_id, data in xp_users.items()
-            ]
-            
-            # Sort by XP (descending), then by level
-            leaderboard_data.sort(key=lambda x: (x[2], x[1]), reverse=True)
-            
-            # Return limited results
-            return leaderboard_data[:limit]
-            
+            return guild_data.get('xp', {}).get('users', {})
         except Exception as e:
-            print(f"Error getting leaderboard: {e}")
+            print(f"Error getting all levels: {e}")
             return []
 
-    async def get_user_leveling(self, user_id: int, guild_id: int) -> tuple:
-        """Get user level information"""
+    async def add_level_reward(self, guild_id: int, level: int, role_id: int):
+        """Add a role reward for reaching a level"""
         try:
-            guild_data = await self.get_guild_data(guild_id)
-            user_data = guild_data.get('xp', {}).get('users', {}).get(str(user_id), {})
-            return (user_data.get('level', 0), user_data.get('xp', 0))
+            key = f"{self.prefix}level_roles:{guild_id}:{level}"
+            self.db[key] = json.dumps({
+                'level': level,
+                'role_id': role_id,
+                'last_updated': datetime.utcnow().isoformat()
+            })
         except Exception as e:
-            print(f"Error getting user leveling data: {e}")
-            return (0, 0)
-
-    async def add_reaction_role(self, message_id: int, emoji: str, role_id: int):
-        """Add a reaction role binding"""
-        try:
-            key = f"{self.prefix}reaction_roles:{message_id}"
-            current = json.loads(self.db.get(key, "{}"))
-            current[emoji] = role_id
-            self.db[key] = json.dumps(current)
-        except Exception as e:
-            print(f"Error adding reaction role: {e}")
+            print(f"Error adding level reward: {e}")
             raise
 
-    async def get_reaction_roles(self, message_id: int) -> dict:
-        """Get reaction roles for a message"""
+    async def remove_level_reward(self, guild_id: int, level: int) -> bool:
+        """Remove a level reward"""
         try:
-            key = f"{self.prefix}reaction_roles:{message_id}"
-            if key not in self.db:
-                return {}
-            data = json.loads(self.db[key])
-            return data if isinstance(data, dict) else {}
-        except Exception as e:
-            print(f"Error getting reaction roles: {e}")
-            return {}
-
-    async def remove_reaction_role(self, message_id: int, emoji: str) -> bool:
-        """Remove a reaction role binding"""
-        try:
-            key = f"{self.prefix}reaction_roles:{message_id}"
-            if key not in self.db:
-                return False
-            current = json.loads(self.db[key])
-            if emoji in current:
-                del current[emoji]
-                if current:
-                    self.db[key] = json.dumps(current)
-                else:
-                    del self.db[key]
+            key = f"{self.prefix}level_roles:{guild_id}:{level}"
+            if key in self.db:
+                del self.db[key]
                 return True
             return False
         except Exception as e:
-            print(f"Error removing reaction role: {e}")
+            print(f"Error removing level reward: {e}")
             return False
 
-    async def get_all_guild_data(self, guild_id: int) -> dict:
-        """Get all data collections for a guild"""
+    async def get_level_rewards(self, guild_id: int) -> list:
+        """Get all level rewards for a guild"""
         try:
-            if not await self.ensure_connection():
-                return {}
+            rewards = []
+            prefix = f"{self.prefix}level_roles:{guild_id}:"
             
-            collections = {}
-            prefix = f"{self.prefix}guild:{guild_id}:"
-            
-            # Get main guild data
-            guild_data = await self.get_guild_data(guild_id)
-            if guild_data:
-                collections.update(guild_data)
-                
-            # Get additional collections
             for key in self.db.keys():
                 if key.startswith(prefix):
-                    try:
-                        collection_name = key.split(':')[2]
-                        collections[collection_name] = json.loads(self.db[key])
-                    except:
-                        continue
-                        
-            return collections
+                    data = json.loads(self.db[key])
+                    rewards.append((data['level'], data['role_id']))
             
+            return sorted(rewards, key=lambda x: x[0])
         except Exception as e:
-            print(f"Error getting all guild data: {e}")
-            return {}
+            print(f"Error getting level rewards: {e}")
+            return []
