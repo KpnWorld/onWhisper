@@ -1,8 +1,7 @@
 import discord 
 from discord.ext import commands
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
-from utils.db_manager import DBManager
 
 class CloseButton(discord.ui.View):
     def __init__(self):
@@ -12,25 +11,29 @@ class CloseButton(discord.ui.View):
     async def close_ticket(self, button: discord.ui.Button, interaction: discord.Interaction):
         await interaction.response.defer()
         
-        # Get ticket data
-        db_manager = DBManager()
-        ticket = await db_manager.get_ticket_by_channel(interaction.channel.id)
-        
-        if not ticket:
-            await interaction.followup.send("This is not a ticket channel!", ephemeral=True)
+        # Get ticket thread
+        thread = interaction.channel
+        if not isinstance(thread, discord.Thread):
+            await interaction.followup.send("This command can only be used in ticket threads!", ephemeral=True)
             return
             
-        # Close ticket
-        await db_manager.close_ticket(interaction.channel.id)
-        await interaction.channel.delete()
+        # Close the thread
+        try:
+            await thread.edit(archived=True, locked=True)
+            await interaction.followup.send("🔒 Ticket closed!", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.followup.send("I don't have permission to close this ticket!", ephemeral=True)
 
 class Tickets(commands.Cog):
+    """Ticket management system using threads"""
+    
     def __init__(self, bot):
         self.bot = bot
-        self.db_manager = bot.db_manager  # Use bot's DBManager instance
+        self.db_manager = bot.db_manager
         self.ui = self.bot.ui_manager
         self._ready = asyncio.Event()
         self.bot.loop.create_task(self.setup())
+        self.auto_close_task = self.bot.loop.create_task(self.check_inactive_tickets())
 
     async def setup(self):
         """Ensure cog is properly initialized"""
@@ -75,151 +78,112 @@ class Tickets(commands.Cog):
             self.details = self.children[1].value
             await interaction.response.defer()
 
-    @commands.hybrid_command(description="Create a support ticket")
-    async def ticket(self, ctx):
-        """Create a support ticket using a form"""
-        try:
-            # Check if using slash command or prefix
-            if hasattr(ctx, 'interaction') and ctx.interaction:
-                # Show modal for slash command
-                modal = self.TicketModal()
-                await ctx.interaction.response.send_modal(modal)
-                await modal.wait()
-                
-                # Get ticket reason from modal
-                reason = f"{modal.summary}\n\n{modal.details}" if modal.details else modal.summary
-                followup = modal.interaction
-            else:
-                # For prefix command, send regular message
-                embed = self.ui.info_embed(
-                    "Create Ticket",
-                    "Use the slash command `/ticket` to create a support ticket"
-                )
-                await ctx.send(embed=embed)
-                return
-
-            # Get guild data
-            guild_data = await self.db_manager.get_guild_data(ctx.guild.id)
-            ticket_settings = guild_data.get('tickets', {}).get('settings', {})
-            
-            category_id = ticket_settings.get('category_id')
-            support_role_id = ticket_settings.get('support_role_id')
-            
-            category = ctx.guild.get_channel(category_id) if category_id else None
-            support_role = ctx.guild.get_role(support_role_id) if support_role_id else None
-
-            if not category or not support_role:
-                missing = []
-                if not category:
-                    missing.append("Category")
-                if not support_role:
-                    missing.append("Support Role")
+    async def check_inactive_tickets(self):
+        """Check and close inactive tickets"""
+        while True:
+            try:
+                await asyncio.sleep(3600)  # Check every hour
+                for guild in self.bot.guilds:
+                    # Get ticket data
+                    guild_data = await self.db_manager.get_guild_data(guild.id)
+                    ticket_settings = guild_data.get('tickets', {}).get('settings', {})
                     
-                embed = self.ui.error_embed(
-                    "Setup Required",
-                    f"Missing configuration: {', '.join(missing)}\n"
-                    "An admin must set these using:\n"
-                    "• `/config tickets category #category`\n"
-                    "• `/config tickets support @role`"
-                )
-                await ctx.send(embed=embed, ephemeral=True)
-                return
+                    if not ticket_settings.get('auto_close', False):
+                        continue
+                        
+                    inactive_hours = ticket_settings.get('close_hours', 24)
+                    cutoff = datetime.utcnow() - timedelta(hours=inactive_hours)
+                    
+                    # Check each thread in forum channels
+                    for channel in guild.channels:
+                        if isinstance(channel, discord.ForumChannel):
+                            async for thread in channel.archived_threads():
+                                if thread.name.startswith('ticket-'):
+                                    last_message = await thread.fetch_message(thread.last_message_id)
+                                    if last_message and last_message.created_at < cutoff:
+                                        try:
+                                            await thread.edit(archived=True, locked=True)
+                                            await thread.send("🔒 Ticket auto-closed due to inactivity")
+                                        except:
+                                            continue
+                                            
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error checking inactive tickets: {e}")
+                await asyncio.sleep(300)  # Wait 5 minutes on error
 
-            # Check existing tickets
-            open_tickets = ticket_settings.get('open_tickets', [])
-            user_ticket = next(
-                (t for t in open_tickets if t['user_id'] == ctx.author.id and not t.get('closed_at')),
-                None
-            )
-
-            if user_ticket:
-                channel = ctx.guild.get_channel(user_ticket['channel_id'])
-                if channel:
-                    embed = self.ui.error_embed(
-                        "Ticket Already Open",
-                        f"You already have an open ticket: {channel.mention}"
-                    )
-                    await followup.send(embed=embed, ephemeral=True)
-                    return
-
-            # Get ticket settings
-            settings = await self.db_manager.get_data('tickets_config', str(ctx.guild.id))
-            if not settings:
-                embed = self.ui.error_embed(
-                    "Tickets Not Configured",
-                    "The ticket system has not been set up yet!"
-                )
-                await followup.send(embed=embed, ephemeral=True)
-                return
-
-            # Create the ticket channel
-            channel_name = f"ticket-{ctx.author.name}-{len(open_tickets) + 1}"
-            overwrites = {
-                ctx.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-                support_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-                ctx.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
-            }
-
-            channel = await ctx.guild.create_text_channel(
-                channel_name,
-                category=category,
-                overwrites=overwrites
-            )
-
-            # Create ticket data
-            ticket_data = {
-                'channel_id': channel.id,
-                'user_id': ctx.author.id,
-                'created_at': datetime.utcnow().isoformat(),
-                'reason': reason,
-                'closed_at': None
-            }
+    @commands.hybrid_command(description="Create a support ticket")
+    async def ticket(self, ctx: commands.Context):
+        """Create a support ticket thread"""
+        try:
+            # Show modal for ticket details
+            modal = self.TicketModal()
+            await ctx.interaction.response.send_modal(modal)
+            await modal.wait()
             
-            # Add to open tickets
-            open_tickets.append(ticket_data)
-            await self.db_manager.update_guild_data(
-                ctx.guild.id,
-                {'open_tickets': open_tickets},
-                ['tickets']
+            # Get ticket reason from modal
+            reason = f"{modal.summary}\n\n{modal.details}" if modal.details else modal.summary
+
+            # Find or create forum channel for tickets
+            forum_channel = None
+            for channel in ctx.guild.channels:
+                if isinstance(channel, discord.ForumChannel) and channel.name == "tickets":
+                    forum_channel = channel
+                    break
+                    
+            if not forum_channel:
+                # Create forum channel
+                overwrites = {
+                    ctx.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                    ctx.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_threads=True)
+                }
+                forum_channel = await ctx.guild.create_forum_channel(
+                    name="tickets",
+                    overwrites=overwrites,
+                    topic="Support Tickets"
+                )
+
+            # Create the ticket thread
+            thread = await forum_channel.create_thread(
+                name=f"ticket-{ctx.author.name}",
+                content=reason,
+                auto_archive_duration=10080  # 7 days
             )
 
-            # Create the initial message
-            description = (
-                f"Support will be with you shortly.\n\n"
-                f"User: {ctx.author.mention}\n"
-                f"Reason: {reason}"
-            )
+            # Add staff and author to thread
+            await thread.add_user(ctx.author)
+            for member in ctx.guild.members:
+                if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
+                    try:
+                        await thread.add_user(member)
+                    except:
+                        continue
 
+            # Send initial message
             embed = self.ui.user_embed(
                 "Ticket Created",
-                description
+                f"**User:** {ctx.author.mention}\n**Reason:** {reason}\n\nStaff will assist you shortly."
             )
-
-            # Add close button and send initial message
             view = CloseButton()
-            await channel.send(embed=embed, view=view)
+            await thread.send(embed=embed, view=view)
 
             # Send confirmation
             confirm_embed = self.ui.user_embed(
                 "Ticket Created",
-                f"Your ticket has been created: {channel.mention}",
+                f"Your ticket has been created: {thread.mention}"
             )
-            await followup.send(embed=confirm_embed, ephemeral=True)
+            await modal.interaction.followup.send(embed=confirm_embed, ephemeral=True)
 
         except Exception as e:
             error_embed = self.ui.error_embed(
                 "Error Creating Ticket",
                 str(e)
             )
-            # Handle response based on context
-            if hasattr(ctx, 'interaction') and ctx.interaction:
-                if not ctx.interaction.response.is_done():
-                    await ctx.interaction.response.send_message(embed=error_embed, ephemeral=True)
-                else:
-                    await ctx.interaction.followup.send(embed=error_embed, ephemeral=True)
-            else:
-                await ctx.send(embed=error_embed)
+            try:
+                await modal.interaction.followup.send(embed=error_embed, ephemeral=True)
+            except:
+                await ctx.send(embed=error_embed, ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Tickets(bot))
