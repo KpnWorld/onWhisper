@@ -288,3 +288,81 @@ class DBManager:
         except Exception as e:
             print(f"Error during optimization: {e}")
             raise
+
+    async def get_auto_role(self, guild_id: int) -> tuple:
+        """Get the auto-role settings for a guild"""
+        try:
+            guild_data = await self.get_guild_data(guild_id)
+            autorole = guild_data.get('autorole', {}).get('settings', {})
+            return (autorole.get('role_id'), autorole.get('enabled', False))
+        except Exception as e:
+            print(f"Error getting auto-role: {e}")
+            return (None, False)
+
+    async def set_auto_role(self, guild_id: int, role_id: int, enabled: bool = True):
+        """Set the auto-role for a guild"""
+        try:
+            await self.update_guild_data(
+                guild_id,
+                {
+                    'role_id': role_id,
+                    'enabled': enabled,
+                    'last_updated': datetime.utcnow().isoformat()
+                },
+                ['autorole', 'settings']
+            )
+        except Exception as e:
+            print(f"Error setting auto-role: {e}")
+            raise
+
+    async def toggle_auto_role(self, guild_id: int, enabled: bool):
+        """Toggle auto-role on/off"""
+        try:
+            guild_data = await self.get_guild_data(guild_id)
+            autorole = guild_data.get('autorole', {}).get('settings', {})
+            
+            await self.update_guild_data(
+                guild_id,
+                {
+                    'role_id': autorole.get('role_id'),
+                    'enabled': enabled,
+                    'last_updated': datetime.utcnow().isoformat()
+                },
+                ['autorole', 'settings']
+            )
+        except Exception as e:
+            print(f"Error toggling auto-role: {e}")
+            raise
+
+    async def get_leaderboard(self, guild_id: int, limit: int = 100) -> list:
+        """Get the XP leaderboard for a guild"""
+        try:
+            # Get guild data
+            guild_data = await self.get_guild_data(guild_id)
+            xp_users = guild_data.get('xp', {}).get('users', {})
+            
+            # Convert to list of tuples (user_id, level, xp)
+            leaderboard_data = [
+                (int(user_id), data.get('level', 0), data.get('xp', 0))
+                for user_id, data in xp_users.items()
+            ]
+            
+            # Sort by XP (descending), then by level
+            leaderboard_data.sort(key=lambda x: (x[2], x[1]), reverse=True)
+            
+            # Return limited results
+            return leaderboard_data[:limit]
+            
+        except Exception as e:
+            print(f"Error getting leaderboard: {e}")
+            return []
+
+    async def get_user_leveling(self, user_id: int, guild_id: int) -> tuple:
+        """Get user level information"""
+        try:
+            guild_data = await self.get_guild_data(guild_id)
+            user_data = guild_data.get('xp', {}).get('users', {}).get(str(user_id), {})
+            return (user_data.get('level', 0), user_data.get('xp', 0))
+        except Exception as e:
+            print(f"Error getting user leveling data: {e}")
+            return (0, 0)

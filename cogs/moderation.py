@@ -253,29 +253,31 @@ class Moderation(commands.Cog):
     async def clear(self, ctx, amount: int, user: discord.Member = None):
         """Clear a specified number of messages"""
         try:
-            if isinstance(ctx, discord.Interaction):
-                await ctx.response.defer(ephemeral=True)
+            # Use ctx.defer() for both interaction and command context
+            if isinstance(ctx.interaction, discord.Interaction):
+                await ctx.defer(ephemeral=True)
             
             def check_message(m):
                 return user is None or m.author == user
 
-            deleted = await ctx.channel.purge(
+            # Get messages before deleting
+            messages = await ctx.channel.purge(
                 limit=amount,
                 check=check_message,
-                before=ctx.message.created_at if hasattr(ctx, 'message') else ctx.created_at
+                before=ctx.message.created_at if hasattr(ctx, 'message') else None
             )
             
-            # Log the action to database
+            # Log the action
             await self.db_manager.log_event(
                 ctx.guild.id,
                 ctx.author.id,
                 "clear",
-                f"Cleared {len(deleted)} messages in {ctx.channel.name}"
+                f"Cleared {len(messages)} messages in {ctx.channel.name}"
                 + (f" from {user}" if user else "")
             )
             
             description = (
-                f"Messages Deleted: {len(deleted)}\n"
+                f"Messages Deleted: {len(messages)}\n"
                 f"Channel: {ctx.channel.mention}\n"
                 f"Target User: {user.mention if user else 'All users'}"
             )
@@ -285,20 +287,29 @@ class Moderation(commands.Cog):
                 description
             )
 
-            if isinstance(ctx, discord.Interaction):
+            # Send response using appropriate method
+            if isinstance(ctx.interaction, discord.Interaction):
                 await ctx.followup.send(embed=embed, ephemeral=True)
             else:
-                await ctx.send(embed=embed, delete_after=5)
+                msg = await ctx.send(embed=embed)
+                await asyncio.sleep(5)
+                try:
+                    await msg.delete()
+                except:
+                    pass
             
         except Exception as e:
             error_embed = self.ui.mod_embed(
                 "Error",
-                str(e),
+                str(e)
             )
-            if isinstance(ctx, discord.Interaction):
-                await ctx.followup.send(embed=error_embed, ephemeral=True)
-            else:
-                await ctx.send(embed=error_embed, ephemeral=True)
+            try:
+                if isinstance(ctx.interaction, discord.Interaction):
+                    await ctx.followup.send(embed=error_embed, ephemeral=True)
+                else:
+                    await ctx.send(embed=error_embed, ephemeral=True)
+            except:
+                pass
 
     @commands.hybrid_command(description="Warn a member")
     @commands.has_permissions(moderate_members=True)
