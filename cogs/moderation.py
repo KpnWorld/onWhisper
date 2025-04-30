@@ -260,6 +260,13 @@ class Moderation(commands.Cog):
             def check_message(m):
                 return user is None or m.author == user
 
+            # Send initial status
+            status_embed = self.ui.mod_embed(
+                "Clearing Messages",
+                f"Deleting {amount} messages..." + (f" from {user.mention}" if user else "")
+            )
+            status_msg = await ctx.send(embed=status_embed)
+
             # Get messages before deleting
             messages = await ctx.channel.purge(
                 limit=amount,
@@ -276,40 +283,30 @@ class Moderation(commands.Cog):
                 + (f" from {user}" if user else "")
             )
             
+            # Update status message with results
             description = (
-                f"Messages Deleted: {len(messages)}\n"
+                f"Successfully deleted {len(messages)} messages\n"
                 f"Channel: {ctx.channel.mention}\n"
                 f"Target User: {user.mention if user else 'All users'}"
             )
             
-            embed = self.ui.mod_embed(
-                "Messages Cleared",
+            result_embed = self.ui.mod_embed(
+                "🗑️ Messages Cleared",
                 description
             )
 
-            # Send response using appropriate method
-            if isinstance(ctx.interaction, discord.Interaction):
-                await ctx.followup.send(embed=embed, ephemeral=True)
-            else:
-                msg = await ctx.send(embed=embed)
-                await asyncio.sleep(5)
-                try:
-                    await msg.delete()
-                except:
-                    pass
+            # Update status message or send new one
+            try:
+                await status_msg.edit(embed=result_embed, delete_after=5)
+            except discord.NotFound:
+                await ctx.send(embed=result_embed, delete_after=5)
             
         except Exception as e:
             error_embed = self.ui.mod_embed(
                 "Error",
                 str(e)
             )
-            try:
-                if isinstance(ctx.interaction, discord.Interaction):
-                    await ctx.followup.send(embed=error_embed, ephemeral=True)
-                else:
-                    await ctx.send(embed=error_embed, ephemeral=True)
-            except:
-                pass
+            await ctx.send(embed=error_embed, ephemeral=True)
 
     @commands.hybrid_command(description="Warn a member")
     @commands.has_permissions(moderate_members=True)

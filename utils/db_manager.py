@@ -366,3 +366,44 @@ class DBManager:
         except Exception as e:
             print(f"Error getting user leveling data: {e}")
             return (0, 0)
+
+    async def add_reaction_role(self, message_id: int, emoji: str, role_id: int):
+        """Add a reaction role binding"""
+        try:
+            key = f"{self.prefix}reaction_roles:{message_id}"
+            current = json.loads(self.db.get(key, "{}"))
+            current[emoji] = role_id
+            self.db[key] = json.dumps(current)
+        except Exception as e:
+            print(f"Error adding reaction role: {e}")
+            raise
+
+    async def get_reaction_roles(self, message_id: int) -> dict:
+        """Get reaction roles for a message"""
+        try:
+            key = f"{self.prefix}reaction_roles:{message_id}"
+            if key not in self.db:
+                return {}
+            return json.loads(self.db[key])
+        except Exception as e:
+            print(f"Error getting reaction roles: {e}")
+            return {}
+
+    async def remove_reaction_role(self, message_id: int, emoji: str) -> bool:
+        """Remove a reaction role binding"""
+        try:
+            key = f"{self.prefix}reaction_roles:{message_id}"
+            if key not in self.db:
+                return False
+            current = json.loads(self.db[key])
+            if emoji in current:
+                del current[emoji]
+                if current:
+                    self.db[key] = json.dumps(current)
+                else:
+                    del self.db[key]
+                return True
+            return False
+        except Exception as e:
+            print(f"Error removing reaction role: {e}")
+            return False
