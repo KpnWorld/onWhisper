@@ -79,13 +79,24 @@ class Tickets(commands.Cog):
     async def ticket(self, ctx):
         """Create a support ticket using a form"""
         try:
-            # Show modal first to get ticket details
-            modal = self.TicketModal()
-            await ctx.interaction.response.send_modal(modal)
-            await modal.wait()
-            
-            # Get ticket reason from modal
-            reason = f"{modal.summary}\n\n{modal.details}" if modal.details else modal.summary
+            # Check if using slash command or prefix
+            if hasattr(ctx, 'interaction') and ctx.interaction:
+                # Show modal for slash command
+                modal = self.TicketModal()
+                await ctx.interaction.response.send_modal(modal)
+                await modal.wait()
+                
+                # Get ticket reason from modal
+                reason = f"{modal.summary}\n\n{modal.details}" if modal.details else modal.summary
+                followup = modal.interaction
+            else:
+                # For prefix command, send regular message
+                embed = self.ui.info_embed(
+                    "Create Ticket",
+                    "Use the slash command `/ticket` to create a support ticket"
+                )
+                await ctx.send(embed=embed)
+                return
 
             # Get guild data
             guild_data = await self.db_manager.get_guild_data(ctx.guild.id)
@@ -105,17 +116,17 @@ class Tickets(commands.Cog):
                         "Ticket Already Open",
                         f"You already have an open ticket: {channel.mention}"
                     )
-                    await modal.interaction.followup.send(embed=embed, ephemeral=True)
+                    await followup.send(embed=embed, ephemeral=True)
                     return
 
             # Get ticket settings
             settings = await self.db_manager.get_data('tickets_config', str(ctx.guild.id))
             if not settings:
-                embed = self.ui.user_embed(
+                embed = self.ui.error_embed(
                     "Tickets Not Configured",
-                    "The ticket system has not been set up yet!",
+                    "The ticket system has not been set up yet!"
                 )
-                await modal.interaction.followup.send(embed=embed, ephemeral=True)
+                await followup.send(embed=embed, ephemeral=True)
                 return
 
             category = ctx.guild.get_channel(settings.get('category_id'))
@@ -182,12 +193,21 @@ class Tickets(commands.Cog):
                 "Ticket Created",
                 f"Your ticket has been created: {channel.mention}",
             )
-            await modal.interaction.followup.send(embed=confirm_embed, ephemeral=True)
+            await followup.send(embed=confirm_embed, ephemeral=True)
 
-        except discord.Forbidden:
-            await ctx.send("I don't have the required permissions to create tickets.")
         except Exception as e:
-            await self.bot.on_command_error(ctx, e)
+            error_embed = self.ui.error_embed(
+                "Error Creating Ticket",
+                str(e)
+            )
+            # Handle response based on context
+            if hasattr(ctx, 'interaction') and ctx.interaction:
+                if not ctx.interaction.response.is_done():
+                    await ctx.interaction.response.send_message(embed=error_embed, ephemeral=True)
+                else:
+                    await ctx.interaction.followup.send(embed=error_embed, ephemeral=True)
+            else:
+                await ctx.send(embed=error_embed)
 
 async def setup(bot):
     await bot.add_cog(Tickets(bot))
