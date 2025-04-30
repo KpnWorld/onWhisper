@@ -10,11 +10,31 @@ class Logging(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
-        self.db_manager = DBManager('bot')  # Use consistent initialization
+        self.db_manager = bot.db_manager  # Use bot's DBManager instance
         self.ui = self.bot.ui_manager
         self.log_channels = {}
-        self.bot.loop.create_task(self.load_log_channels())
+        self._ready = asyncio.Event()
+        self.bot.loop.create_task(self.setup())
 
+    async def setup(self):
+        """Ensure cog is properly initialized"""
+        await self.bot.wait_until_ready()
+        
+        try:
+            if not await self.db_manager.ensure_connection():
+                print("❌ Database not available for Logging cog")
+                return
+                
+            await self.load_log_channels()
+            self._ready.set()
+            
+        except Exception as e:
+            print(f"❌ Error setting up Logging cog: {e}")
+
+    async def cog_before_invoke(self, ctx):
+        """Wait for cog to be ready before processing commands"""
+        await self._ready.wait()
+        
     async def load_log_channels(self):
         """Load all logging channels from database on startup"""
         try:

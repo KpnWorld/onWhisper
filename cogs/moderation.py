@@ -5,13 +5,35 @@ from typing import Optional, Union
 from utils.db_manager import DBManager
 import json
 from replit import db
+import asyncio
 
 class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db_manager = DBManager()
+        self.db_manager = bot.db_manager  # Use bot's DBManager instance
         self.ui = self.bot.ui_manager
         self.locked_channels = set()
+        self._ready = asyncio.Event()
+        self.bot.loop.create_task(self.setup())
+
+    async def setup(self):
+        """Ensure cog is properly initialized"""
+        await self.bot.wait_until_ready()
+        
+        try:
+            if not await self.db_manager.ensure_connection():
+                print("❌ Database not available for Moderation cog")
+                return
+                
+            self._ready.set()
+            print("✅ Moderation cog ready")
+            
+        except Exception as e:
+            print(f"❌ Error setting up Moderation cog: {e}")
+
+    async def cog_before_invoke(self, ctx):
+        """Wait for cog to be ready before processing commands"""
+        await self._ready.wait()
 
     async def log_mod_action(self, guild: discord.Guild, action: str, description: str):
         """Send mod action to logging channel"""

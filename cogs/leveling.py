@@ -3,6 +3,7 @@ from discord.ext import commands
 from typing import Optional
 import math
 from datetime import datetime, timedelta
+import asyncio
 from utils.db_manager import DBManager
 import json
 
@@ -27,11 +28,32 @@ class LeaderboardView(discord.ui.View):
 class Leveling(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db_manager = DBManager()
+        self.db_manager = bot.db_manager  # Use bot's DBManager instance
         self.ui = self.bot.ui_manager
         self.xp_cooldown = {}
         self.base_xp = 15
         self.cooldown = 60
+        self._ready = asyncio.Event()
+        self.bot.loop.create_task(self.setup())
+
+    async def setup(self):
+        """Ensure cog is properly initialized"""
+        await self.bot.wait_until_ready()
+        
+        try:
+            if not await self.db_manager.ensure_connection():
+                print("❌ Database not available for Leveling cog")
+                return
+                
+            self._ready.set()
+            print("✅ Leveling cog ready")
+            
+        except Exception as e:
+            print(f"❌ Error setting up Leveling cog: {e}")
+
+    async def cog_before_invoke(self, ctx):
+        """Wait for cog to be ready before processing commands"""
+        await self._ready.wait()
 
     def calculate_level(self, xp):
         """Calculate level from XP using a logarithmic formula"""

@@ -1,14 +1,38 @@
 import discord
 from discord.ext import commands
-import platform
 from datetime import datetime
-from utils.db_manager import DBManager
+import asyncio
+import platform
 
 class Info(commands.Cog):
+    """Information and help commands"""
+    
     def __init__(self, bot):
         self.bot = bot
-        self.start_time = datetime.utcnow()
+        self.db_manager = bot.db_manager  # Use bot's DBManager instance
         self.ui = self.bot.ui_manager
+        self.start_time = datetime.utcnow()
+        self._ready = asyncio.Event()
+        self.bot.loop.create_task(self.setup())
+
+    async def setup(self):
+        """Ensure cog is properly initialized"""
+        await self.bot.wait_until_ready()
+        
+        try:
+            if not await self.db_manager.ensure_connection():
+                print("❌ Database not available for Info cog")
+                return
+                
+            self._ready.set()
+            print("✅ Info cog ready")
+            
+        except Exception as e:
+            print(f"❌ Error setting up Info cog: {e}")
+
+    async def cog_before_invoke(self, ctx):
+        """Wait for cog to be ready before processing commands"""
+        await self._ready.wait()
 
     @commands.hybrid_command(name="help", description="Shows all available commands")
     async def help_command(self, ctx, command: str = None):

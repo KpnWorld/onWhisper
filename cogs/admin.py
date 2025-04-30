@@ -1,17 +1,37 @@
 import discord
 from discord.ext import commands
-from typing import Optional
-from utils.db_manager import DBManager
-import json
 from datetime import datetime
+import json
+import asyncio
 
 class Admin(commands.Cog):
     """Server administration and configuration commands"""
     
     def __init__(self, bot):
         self.bot = bot
-        self.db_manager = DBManager()
+        self.db_manager = bot.db_manager  # Use bot's DBManager instance
         self.ui = self.bot.ui_manager
+        self._ready = asyncio.Event()
+        self.bot.loop.create_task(self.setup())
+
+    async def setup(self):
+        """Ensure cog is properly initialized"""
+        await self.bot.wait_until_ready()
+        
+        try:
+            if not await self.db_manager.ensure_connection():
+                print("❌ Database not available for Admin cog")
+                return
+                
+            self._ready.set()
+            print("✅ Admin cog ready")
+            
+        except Exception as e:
+            print(f"❌ Error setting up Admin cog: {e}")
+
+    async def cog_before_invoke(self, ctx):
+        """Wait for cog to be ready before processing commands"""
+        await self._ready.wait()
 
     @commands.hybrid_group(name="config")
     @commands.has_permissions(administrator=True)

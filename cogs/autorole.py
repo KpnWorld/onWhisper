@@ -3,12 +3,34 @@ from discord.ext import commands
 from typing import Optional, List
 from utils.db_manager import DBManager
 from datetime import datetime
+import asyncio
 
 class AutoRole(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db_manager = DBManager()
+        self.db_manager = bot.db_manager  # Use bot's DBManager instance
         self.ui = self.bot.ui_manager
+        self._ready = asyncio.Event()
+        self.bot.loop.create_task(self.setup())
+
+    async def setup(self):
+        """Ensure cog is properly initialized"""
+        await self.bot.wait_until_ready()
+        
+        try:
+            if not await self.db_manager.ensure_connection():
+                print("❌ Database not available for AutoRole cog")
+                return
+                
+            self._ready.set()
+            print("✅ AutoRole cog ready")
+            
+        except Exception as e:
+            print(f"❌ Error setting up AutoRole cog: {e}")
+
+    async def cog_before_invoke(self, ctx):
+        """Wait for cog to be ready before processing commands"""
+        await self._ready.wait()
 
     @commands.Cog.listener()
     async def on_member_join(self, member):

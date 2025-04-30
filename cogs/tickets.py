@@ -1,6 +1,7 @@
 import discord 
 from discord.ext import commands
 from datetime import datetime
+import asyncio
 from utils.db_manager import DBManager
 
 class CloseButton(discord.ui.View):
@@ -26,8 +27,29 @@ class CloseButton(discord.ui.View):
 class Tickets(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db_manager = DBManager()
+        self.db_manager = bot.db_manager  # Use bot's DBManager instance
         self.ui = self.bot.ui_manager
+        self._ready = asyncio.Event()
+        self.bot.loop.create_task(self.setup())
+
+    async def setup(self):
+        """Ensure cog is properly initialized"""
+        await self.bot.wait_until_ready()
+        
+        try:
+            if not await self.db_manager.ensure_connection():
+                print("❌ Database not available for Tickets cog")
+                return
+                
+            self._ready.set()
+            print("✅ Tickets cog ready")
+            
+        except Exception as e:
+            print(f"❌ Error setting up Tickets cog: {e}")
+
+    async def cog_before_invoke(self, ctx):
+        """Wait for cog to be ready before processing commands"""
+        await self._ready.wait()
 
     class TicketModal(discord.ui.Modal):
         def __init__(self):

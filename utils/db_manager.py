@@ -57,6 +57,50 @@ class DBManager:
             return await self.initialize()
         return True
 
+    async def check_connection(self) -> bool:
+        """Verify database connection is working"""
+        try:
+            if not self.db:
+                return False
+                
+            test_key = f"{self.prefix}healthcheck"
+            test_value = datetime.utcnow().isoformat()
+            
+            try:
+                self.db[test_key] = test_value
+                read_value = self.db[test_key]
+                del self.db[test_key]
+                return read_value == test_value
+            except:
+                return False
+                
+        except Exception:
+            return False
+
+    async def ensure_guild_exists(self, guild_id: int, guild_name: str = None) -> bool:
+        """Ensure guild data exists with proper structure"""
+        try:
+            if not await self.ensure_connection():
+                return False
+                
+            data = await self.get_guild_data(guild_id)
+            if not data:
+                return False
+                
+            # Verify structure is complete
+            expected_keys = ['xp', 'tickets', 'logging', 'moderation', 'autorole']
+            missing = [k for k in expected_keys if k not in data]
+            
+            if missing:
+                # Repair missing sections
+                await self.get_guild_data(guild_id)
+                
+            return True
+            
+        except Exception as e:
+            print(f"Error ensuring guild exists: {e}")
+            return False
+
     async def get_guild_data(self, guild_id: int) -> dict:
         """Get all data for a guild, with proper initialization"""
         try:
