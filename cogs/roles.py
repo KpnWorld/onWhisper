@@ -194,7 +194,7 @@ class Roles(commands.Cog):
             await ctx.send(f"Error: {e}", ephemeral=True)
 
     # Bulk role commands
-    @roles.command(name="bulk")
+    @roles.group(name="bulk")
     async def roles_bulk(self, ctx):
         """Bulk role management commands"""
         if ctx.invoked_subcommand is None:
