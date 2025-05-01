@@ -20,23 +20,27 @@ class LeaderboardView(discord.ui.View):
             self.children[1].disabled = True
 
     async def update_message(self, interaction: discord.Interaction):
-        start = self.current_page * self.per_page
-        end = start + self.per_page
-        current_users = self.users[start:end]
-        
-        description = "\n".join(
-            f"{i+1+start}. {user.mention} - Level {level} ({xp} XP)"
-            for i, (user, level, xp) in enumerate(current_users)
-        )
-        
-        embed = discord.Embed(
-            title="Server Leaderboard",
-            description=description,
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages}")
-        
-        await interaction.response.edit_message(embed=embed, view=self)
+        try:
+            start = self.current_page * self.per_page
+            end = start + self.per_page
+            current_users = self.users[start:end]
+            
+            description = "\n".join(
+                f"{i+1+start}. {user.mention} - Level {level} ({xp} XP)"
+                for i, (user, level, xp) in enumerate(current_users)
+            )
+            
+            embed = discord.Embed(
+                title="Server Leaderboard",
+                description=description,
+                color=discord.Color.blue()
+            )
+            embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages}")
+            
+            await interaction.response.edit_message(embed=embed, view=self)
+        except Exception as e:
+            print(f"Error updating leaderboard: {e}")
+            await interaction.response.send_message("Error updating leaderboard", ephemeral=True)
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -92,10 +96,8 @@ class Leveling(commands.Cog):
             return
 
         try:
-            # Get guild settings
-            settings = await self.db_manager.get_guild_data(message.guild.id)
-            xp_settings = settings.get('xp_settings', {})
-            
+            # Get XP settings directly from section
+            xp_settings = await self.db_manager.get_section(message.guild.id, 'xp_settings')
             if not xp_settings.get('enabled', True):
                 return
 
@@ -110,8 +112,9 @@ class Leveling(commands.Cog):
                 if now < self.xp_cooldown[key]:
                     return
 
-            # Get user data
-            user_data = await self.db_manager.get_user_level_data(message.guild.id, message.author.id)
+            # Get user data directly from section
+            xp_users = await self.db_manager.get_section(message.guild.id, 'xp_users')
+            user_data = xp_users.get(str(message.author.id), {'xp': 0, 'level': 0})
             current_xp = user_data.get('xp', 0)
             current_level = user_data.get('level', 0)
 
@@ -125,36 +128,31 @@ class Leveling(commands.Cog):
                 message.author.id,
                 new_xp,
                 new_level,
-                now  # Use aware datetime
+                now
             )
 
-            # Set cooldown using aware datetime
+            # Set cooldown
             self.xp_cooldown[key] = now + timedelta(seconds=cooldown)
 
             # Handle level up
             if new_level > current_level:
-                # Get level up message settings
-                levelup_settings = settings.get('level_up', {})
-                if levelup_settings.get('enabled', True):
-                    msg_format = levelup_settings.get('message', "{user} reached level {level}!")
-                    msg_duration = levelup_settings.get('duration', 0)  # 0 means permanent
-                    
-                    # Replace placeholders
-                    msg = msg_format.replace("{user}", message.author.mention)
-                    msg = msg.replace("{level}", str(new_level))
-                    
-                    # Send in the channel where user leveled up
-                    sent = await message.channel.send(msg)
-                    
-                    # Delete after duration if set
-                    if msg_duration > 0:
-                        await sent.delete(delay=msg_duration)
+                await self.handle_level_up(message, new_level)
 
-                # Check for role rewards
-                await self.check_level_roles(message.author, new_level)
-
+    async def handle_level_up(self, message, new_level: int):
+        """Handle level up rewards and announcements"""
+        try:
+            # Send level up message
+            embed = self.ui.success_embed(
+                "Level Up! 🎉",
+                f"{message.author.mention} reached level {new_level}!"
+            )
+            await message.channel.send(embed=embed)
+            
+            # Check and assign role rewards
+            await self.check_level_roles(message.author, new_level)
+            
         except Exception as e:
-            print(f"Error in XP processing: {e}")
+            print(f"Error handling level up: {e}")
 
     @commands.hybrid_group(name="level")
     async def level(self, ctx):
@@ -179,7 +177,12 @@ class Leveling(commands.Cog):
             current_xp = data.get('xp', 0)
             current_level = data.get('level', 0)
             next_level_xp = self.calculate_xp_for_level(current_level + 1)
-            progress = (current_xp - self.calculate_xp_for_level(current_level)) / (next_level_xp - self.calculate_xp_for_level(current_level))
+            current_level_xp = self.calculate_xp_for_level(current_level)
+
+            try:
+                progress = (current_xp - current_level_xp) / (next_level_xp - current_level_xp)
+            except ZeroDivisionError:
+                progress = 1.0
             
             # Create progress bar
             bar_length = 20
@@ -189,7 +192,7 @@ class Leveling(commands.Cog):
             embed = self.ui.info_embed(
                 f"{target.display_name}'s Level Stats",
                 f"Level: {current_level}\n"
-                f"XP: {current_xp}/{next_level_xp}\n"
+                f"XP: {current_xp:,}/{next_level_xp:,}\n"
                 f"Progress: {bar} ({progress:.1%})"
             )
             embed.set_thumbnail(url=target.display_avatar.url)
@@ -218,14 +221,21 @@ class Leveling(commands.Cog):
                         data.get('xp', 0)
                     ))
             
-            user_list.sort(key=lambda x: x[2], reverse=True)
+            user_list.sort(key=lambda x: (x[1], x[2]), reverse=True)  # Sort by level then XP
             
             if not user_list:
                 await ctx.send("No active users with XP!")
                 return
 
             view = LeaderboardView(user_list)
-            await view.update_message(await ctx.send(embed=discord.Embed()))
+            embed = discord.Embed(title="Server Leaderboard")  # Initial embed
+            message = await ctx.send(embed=embed, view=view)
+            
+            # Update the initial message
+            try:
+                await view.update_message(await message.interaction.original_response())
+            except (AttributeError, discord.NotFound):
+                await view.update_message(message)
 
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)
@@ -255,22 +265,155 @@ class Leveling(commands.Cog):
         except Exception as e:
             await ctx.send(f"Error: {e}", ephemeral=True)
 
+    @commands.hybrid_group(name="config")
+    @commands.has_permissions(manage_guild=True)
+    async def config(self, ctx):
+        """Configure leveling system"""
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help(ctx.command)
+
+    @config.group(name="xp")
+    async def config_xp(self, ctx):
+        """XP system configuration"""
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help(ctx.command)
+
+    @config_xp.command(name="rate")
+    async def xp_rate(self, ctx, amount: int):
+        """Set XP per message (1-100)"""
+        try:
+            if not 1 <= amount <= 100:
+                await ctx.send("XP rate must be between 1 and 100", ephemeral=True)
+                return
+                
+            await self.db_manager.update_xp_config(ctx.guild.id, 'rate', amount)
+            await ctx.send(f"XP rate set to {amount} per message", ephemeral=True)
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @config_xp.command(name="cooldown")
+    async def xp_cooldown(self, ctx, seconds: int):
+        """Set XP cooldown in seconds"""
+        try:
+            if seconds < 0:
+                await ctx.send("Cooldown cannot be negative", ephemeral=True)
+                return
+                
+            await self.db_manager.update_xp_config(ctx.guild.id, 'cooldown', seconds)
+            await ctx.send(f"XP cooldown set to {seconds} seconds", ephemeral=True)
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @config_xp.command(name="toggle")
+    async def xp_toggle(self, ctx):
+        """Enable or disable XP gain"""
+        try:
+            config = await self.db_manager.get_section(ctx.guild.id, 'xp_settings')
+            enabled = not config.get('enabled', True)
+            
+            await self.db_manager.update_xp_config(ctx.guild.id, 'enabled', enabled)
+            await ctx.send(
+                f"XP gain {'enabled' if enabled else 'disabled'}",
+                ephemeral=True
+            )
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @config.group(name="level")
+    async def config_level(self, ctx):
+        """Level rewards configuration"""
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help(ctx.command)
+
+    @config_level.command(name="add")
+    @commands.has_permissions(manage_roles=True)
+    async def level_add(self, ctx, level: int, role: discord.Role):
+        """Add a level-up role reward"""
+        try:
+            if level < 1:
+                await ctx.send("Level must be at least 1", ephemeral=True)
+                return
+                
+            # Check role hierarchy
+            if role >= ctx.guild.me.top_role:
+                await ctx.send("I cannot manage roles higher than my own role", ephemeral=True)
+                return
+                
+            if role >= ctx.author.top_role and ctx.author != ctx.guild.owner:
+                await ctx.send("You cannot add roles higher than your highest role", ephemeral=True)
+                return
+                
+            await self.db_manager.add_level_reward(ctx.guild.id, level, role.id)
+            await ctx.send(
+                f"Added {role.mention} as reward for level {level}",
+                ephemeral=True
+            )
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @config_level.command(name="remove")
+    async def level_remove(self, ctx, level: int):
+        """Remove a level-up role reward"""
+        try:
+            if await self.db_manager.remove_level_reward(ctx.guild.id, level):
+                await ctx.send(f"Removed reward for level {level}", ephemeral=True)
+            else:
+                await ctx.send("No reward found for that level", ephemeral=True)
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
+    @config_level.command(name="list")
+    async def level_list(self, ctx):
+        """List all level-up role rewards"""
+        try:
+            rewards = await self.db_manager.get_level_rewards(ctx.guild.id)
+            
+            if not rewards:
+                await ctx.send("No level rewards configured", ephemeral=True)
+                return
+                
+            description = "\n".join(
+                f"Level {level}: {ctx.guild.get_role(role_id).mention}"
+                for level, role_id in sorted(rewards)
+                if ctx.guild.get_role(role_id)
+            )
+            
+            embed = self.ui.info_embed(
+                "Level Rewards",
+                description
+            )
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ctx.send(f"Error: {e}", ephemeral=True)
+
     async def check_level_roles(self, member: discord.Member, new_level: int):
         """Check and assign any level roles the member should have"""
         try:
             rewards = await self.db_manager.get_level_rewards(member.guild.id)
+            if not rewards:
+                return
+                
+            # Sort rewards by level to assign in order
+            rewards.sort(key=lambda x: x[0])
             
             for level, role_id in rewards:
                 if level <= new_level:
                     role = member.guild.get_role(role_id)
                     if role and role not in member.roles:
+                        # Check if bot can manage this role
+                        if role >= member.guild.me.top_role:
+                            print(f"Cannot assign level role {role.name} - higher than bot's role")
+                            continue
+                            
                         try:
                             await member.add_roles(
                                 role,
                                 reason=f"Reached level {new_level}"
                             )
                         except discord.Forbidden:
-                            print(f"Cannot assign level role {role.name}")
+                            print(f"Missing permissions to assign role {role.name}")
+                        except discord.HTTPException as e:
+                            print(f"HTTP error assigning role {role.name}: {e}")
                         except Exception as e:
                             print(f"Error assigning level role: {e}")
                             

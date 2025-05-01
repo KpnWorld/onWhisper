@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta
 import asyncio
 from replit import db  # Add database backend import
+from typing import Optional, Dict, Any, List, Union
 
 class DBManager:
     _shared_state = {
@@ -98,7 +99,7 @@ class DBManager:
                 return False
                 
             # Verify structure is complete
-            expected_keys = ['xp', 'tickets', 'logging', 'moderation', 'autorole']
+            expected_keys = ['whisper_config', 'whispers', 'xp_settings', 'xp_users', 'level_roles', 'mod_actions', 'reaction_roles', 'logs_config']
             missing = [k for k in expected_keys if k not in data]
             
             if missing:
@@ -119,53 +120,27 @@ class DBManager:
 
             key = f"{self.prefix}guild:{guild_id}"
             if key not in self.db:
-                # Create default guild structure matching cogs
+                # Create default guild structure
                 default_data = {
-                    'xp': {
-                        'settings': {
-                            'rate': 15,
-                            'cooldown': 60,
-                            'enabled': True
-                        },
-                        'users': {},
-                        'roles': {}
+                    'whisper_config': {
+                        'enabled': True,
+                        'staff_role': None,
+                        'auto_close_minutes': 1440,
+                        'anonymous_allowed': False
                     },
-                    'tickets': {
-                        'settings': {
-                            'category_id': None,
-                            'support_role_id': None,
-                            'enabled': True
-                        },
-                        'active': [],
-                        'archived': []
+                    'whispers': [],
+                    'xp_settings': {
+                        'enabled': True,
+                        'rate': 15,
+                        'cooldown': 60
                     },
-                    'logging': {
-                        'settings': {
-                            'channel_id': None,
-                            'enabled': True,
-                            'events': {
-                                'messages': True,
-                                'members': True,
-                                'moderation': True,
-                                'server': True
-                            }
-                        }
-                    },
-                    'moderation': {
-                        'settings': {
-                            'muted_role_id': None,
-                            'mod_role_id': None,
-                            'warn_expire_days': 30,
-                            'max_warnings': 3
-                        },
-                        'cases': []
-                    },
-                    'autorole': {
-                        'settings': {
-                            'role_id': None,
-                            'enabled': False
-                        },
-                        'reaction_roles': {}
+                    'xp_users': {},
+                    'level_roles': {},
+                    'mod_actions': [],
+                    'reaction_roles': {},
+                    'logs_config': {
+                        'enabled': True,
+                        'channels': {}  # channel_id -> [log_types]
                     }
                 }
                 self.db[key] = json.dumps(default_data)
@@ -175,182 +150,72 @@ class DBManager:
             print(f"Error getting guild data: {e}")
             raise
 
-    async def update_guild_data(self, guild_id: int, updates: dict, path: list = None):
-        """Update guild data at specific path"""
+    async def update_guild_data(self, guild_id: int, section: str, data: dict):
+        """Update a specific section of guild data"""
         try:
             if not await self.ensure_connection():
                 raise Exception("Database not available")
                 
-            data = await self.get_guild_data(guild_id)
-            
-            if path:
-                # Navigate to nested location
-                current = data
-                for key in path[:-1]:
-                    if key not in current:
-                        current[key] = {}
-                    current = current[key]
-                current[path[-1]] = updates
-            else:
-                data.update(updates)
-
-            # Save with metadata
-            data['last_updated'] = datetime.utcnow().isoformat()
-            self.db[f"{self.prefix}guild:{guild_id}"] = json.dumps(data)
+            guild_data = await self.get_guild_data(guild_id)
+            guild_data[section] = data
+            self.db[f"{self.prefix}guild:{guild_id}"] = json.dumps(guild_data)
             
         except Exception as e:
             print(f"Error updating guild data: {e}")
             raise
 
-    async def get_data(self, collection: str, key: str) -> dict:
-        """Get data from a collection with connection management"""
-        if not await self.ensure_connection():
-            return None
+    async def get_section(self, guild_id: int, section: str) -> dict:
+        """Get a specific section of guild data"""
+        try:
+            data = await self.get_guild_data(guild_id)
+            return data.get(section, {})
+        except Exception as e:
+            print(f"Error getting section {section}: {e}")
+            return {}
+
+    async def get_guild_config(self, guild_id: int, section: str = None) -> dict:
+        """Get guild configuration, optionally for a specific section"""
+        try:
+            data = await self.get_guild_data(guild_id)
+            config = data.get('config', {})
+            return config.get(section, {}) if section else config
+        except Exception as e:
+            print(f"Error getting guild config: {e}")
+            return {}
+
+    async def update_guild_config(self, guild_id: int, updates: dict, section: str = None) -> bool:
+        """Update guild configuration, optionally for a specific section"""
+        try:
+            data = await self.get_guild_data(guild_id)
             
-        db_key = f"{self.prefix}{collection}:{key}"
-        if db_key not in self.db:
-            return None
+            if section:
+                if 'config' not in data:
+                    data['config'] = {}
+                if section not in data['config']:
+                    data['config'][section] = {}
+                data['config'][section].update(updates)
+            else:
+                if 'config' not in data:
+                    data['config'] = {}
+                data['config'].update(updates)
             
-        return json.loads(self.db[db_key])
-
-    async def set_data(self, collection: str, key: str, data: dict):
-        """Set data in a collection"""
-        try:
-            if not self.db:
-                await self.initialize()
-                if not self.db:
-                    raise Exception("Database not available")
-                    
-            db_key = f"{self.prefix}{collection}:{key}"
-            self.db[db_key] = json.dumps(data)
+            data['last_updated'] = datetime.utcnow().isoformat()
+            self.db[f"{self.prefix}guild:{guild_id}"] = json.dumps(data)
+            return True
         except Exception as e:
-            print(f"Error setting data: {e}")
-            raise
-
-    async def delete_data(self, collection: str, key: str):
-        """Delete data from a collection"""
-        try:
-            if not await self.ensure_connection():
-                raise Exception("Database not available")
-                
-            db_key = f"{self.prefix}{collection}:{key}"
-            if db_key in self.db:
-                del self.db[db_key]
-        except Exception as e:
-            print(f"Error deleting data: {e}")
-            raise
-
-    async def log_event(self, guild_id: int, user_id: int, event_type: str, details: str, **kwargs):
-        """Log an event with additional metadata"""
-        try:
-            if not self.db:
-                await self.initialize()
-                if not self.db:
-                    return
-                    
-            event_data = {
-                'guild_id': guild_id,
-                'user_id': user_id,
-                'action': event_type,
-                'details': details,
-                'timestamp': datetime.utcnow().isoformat(),
-                **kwargs
-            }
-            
-            key = f"{self.prefix}logs:{guild_id}:{int(datetime.utcnow().timestamp())}"
-            self.db[key] = json.dumps(event_data)
-            
-        except Exception as e:
-            print(f"Error logging event: {e}")
-
-    async def cleanup_old_data(self, days: int = 30):
-        """Clean up old data"""
-        try:
-            if not await self.ensure_connection():
-                return
-                
-            cutoff = datetime.utcnow() - timedelta(days=days)
-            
-            for guild_id in [k.split(':')[2] for k in self.db.keys() if k.startswith(f"{self.prefix}guild:")]:
-                data = await self.get_guild_data(int(guild_id))
-                
-                # Clean old tickets
-                if 'tickets' in data:
-                    data['tickets']['archived'] = [
-                        t for t in data['tickets'].get('archived', [])
-                        if datetime.fromisoformat(t['closed_at']) > cutoff
-                    ]
-                
-                # Clean old mod cases
-                if 'moderation' in data:
-                    data['moderation']['cases'] = [
-                        c for c in data['moderation'].get('cases', [])
-                        if not c.get('expires') or 
-                        datetime.fromisoformat(c['expires']) > cutoff
-                    ]
-                
-                # Update cleaned data
-                await self.update_guild_data(int(guild_id), data)
-                
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
-            raise
-
-    async def optimize(self):
-        """Optimize database structure"""
-        try:
-            if not await self.ensure_connection():
-                return
-                
-            # Verify all guild data matches current structure
-            for key in self.db.keys():
-                if key.startswith(f"{self.prefix}guild:"):
-                    guild_id = int(key.split(':')[2])
-                    await self.get_guild_data(guild_id)  # This will fix structure
-                    
-        except Exception as e:
-            print(f"Error during optimization: {e}")
-            raise
-
-    async def add_warning(self, guild_id: int, user_id: int, mod_id: int, reason: str, timestamp: datetime):
-        """Add a warning to a user"""
-        try:
-            warning = {
-                'mod_id': mod_id,
-                'reason': reason,
-                'timestamp': timestamp.isoformat()
-            }
-            
-            await self.update_guild_data(
-                guild_id,
-                {'warnings': [warning]},
-                ['moderation', 'users', str(user_id)]
-            )
-        except Exception as e:
-            print(f"Error adding warning: {e}")
-            raise
-
-    async def get_warnings(self, guild_id: int, user_id: int) -> list:
-        """Get all warnings for a user"""
-        try:
-            guild_data = await self.get_guild_data(guild_id)
-            return guild_data.get('moderation', {}).get('users', {}).get(str(user_id), {}).get('warnings', [])
-        except Exception as e:
-            print(f"Error getting warnings: {e}")
-            return []
+            print(f"Error updating guild config: {e}")
+            return False
 
     async def update_user_level_data(self, guild_id: int, user_id: int, xp: int, level: int, timestamp: datetime):
         """Update user XP and level data"""
         try:
-            await self.update_guild_data(
-                guild_id,
-                {
-                    'xp': xp,
-                    'level': level,
-                    'last_xp': timestamp.isoformat()
-                },
-                ['xp', 'users', str(user_id)]
-            )
+            data = await self.get_section(guild_id, 'xp_users')
+            data[str(user_id)] = {
+                'level': level,
+                'xp': xp,
+                'last_xp': timestamp.isoformat()
+            }
+            await self.update_guild_data(guild_id, 'xp_users', data)
         except Exception as e:
             print(f"Error updating user level data: {e}")
             raise
@@ -358,17 +223,93 @@ class DBManager:
     async def get_user_level_data(self, guild_id: int, user_id: int) -> dict:
         """Get user XP and level data"""
         try:
-            guild_data = await self.get_guild_data(guild_id)
-            return guild_data.get('xp', {}).get('users', {}).get(str(user_id), {})
+            data = await self.get_section(guild_id, 'xp_users')
+            return data.get(str(user_id), {})
         except Exception as e:
             print(f"Error getting user level data: {e}")
+            return {}
+
+    async def add_mod_action(self, guild_id: int, action: str, user_id: int, details: str, 
+                            expires: datetime = None):
+        """Add a moderation action"""
+        try:
+            mod_action = {
+                'action': action,
+                'user_id': str(user_id),
+                'details': details,
+                'timestamp': datetime.utcnow().isoformat(),
+                'expires': expires.isoformat() if expires else None
+            }
+            
+            actions = await self.get_section(guild_id, 'mod_actions')
+            actions.append(mod_action)
+            await self.update_guild_data(guild_id, 'mod_actions', actions)
+        except Exception as e:
+            print(f"Error adding mod action: {e}")
+            raise
+
+    async def add_level_role(self, guild_id: int, level: int, role_id: int):
+        """Add a level-up role reward"""
+        try:
+            roles = await self.get_section(guild_id, 'level_roles')
+            roles[str(level)] = role_id  # Store as int
+            await self.update_guild_data(guild_id, 'level_roles', roles)
+            return True
+        except Exception as e:
+            print(f"Error adding level role: {e}")
+            return False
+
+    async def remove_level_role(self, guild_id: int, level: int) -> bool:
+        """Remove a level-up role"""
+        try:
+            roles = await self.get_section(guild_id, 'level_roles')
+            if str(level) in roles:
+                del roles[str(level)]
+                await self.update_guild_data(guild_id, 'level_roles', roles)
+                return True
+            return False
+        except Exception as e:
+            print(f"Error removing level role: {e}")
+            return False
+
+    async def get_level_roles(self, guild_id: int) -> list:
+        """Get all level-up roles"""
+        try:
+            roles = await self.get_section(guild_id, 'level_roles')
+            return [(int(level), role_id) for level, role_id in roles.items()]
+        except Exception as e:
+            print(f"Error getting level roles: {e}")
+            return []
+
+    async def update_reaction_roles(self, guild_id: int, message_id: int, emoji: str, role_id: int):
+        """Update reaction role bindings"""
+        try:
+            reaction_roles = await self.get_section(guild_id, 'reaction_roles')
+            if str(message_id) not in reaction_roles:
+                reaction_roles[str(message_id)] = {}
+            reaction_roles[str(message_id)][emoji] = str(role_id)
+            await self.update_guild_data(guild_id, 'reaction_roles', reaction_roles)
+            return True
+        except Exception as e:
+            print(f"Error updating reaction roles: {e}")
+            return False
+
+    async def get_reaction_roles(self, guild_id: int, message_id: int = None) -> dict:
+        """Get reaction roles, optionally filtered by message"""
+        try:
+            reaction_roles = await self.get_section(guild_id, 'reaction_roles')
+            if message_id:
+                return reaction_roles.get(str(message_id), {})
+            return reaction_roles
+        except Exception as e:
+            print(f"Error getting reaction roles: {e}")
             return {}
 
     async def get_ticket_logs(self, guild_id: int, user_id: int = None) -> list:
         """Get ticket logs, optionally filtered by user"""
         try:
             guild_data = await self.get_guild_data(guild_id)
-            logs = guild_data.get('tickets', {}).get('logs', [])
+            logs = guild_data.get('data', {}).get('tickets', {}).get('logs', [])
             
             if user_id:
                 logs = [log for log in logs if log.get('user_id') == user_id]
@@ -397,27 +338,24 @@ class DBManager:
             print(f"Error logging deleted message: {e}")
             raise
 
-    async def set_auto_role(self, guild_id: int, role_id: int, enabled: bool = True):
-        """Set auto-role for new members"""
+    async def update_auto_role(self, guild_id: int, role_id: Optional[int] = None) -> bool:
+        """Set or remove auto-role"""
         try:
-            await self.update_guild_data(
-                guild_id,
-                {
-                    'role_id': role_id,
-                    'enabled': enabled
-                },
-                ['autorole', 'settings']
-            )
+            config = await self.get_section(guild_id, 'autorole')
+            config['role_id'] = role_id
+            config['enabled'] = bool(role_id)
+            await self.update_guild_data(guild_id, 'autorole', config)
+            return True
         except Exception as e:
-            print(f"Error setting auto-role: {e}")
-            raise
+            print(f"Error updating auto-role: {e}")
+            return False
 
     async def get_auto_role(self, guild_id: int) -> tuple:
         """Get auto-role settings"""
         try:
-            guild_data = await self.get_guild_data(guild_id)
-            settings = guild_data.get('autorole', {}).get('settings', {})
-            return (settings.get('role_id'), settings.get('enabled', False))
+            config = await self.get_section(guild_id, 'autorole')
+            role_id = config.get('role_id')
+            return (int(role_id) if role_id else None, config.get('enabled', False))
         except Exception as e:
             print(f"Error getting auto-role: {e}")
             return (None, False)
@@ -425,11 +363,11 @@ class DBManager:
     async def get_all_levels(self, guild_id: int) -> dict:
         """Get all user levels in a guild"""
         try:
-            guild_data = await self.get_guild_data(guild_id)
-            return guild_data.get('xp', {}).get('users', {})
+            data = await self.get_section(guild_id, 'xp_users')
+            return data or {}
         except Exception as e:
             print(f"Error getting all levels: {e}")
-            return []
+            return {}
 
     async def add_level_reward(self, guild_id: int, level: int, role_id: int):
         """Add a role reward for reaching a level"""
@@ -498,10 +436,375 @@ class DBManager:
             print(f"Error removing reaction role: {e}")
             return False
 
-    async def get_reaction_roles(self, message_id: int) -> dict:
-        """Get all reaction role bindings for a message"""
+    async def create_whisper_thread(self, guild_id: int, user_id: int, thread_id: int, message: str) -> bool:
+        """Create a new whisper thread"""
         try:
-            return await self.get_data('reaction_roles', str(message_id)) or {}
+            whisper = {
+                'user_id': str(user_id),
+                'thread_id': str(thread_id),
+                'initial_message': message,
+                'created_at': datetime.utcnow().isoformat(),
+                'closed_at': None
+            }
+            whispers = await self.get_section(guild_id, 'whispers')
+            whispers.append(whisper)
+            await self.update_guild_data(guild_id, 'whispers', whispers)
+            return True
         except Exception as e:
-            print(f"Error getting reaction roles: {e}")
+            print(f"Error creating whisper: {e}")
+            return False
+
+    async def close_whisper(self, guild_id: int, thread_id: str) -> bool:
+        """Close a whisper thread"""
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            for whisper in whispers:
+                if whisper['thread_id'] == thread_id:
+                    whisper['closed_at'] = datetime.utcnow().isoformat()
+                    await self.update_guild_data(guild_id, 'whispers', whispers)
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error closing whisper: {e}")
+            return False
+
+    async def get_whispers(self, guild_id: int, include_closed: bool = False) -> list:
+        """Get all whispers for a guild"""
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            if include_closed:
+                return whispers
+            return [w for w in whispers if not w.get('closed_at')]
+        except Exception as e:
+            print(f"Error getting whispers: {e}")
+            return []
+
+    async def get_active_whispers(self, guild_id: int) -> list:
+        """Get only active whispers"""
+        return await self.get_whispers(guild_id, include_closed=False)
+
+    # Whisper System Methods
+    async def update_whisper_config(self, guild_id: int, setting: str, value: Any) -> bool:
+        """Update whisper system configuration"""
+        try:
+            config = await self.get_section(guild_id, 'whisper_config')
+            config[setting] = value
+            await self.update_guild_data(guild_id, 'whisper_config', config)
+            return True
+        except Exception as e:
+            print(f"Error updating whisper config: {e}")
+            return False
+
+    # XP and Leveling Methods
+    async def update_xp_config(self, guild_id: int, setting: str, value: Any) -> bool:
+        """Update XP system configuration"""
+        try:
+            config = await self.get_section(guild_id, 'xp_settings')
+            config[setting] = value
+            await self.update_guild_data(guild_id, 'xp_settings', config)
+            return True
+        except Exception as e:
+            print(f"Error updating XP config: {e}")
+            return False
+
+    # Moderation Methods
+    async def add_warning(self, guild_id: int, user_id: int, mod_id: int, reason: str) -> bool:
+        """Add a warning to a user"""
+        try:
+            warning = {
+                'action': 'warn',
+                'user_id': str(user_id),
+                'mod_id': str(mod_id),
+                'details': reason,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            actions = await self.get_section(guild_id, 'mod_actions')
+            actions.append(warning)
+            await self.update_guild_data(guild_id, 'mod_actions', actions)
+            return True
+        except Exception as e:
+            print(f"Error adding warning: {e}")
+            return False
+
+    async def get_user_warnings(self, guild_id: int, user_id: int) -> list:
+        """Get all warnings for a user"""
+        try:
+            actions = await self.get_section(guild_id, 'mod_actions')
+            return [
+                a for a in actions 
+                if a['action'] == 'warn' and a['user_id'] == str(user_id)
+            ]
+        except Exception as e:
+            print(f"Error getting warnings: {e}")
+            return []
+
+    async def add_channel_lock(self, guild_id: int, channel_id: int, 
+                             duration: int = None) -> bool:
+        """Add a channel lockdown"""
+        try:
+            lock = {
+                'channel_id': str(channel_id),
+                'locked_at': datetime.utcnow().isoformat(),
+                'duration': duration,
+                'expires': (datetime.utcnow() + timedelta(minutes=duration)).isoformat() if duration else None
+            }
+            data = await self.get_section(guild_id, 'locks')
+            data[str(channel_id)] = lock
+            await self.update_guild_data(guild_id, 'locks', data)
+            return True
+        except Exception as e:
+            print(f"Error adding channel lock: {e}")
+            return False
+
+    # Role Management Methods
+    async def bulk_role_update(self, guild_id: int, role_id: int, 
+                             user_ids: list, action: str) -> dict:
+        """Bulk add/remove role from users"""
+        try:
+            key = f"{self.prefix}bulk_role:{guild_id}:{int(datetime.utcnow().timestamp())}"
+            data = {
+                'role_id': str(role_id),
+                'users': [str(uid) for uid in user_ids],
+                'action': action,
+                'timestamp': datetime.utcnow().isoformat(),
+                'status': {}
+            }
+            self.db[key] = json.dumps(data)
+            return data
+        except Exception as e:
+            print(f"Error in bulk role update: {e}")
             return {}
+
+    # Info and Stats Methods
+    async def get_bot_stats(self, bot_id: int) -> dict:
+        """Get bot statistics"""
+        try:
+            stats_key = f"{self.prefix}stats:{bot_id}"
+            if stats_key not in self.db:
+                return {'commands_used': 0, 'messages_seen': 0}
+            return json.loads(self.db[stats_key])
+        except Exception as e:
+            print(f"Error getting bot stats: {e}")
+            return {}
+
+    async def increment_stat(self, bot_id: int, stat: str) -> bool:
+        """Increment a bot statistic"""
+        try:
+            stats = await self.get_bot_stats(bot_id)
+            stats[stat] = stats.get(stat, 0) + 1
+            self.db[f"{self.prefix}stats:{bot_id}"] = json.dumps(stats)
+            return True
+        except Exception as e:
+            print(f"Error incrementing stat: {e}")
+            return False
+
+    async def get_data(self, collection: str, key: str) -> Optional[Dict]:
+        """Get data from a collection"""
+        try:
+            if not await self.ensure_connection():
+                raise Exception("Database not available")
+                
+            db_key = f"{self.prefix}{collection}:{key}"
+            data = self.db.get(db_key)
+            return json.loads(data) if data else None
+            
+        except Exception as e:
+            print(f"Error getting data from {collection}: {e}")
+            return None
+
+    async def set_data(self, collection: str, key: str, data: Dict) -> bool:
+        """Set data in a collection"""
+        try:
+            if not await self.ensure_connection():
+                raise Exception("Database not available")
+                
+            db_key = f"{self.prefix}{collection}:{key}"
+            self.db[db_key] = json.dumps(data)
+            return True
+            
+        except Exception as e:
+            print(f"Error setting data in {collection}: {e}")
+            return False
+
+    async def delete_data(self, collection: str, key: str) -> bool:
+        """Delete data from a collection"""
+        try:
+            if not await self.ensure_connection():
+                raise Exception("Database not available")
+                
+            db_key = f"{self.prefix}{collection}:{key}"
+            if db_key in self.db:
+                del self.db[db_key]
+                return True
+            return False
+            
+        except Exception as e:
+            print(f"Error deleting data from {collection}: {e}")
+            return False
+
+    async def log_event(self, guild_id: int, user_id: int, event_type: str, details: str) -> bool:
+        """Log an event to guild events collection"""
+        try:
+            event = {
+                'user_id': str(user_id),
+                'type': event_type,
+                'details': details,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            
+            events = await self.get_section(guild_id, 'events') or []
+            events.append(event)
+            await self.update_guild_data(guild_id, 'events', events)
+            return True
+            
+        except Exception as e:
+            print(f"Error logging event: {e}")
+            return False
+
+    async def cleanup_old_data(self, days: int = 30) -> bool:
+        """Clean up old data"""
+        try:
+            if not await self.ensure_connection():
+                raise Exception("Database not available")
+                
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            counter = 0
+            
+            # Clean up old bulk role operations
+            for key in list(self.db.keys()):
+                if key.startswith(f"{self.prefix}bulk_role:"):
+                    try:
+                        data = json.loads(self.db[key])
+                        if datetime.fromisoformat(data['timestamp']) < cutoff:
+                            del self.db[key]
+                            counter += 1
+                    except:
+                        continue
+
+            # Clean up old snipe data
+            for key in list(self.db.keys()):
+                if key.startswith(f"{self.prefix}snipe:"):
+                    try:
+                        data = json.loads(self.db[key])
+                        if datetime.fromisoformat(data['timestamp']) < cutoff:
+                            del self.db[key]
+                            counter += 1
+                    except:
+                        continue
+
+            # Clean up old events
+            for guild_key in list(self.db.keys()):
+                if guild_key.startswith(f"{self.prefix}guild:"):
+                    try:
+                        guild_data = json.loads(self.db[guild_key])
+                        events = guild_data.get('events', [])
+                        new_events = [
+                            e for e in events
+                            if datetime.fromisoformat(e['timestamp']) >= cutoff
+                        ]
+                        if len(new_events) != len(events):
+                            guild_data['events'] = new_events
+                            self.db[guild_key] = json.dumps(guild_data)
+                            counter += len(events) - len(new_events)
+                    except:
+                        continue
+                        
+            print(f"Cleaned up {counter} old records")
+            return True
+            
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+            return False
+
+    async def optimize(self) -> bool:
+        """Optimize database"""
+        try:
+            if not await self.ensure_connection():
+                raise Exception("Database not available")
+                
+            # Clean up any None or empty values
+            for key in list(self.db.keys()):
+                if key.startswith(self.prefix):
+                    try:
+                        value = self.db[key]
+                        if value is None:
+                            del self.db[key]
+                            continue
+                            
+                        # Parse and re-serialize JSON to clean up formatting
+                        if isinstance(value, str):
+                            data = json.loads(value)
+                            if not data:  # Remove empty objects/arrays
+                                del self.db[key]
+                            else:
+                                self.db[key] = json.dumps(data)
+                    except:
+                        continue
+                        
+            return True
+            
+        except Exception as e:
+            print(f"Error optimizing database: {e}")
+            return False
+
+    async def get_connection_stats(self) -> Dict[str, Any]:
+        """Get database connection statistics"""
+        try:
+            if not await self.ensure_connection():
+                raise Exception("Database not available")
+                
+            total_keys = 0
+            total_size = 0
+            collections = {}
+            
+            # Calculate stats
+            for key in self.db.keys():
+                if key.startswith(self.prefix):
+                    total_keys += 1
+                    try:
+                        size = len(str(self.db[key]).encode('utf-8'))
+                        total_size += size
+                        
+                        # Group by collection
+                        collection = key.split(':', 2)[1].split(':', 1)[0]
+                        if collection not in collections:
+                            collections[collection] = {'keys': 0, 'size': 0}
+                        collections[collection]['keys'] += 1
+                        collections[collection]['size'] += size
+                    except:
+                        continue
+            
+            return {
+                'status': 'connected',
+                'total_keys': total_keys,
+                'total_size': total_size,
+                'collections': collections,
+                'prefix': self.prefix
+            }
+            
+        except Exception as e:
+            print(f"Error getting connection stats: {e}")
+            return {
+                'status': 'error',
+                'error': str(e)
+            }
+
+    async def get_database_size(self) -> int:
+        """Get approximate database size in bytes"""
+        try:
+            if not await self.ensure_connection():
+                raise Exception("Database not available")
+                
+            total_size = 0
+            for key in self.db.keys():
+                if key.startswith(self.prefix):
+                    try:
+                        total_size += len(key.encode('utf-8'))  # Key size
+                        total_size += len(str(self.db[key]).encode('utf-8'))  # Value size
+                    except:
+                        continue
+            return total_size
+            
+        except Exception as e:
+            print(f"Error calculating database size: {e}")
+            return 0
