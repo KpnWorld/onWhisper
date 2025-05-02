@@ -95,37 +95,74 @@ class RolesCog(commands.Cog):
             if role >= interaction.guild.me.top_role:
                 raise commands.CommandError("I cannot manage this role as it's higher than my highest role")
 
-            # Try to find the message
+            # Try to find the message first
             try:
                 message = await interaction.channel.fetch_message(int(message_id))
             except:
                 raise commands.CommandError("Could not find message with that ID in this channel")
 
-            # Add the initial reaction
+            # Verify the emoji by trying to add it
             try:
                 await message.add_reaction(emoji)
             except:
                 raise commands.CommandError("Invalid emoji or I cannot add reactions to that message")
 
+            # Let the user know we're processing
+            await interaction.response.defer()
+
             # Store the reaction role binding
-            await self.bot.db_manager.add_reaction_role(
-                interaction.guild_id,
-                message_id,
-                emoji,
-                str(role.id)
-            )
+            try:
+                await self.bot.db_manager.add_reaction_role(
+                    interaction.guild_id,
+                    int(message_id),
+                    emoji,
+                    role.id
+                )
 
-            embed = self.bot.ui_manager.success_embed(
-                "Reaction Role Created",
-                f"Users can now get the {role.mention} role by reacting with {emoji}"
-            )
-            await interaction.response.send_message(embed=embed)
+                embed = self.bot.ui_manager.success_embed(
+                    "Reaction Role Created",
+                    f"Users can now get the {role.mention} role by reacting with {emoji} to [this message]({message.jump_url})"
+                )
+                await interaction.followup.send(embed=embed)
 
-        except Exception as e:
+            except Exception as e:
+                # Clean up the reaction if database update failed
+                try:
+                    await message.remove_reaction(emoji, interaction.guild.me)
+                except:
+                    pass
+                raise commands.CommandError(f"Failed to create reaction role: {str(e)}")
+
+        except commands.MissingPermissions:
             await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                embed=self.bot.ui_manager.error_embed(
+                    "Missing Permissions",
+                    "You need the Manage Roles permission to use this command"
+                ),
                 ephemeral=True
             )
+        except commands.CommandError as e:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                    ephemeral=True
+                )
+        except Exception as e:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                    ephemeral=True
+                )
 
     @app_commands.command(
         name="roles_react_unbind",

@@ -164,10 +164,13 @@ class DBManager:
             print(f"Error updating guild data: {e}")
             raise
 
-    async def get_section(self, guild_id: int, section: str) -> dict:
+    async def get_section(self, guild_id: int, section: str) -> Union[dict, list]:
         """Get a specific section of guild data"""
         try:
             data = await self.get_guild_data(guild_id)
+            # Handle special sections that should be lists
+            if section in ['whispers', 'mod_actions']:
+                return data.get(section, [])
             return data.get(section, {})
         except Exception as e:
             print(f"Error getting section {section}: {e}")
