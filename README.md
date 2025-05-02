@@ -89,9 +89,9 @@ A feature-rich Discord bot built with py-cord that includes leveling, tickets, m
 - `/kick <user> [reason]` - Kick a member
 - `/ban <user> [reason]` - Ban a member
 - `/timeout <user> <duration> [reason]` - Temporarily mute a user
-- `/purge <amount>` - Bulk delete messages (1-100)
 - `/lockdown [channel] [duration]` - Lock a channel temporarily
 - `/slowmode <seconds> [channel]` - Set slowmode in a channel
+- `/clear <amount> [user]` - Bulk delete messages (1-100)
 - `/snipe` - Retrieve last deleted message
 
 ### Information

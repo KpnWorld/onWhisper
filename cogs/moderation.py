@@ -652,60 +652,6 @@ class ModerationCog(commands.Cog):
             )
 
     @app_commands.command(
-        name="purge",
-        description="Delete multiple messages at once"
-    )
-    @app_commands.describe(
-        amount="Number of messages to delete (1-100)"
-    )
-    @app_commands.default_permissions(manage_messages=True)
-    async def purge(
-        self,
-        interaction: discord.Interaction,
-        amount: int
-    ):
-        """Bulk delete messages"""
-        try:
-            if not interaction.user.guild_permissions.manage_messages:
-                raise commands.MissingPermissions(["manage_messages"])
-
-            if amount < 1 or amount > 100:
-                raise ValueError("Amount must be between 1 and 100")
-
-            await interaction.response.defer(ephemeral=True)
-
-            # Delete messages
-            deleted = await interaction.channel.purge(
-                limit=amount,
-                reason=f"Purge command used by {interaction.user}"
-            )
-
-            embed = self.bot.ui_manager.success_embed(
-                "Messages Deleted",
-                f"Successfully deleted {len(deleted)} messages"
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except commands.MissingPermissions as e:
-            await interaction.followup.send(
-                embed=self.bot.ui_manager.error_embed(
-                    "Missing Permissions",
-                    "You need the Manage Messages permission to use this command."
-                ),
-                ephemeral=True
-            )
-        except ValueError as e:
-            await interaction.followup.send(
-                embed=self.bot.ui_manager.error_embed("Invalid Value", str(e)),
-                ephemeral=True
-            )
-        except Exception as e:
-            await interaction.followup.send(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
-
-    @app_commands.command(
         name="timeout",
         description="Timeout a user for a specified duration"
     )

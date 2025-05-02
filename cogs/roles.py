@@ -218,7 +218,7 @@ class RolesCog(commands.Cog):
     @app_commands.describe(
         action="Whether to add or remove the role",
         role="The role to add/remove",
-        users="The users to update (space-separated)"
+        users="Users to update (space-separated) or '@everyone' for all members"
     )
     @app_commands.choices(action=[
         app_commands.Choice(name="Add role", value="add"),
@@ -240,15 +240,22 @@ class RolesCog(commands.Cog):
             if role >= interaction.guild.me.top_role:
                 raise commands.CommandError("I cannot manage this role as it's higher than my highest role")
 
-            # Parse user IDs/mentions
-            user_ids = []
-            for word in users.split():
-                if word.isdigit():
-                    user_ids.append(int(word))
-                elif word.startswith('<@') and word.endswith('>'):
-                    user_id = ''.join(filter(str.isdigit, word))
-                    if user_id:
-                        user_ids.append(int(user_id))
+            await interaction.response.defer()
+
+            # Handle @everyone case
+            if users.lower() == "@everyone":
+                members = interaction.guild.members
+                user_ids = [member.id for member in members if not member.bot]
+            else:
+                # Parse user IDs/mentions
+                user_ids = []
+                for word in users.split():
+                    if word.isdigit():
+                        user_ids.append(int(word))
+                    elif word.startswith('<@') and word.endswith('>'):
+                        user_id = ''.join(filter(str.isdigit, word))
+                        if user_id:
+                            user_ids.append(int(user_id))
 
             if not user_ids:
                 raise commands.CommandError("No valid user IDs or mentions found")
@@ -256,6 +263,26 @@ class RolesCog(commands.Cog):
             # Process users
             success = []
             failed = []
+            
+            # Add confirmation for @everyone
+            if users.lower() == "@everyone":
+                confirmed = await self.bot.ui_manager.confirm_action(
+                    interaction,
+                    "Confirm Bulk Role Update",
+                    f"Are you sure you want to {action} the role {role.mention} {'to' if action == 'add' else 'from'} ALL members ({len(user_ids)} users)?",
+                    confirm_label="Confirm",
+                    cancel_label="Cancel"
+                )
+                if not confirmed:
+                    await interaction.followup.send(
+                        embed=self.bot.ui_manager.info_embed(
+                            "Action Cancelled",
+                            "Bulk role update was cancelled."
+                        ),
+                        ephemeral=True
+                    )
+                    return
+
             for user_id in user_ids:
                 member = interaction.guild.get_member(user_id)
                 if member:
@@ -276,11 +303,19 @@ class RolesCog(commands.Cog):
             )
             
             if success:
-                embed.add_field(
-                    name="Successful",
-                    value=", ".join(success[:10]) + ("..." if len(success) > 10 else ""),
-                    inline=False
-                )
+                # For @everyone, just show the count
+                if users.lower() == "@everyone":
+                    embed.add_field(
+                        name="Successful",
+                        value=f"Updated {len(success)} members successfully",
+                        inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name="Successful",
+                        value=", ".join(success[:10]) + ("..." if len(success) > 10 else ""),
+                        inline=False
+                    )
             
             if failed:
                 embed.add_field(
@@ -289,7 +324,7 @@ class RolesCog(commands.Cog):
                     inline=False
                 )
 
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
         except Exception as e:
             await interaction.response.send_message(
