@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
-from typing import List, Dict, Any
+from discord import Embed
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 class CommandMultiSelectView(discord.ui.View):
@@ -26,134 +27,111 @@ class CommandMultiSelectView(discord.ui.View):
         self.stop()
 
 class UIManager:
+    """Handles consistent UI elements across the bot"""
+
     def __init__(self, bot):
         self.bot = bot
+        # Brand colors
         self.colors = {
-            "info": discord.Color.blurple(),
-            "success": discord.Color.green(),
-            "error": discord.Color.red(),
-            "admin": discord.Color.red(),
-            "mod": discord.Color.orange(),
-            "user": discord.Color.blurple(),
-            "system": discord.Color.dark_grey()
-        }
-        
-        self.command_types = {
-            "admin": "Administrative",
-            "mod": "Moderation", 
-            "user": "User",
-            "system": "System"
+            'primary': 0x5865F2,    # Discord blurple for main actions
+            'success': 0x57F287,    # Green for success messages
+            'warning': 0xFEE75C,    # Yellow for warnings
+            'error': 0xED4245,      # Red for errors
+            'info': 0x5865F2,       # Blurple for info
+            'whisper': 0x9C84EF,    # Purple for whisper system
+            'xp': 0x2ECC71,         # Green for leveling system
+            'mod': 0xF1C40F         # Yellow for moderation
         }
 
-    def make_embed(
-        self,
-        title: str = None,
-        description: str = None,
-        *,
-        color: discord.Color = None,
-        fields: list = None,
-        footer_text: str = None,
-        timestamp: bool = True,
-        codeblock: bool = False,
-        command_type: str = "user"
-    ) -> discord.Embed:
-        """Creates a clean, reusable embed."""
-        # Normalize command type and get color
-        cmd_type = command_type.lower()
-        embed_color = color or self.colors.get(cmd_type, self.colors["info"])
-        
-        embed = discord.Embed(
-            title=title,
-            description=f"```{description}```" if codeblock and description else description,
-            color=embed_color,
-            timestamp=datetime.utcnow() if timestamp else None
-        )
-
-        if fields:
-            for name, value, inline in fields:
-                embed.add_field(name=name, value=value, inline=inline)
-
-        # Set footer with command type
-        footer = footer_text or "onWhisper • Powered by KpnWorld LLC"
-        if cmd_type in self.command_types:
-            footer = f"{self.command_types[cmd_type]} Command • {footer}"
-            
-        embed.set_footer(
-            text=footer,
-            icon_url=getattr(self.bot.user.avatar, 'url', None)
-        )
-
-        return embed
-
-    def info_embed(self, title: str, description: str) -> discord.Embed:
-        """Create an info embed"""
-        embed = discord.Embed(
+    def base_embed(self, title: str, description: Optional[str] = None, color: int = None) -> Embed:
+        """Create a base embed with consistent styling"""
+        embed = Embed(
             title=title,
             description=description,
-            color=0x3498db
+            color=color or self.colors['primary']
         )
+        embed.set_footer(text="onWhisper")
+        embed.timestamp = discord.utils.utcnow()
         return embed
 
-    def error_embed(self, title: str, description: str) -> discord.Embed:
-        """Create an error embed"""
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=0xe74c3c
-        )
-        return embed
-
-    def success_embed(self, title: str, description: str) -> discord.Embed:
+    def success_embed(self, title: str, description: str) -> Embed:
         """Create a success embed"""
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=0x2ecc71
-        )
+        return self.base_embed(title, description, self.colors['success'])
+
+    def error_embed(self, title: str, description: str) -> Embed:
+        """Create an error embed"""
+        return self.base_embed(f"❌ {title}", description, self.colors['error'])
+
+    def warning_embed(self, title: str, description: str) -> Embed:
+        """Create a warning embed"""
+        return self.base_embed(f"⚠️ {title}", description, self.colors['warning'])
+
+    def info_embed(self, title: str, description: str) -> Embed:
+        """Create an info embed"""
+        return self.base_embed(title, description, self.colors['info'])
+
+    def whisper_embed(self, title: str, description: str) -> Embed:
+        """Create a whisper-themed embed"""
+        embed = self.base_embed(title, description, self.colors['whisper'])
+        embed.set_footer(text="onWhisper • Private Thread")
         return embed
 
-    def admin_embed(self, title: str, description: str) -> discord.Embed:
-        """Create an admin command embed"""
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=0x9b59b6
-        )
+    def xp_embed(self, title: str, description: str) -> Embed:
+        """Create an XP/leveling themed embed"""
+        embed = self.base_embed(title, description, self.colors['xp'])
+        embed.set_footer(text="onWhisper • Leveling")
         return embed
 
-    def mod_embed(self, title: str, description: str) -> discord.Embed:
-        """Create a moderation command embed"""
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=0xe67e22
-        )
+    def mod_embed(self, title: str, description: str) -> Embed:
+        """Create a moderation themed embed"""
+        embed = self.base_embed(title, description, self.colors['mod'])
+        embed.set_footer(text="onWhisper • Moderation")
         return embed
 
-    def log_embed(self, title: str) -> discord.Embed:
-        """Create a logging embed"""
-        embed = discord.Embed(
-            title=title,
-            color=0x95a5a6
+    def feature_error_embed(self, feature: str, error_type: str, details: str) -> Embed:
+        """Create an error embed for specific features"""
+        titles = {
+            'whisper': "Whisper System Error",
+            'xp': "Leveling System Error",
+            'mod': "Moderation Error",
+            'roles': "Role Management Error"
+        }
+        colors = {
+            'whisper': self.colors['whisper'],
+            'xp': self.colors['xp'],
+            'mod': self.colors['mod'],
+            'roles': self.colors['primary']
+        }
+        return self.base_embed(
+            f"❌ {titles.get(feature, 'System Error')}",
+            f"**{error_type}**: {details}",
+            colors.get(feature, self.colors['error'])
         )
-        return embed
 
-    def user_embed(self, title=None, description=None, **kwargs):
-        """Shortcut for a user command embed."""
-        return self.make_embed(
-            title=title,
-            description=description,
-            command_type="user",
-            **kwargs
-        )
-
-    def system_embed(self, title=None, description=None, **kwargs):
-        """Shortcut for a system message embed."""
-        return self.make_embed(
-            title=title,
-            description=description,
-            command_type="system",
-            **kwargs
+    def error_to_embed(self, error: Exception) -> Embed:
+        """Convert an exception to an appropriate error embed"""
+        if isinstance(error, self.bot.WhisperError):
+            return self.feature_error_embed(
+                'whisper',
+                error.__class__.__name__.replace('Whisper', ''),
+                str(error)
+            )
+        elif isinstance(error, self.bot.LevelingError):
+            return self.feature_error_embed(
+                'xp',
+                error.__class__.__name__.replace('XP', '').replace('Leveling', ''),
+                str(error)
+            )
+        elif isinstance(error, self.bot.ReactionRoleError):
+            return self.feature_error_embed(
+                'roles',
+                'Configuration Error',
+                str(error)
+            )
+        # Generic error fallback
+        return self.error_embed(
+            "Error",
+            str(error)
         )
 
     async def send_embed(self, interaction: discord.Interaction, embed: discord.Embed, ephemeral: bool = False):
@@ -302,10 +280,9 @@ class UIManager:
                     pass
 
         view = ConfirmView()
-        embed = self.make_embed(
+        embed = self.info_embed(
             title=title,
-            description=description,
-            color=self.colors["info"]
+            description=description
         )
         
         await interaction.response.send_message(embed=embed, view=view, ephemeral=ephemeral)

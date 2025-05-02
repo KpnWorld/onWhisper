@@ -132,17 +132,25 @@ class Bot(commands.Bot):
     async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
         """Enhanced error handler for slash commands"""
         try:
+            # Rate limit/cooldown errors
             if isinstance(error, discord.app_commands.CommandOnCooldown):
                 await interaction.response.send_message(
-                    f"This command is on cooldown. Try again in {error.retry_after:.1f} seconds.",
+                    embed=self.ui_manager.error_embed(
+                        "Slow Down!",
+                        f"This command is on cooldown. Try again in {error.retry_after:.1f} seconds."
+                    ),
                     ephemeral=True
                 )
                 return
 
+            # Permission errors
             if isinstance(error, discord.app_commands.MissingPermissions):
                 perms = ", ".join(error.missing_permissions)
                 await interaction.response.send_message(
-                    f"You need the following permissions: {perms}",
+                    embed=self.ui_manager.error_embed(
+                        "Missing Permissions",
+                        f"You need these permissions: {perms}"
+                    ),
                     ephemeral=True
                 )
                 return
@@ -150,23 +158,45 @@ class Bot(commands.Bot):
             if isinstance(error, discord.app_commands.BotMissingPermissions):
                 perms = ", ".join(error.missing_permissions)
                 await interaction.response.send_message(
-                    f"I need the following permissions: {perms}",
+                    embed=self.ui_manager.error_embed(
+                        "Bot Missing Permissions", 
+                        f"I need these permissions: {perms}"
+                    ),
                     ephemeral=True
                 )
                 return
 
-            # Log unexpected errors
-            print(f"Command error in {interaction.command.name}: {str(error)}")
+            # Check errors
+            if isinstance(error, discord.app_commands.CheckFailure):
+                await interaction.response.send_message(
+                    embed=self.ui_manager.error_embed(
+                        "Check Failed",
+                        "You don't have permission to use this command."
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Log context of unexpected errors
+            print(f"Command error in {interaction.command.name}:")
+            print(f"- User: {interaction.user} ({interaction.user.id})")
+            print(f"- Guild: {interaction.guild.name} ({interaction.guild.id})")
+            print(f"- Channel: #{interaction.channel.name}")
+            print(f"- Error: {str(error)}")
             
             error_embed = self.ui_manager.error_embed(
                 "Command Error",
-                "An unexpected error occurred. The error has been logged."
+                "An unexpected error occurred. This has been logged for investigation."
             )
             
-            if interaction.response.is_done():
-                await interaction.followup.send(embed=error_embed, ephemeral=True)
-            else:
-                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(embed=error_embed, ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            except:
+                # If we can't send the error message, just log it
+                print("Failed to send error message to user")
 
         except Exception as e:
             print(f"Error in error handler: {str(e)}")
@@ -179,14 +209,26 @@ class Bot(commands.Bot):
         """Enhanced error handler for prefix commands"""
         try:
             if isinstance(error, commands.CommandNotFound):
+                return  # Silently ignore command not found
+
+            # Rate limit/cooldown errors 
+            if isinstance(error, commands.CommandOnCooldown):
+                await ctx.send(
+                    embed=self.ui_manager.error_embed(
+                        "Slow Down!",
+                        f"This command is on cooldown. Try again in {error.retry_after:.1f} seconds."
+                    ),
+                    ephemeral=True
+                )
                 return
 
+            # Permission errors
             if isinstance(error, commands.MissingPermissions):
                 perms = ", ".join(error.missing_permissions)
                 await ctx.send(
                     embed=self.ui_manager.error_embed(
                         "Missing Permissions",
-                        f"You need the following permissions: {perms}"
+                        f"You need these permissions: {perms}"
                     ),
                     ephemeral=True
                 )
@@ -231,27 +273,85 @@ class Bot(commands.Bot):
         try:
             error = sys.exc_info()[1]
             
+            # Database errors
+            if isinstance(error, Exception) and "Database" in str(error):
+                print(f"Database error in {event_method}: {str(error)}")
+                if not await self.db_manager.check_connection():
+                    print("Attempting database recovery...")
+                    if await self.db_manager.initialize():
+                        print("Database connection restored")
+                    else:
+                        print("Database recovery failed")
+                return
+
+            # Discord API errors
             if isinstance(error, discord.errors.HTTPException):
                 if error.status == 429:  # Rate limit
                     retry_after = error.response.headers.get('Retry-After', 5)
                     self._rate_limit_retries += 1
                     wait_time = float(retry_after) * (2 ** self._rate_limit_retries)
-                    print(f"Rate limited. Waiting {wait_time:.2f} seconds. Retry #{self._rate_limit_retries}")
+                    print(f"Rate limited. Waiting {wait_time:.2f}s (Retry #{self._rate_limit_retries})")
                     await asyncio.sleep(wait_time)
                     if event_method == "start":
                         await self.start(TOKEN)
                 elif error.status == 403:  # Forbidden
                     print(f"Permission error in {event_method}: {error.text}")
+                    # Check if it's thread-related
+                    if "thread" in error.text.lower():
+                        print("Thread permission error - check MANAGE_THREADS permission")
                 elif error.status == 404:  # Not Found
                     print(f"Resource not found in {event_method}: {error.text}")
                 else:
                     print(f"HTTP error in {event_method}: {error.status} - {error.text}")
-                    
-                    await self.db_manager.cleanup_old_data(days=30)
+
+            # Thread-specific errors
+            elif isinstance(error, discord.errors.Forbidden) and "thread" in str(error).lower():
+                print(f"Thread permission error in {event_method}")
+                print("Make sure the bot has MANAGE_THREADS permission")
+
+            # Generic Discord errors
+            elif isinstance(error, discord.DiscordException):
+                print(f"Discord error in {event_method}: {str(error)}")
+
+            # Unexpected errors
+            else:
+                print(f"Unexpected error in {event_method}: {str(error)}")
+                print(f"Args: {args}")
+                print(f"Kwargs: {kwargs}")
+
         except asyncio.CancelledError:
-            pass
+            pass  # Task cancellation, handled gracefully
         except Exception as e:
-            print(f"Error during cleanup: {e}")
+            print(f"Error in error handler: {str(e)}")
+
+    # Add custom exceptions for feature-specific errors
+    class WhisperError(Exception):
+        """Base exception for whisper-related errors"""
+        pass
+
+    class WhisperNotConfigured(WhisperError):
+        """Raised when whisper system is not configured"""
+        pass
+
+    class WhisperNotEnabled(WhisperError):
+        """Raised when whisper system is disabled"""
+        pass
+
+    class WhisperThreadError(WhisperError):
+        """Raised when there's an error with whisper threads"""
+        pass
+
+    class LevelingError(Exception):
+        """Base exception for leveling-related errors"""
+        pass
+
+    class XPNotEnabled(LevelingError):
+        """Raised when XP system is disabled"""
+        pass
+
+    class ReactionRoleError(Exception):
+        """Base exception for reaction role errors"""
+        pass
 
     async def _periodic_db_cleanup(self):
         """Periodically clean up old database entries"""
