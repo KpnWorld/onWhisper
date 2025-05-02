@@ -36,28 +36,28 @@ class InfoCog(commands.Cog):
             # Basic info
             embed.add_field(
                 name="User ID",
-                value=target.id,
+                value=f"```{target.id}```",
                 inline=True
             )
             embed.add_field(
                 name="Nickname",
-                value=target.nick or "None",
+                value=f"```{target.nick or 'None'}```",
                 inline=True
             )
             embed.add_field(
                 name="Account Created",
-                value=discord.utils.format_dt(target.created_at, style='R'),
+                value=f"<t:{int(target.created_at.timestamp())}:R>",
                 inline=True
             )
             embed.add_field(
                 name="Joined Server",
-                value=discord.utils.format_dt(target.joined_at, style='R') if target.joined_at else "Unknown",
+                value=f"<t:{int(target.joined_at.timestamp())}:R>" if target.joined_at else "```Unknown```",
                 inline=True
             )
 
             # Roles
             role_list = [role.mention for role in reversed(target.roles[1:])]  # Exclude @everyone
-            roles_text = " ".join(role_list) if role_list else "No roles"
+            roles_text = " ".join(role_list) if role_list else "```No roles```"
             if len(roles_text) > 1024:
                 roles_text = roles_text[:1021] + "..."
             embed.add_field(
@@ -86,7 +86,7 @@ class InfoCog(commands.Cog):
             if key_perms:
                 embed.add_field(
                     name="Key Permissions",
-                    value=", ".join(key_perms),
+                    value=f"```{', '.join(key_perms)}```",
                     inline=False
                 )
 
@@ -98,20 +98,20 @@ class InfoCog(commands.Cog):
                 discord.Status.offline: "⚫"
             }
             
-            status_text = f"{status_emoji.get(target.status, '⚫')} {str(target.status).title()}"
+            status_text = [f"{status_emoji.get(target.status, '⚫')} {str(target.status).title()}"]
             if target.activity:
                 if isinstance(target.activity, discord.Game):
-                    status_text += f"\nPlaying {target.activity.name}"
+                    status_text.append(f"Playing {target.activity.name}")
                 elif isinstance(target.activity, discord.Streaming):
-                    status_text += f"\nStreaming {target.activity.name}"
+                    status_text.append(f"Streaming {target.activity.name}")
                 elif isinstance(target.activity, discord.Spotify):
-                    status_text += f"\nListening to {target.activity.title} by {target.activity.artist}"
+                    status_text.append(f"Listening to {target.activity.title} by {target.activity.artist}")
                 elif isinstance(target.activity, discord.CustomActivity):
-                    status_text += f"\n{target.activity.name}"
+                    status_text.append(target.activity.name)
 
             embed.add_field(
                 name="Status",
-                value=status_text,
+                value=f"```{chr(10).join(status_text)}```",
                 inline=False
             )
 
@@ -125,7 +125,7 @@ class InfoCog(commands.Cog):
                 if data:
                     embed.add_field(
                         name="Level Info",
-                        value=f"Level: {data.get('level', 0)}\nXP: {data.get('xp', 0)}",
+                        value=f"```Level: {data.get('level', 0)}\nXP: {data.get('xp', 0):,}```",
                         inline=True
                     )
 
@@ -146,7 +146,6 @@ class InfoCog(commands.Cog):
         try:
             guild = interaction.guild
 
-            # Create embed using UI manager
             embed = self.bot.ui_manager.info_embed(
                 f"Server Info: {guild.name}",
                 ""
@@ -155,17 +154,17 @@ class InfoCog(commands.Cog):
             # Basic info
             embed.add_field(
                 name="Server ID",
-                value=guild.id,
+                value=f"```{guild.id}```",
                 inline=True
             )
             embed.add_field(
                 name="Owner",
-                value=guild.owner.mention if guild.owner else "Unknown",
+                value=guild.owner.mention if guild.owner else "```Unknown```",
                 inline=True
             )
             embed.add_field(
                 name="Created",
-                value=discord.utils.format_dt(guild.created_at, style='R'),
+                value=f"<t:{int(guild.created_at.timestamp())}:R>",
                 inline=True
             )
 
@@ -176,7 +175,7 @@ class InfoCog(commands.Cog):
 
             embed.add_field(
                 name="Members",
-                value=f"Total: {total_members}\nOnline: {online_members}\nBots: {bot_count}",
+                value=f"```Total: {total_members:,}\nOnline: {online_members:,}\nBots: {bot_count:,}```",
                 inline=True
             )
 
@@ -187,14 +186,14 @@ class InfoCog(commands.Cog):
 
             embed.add_field(
                 name="Channels",
-                value=f"Text: {text_channels}\nVoice: {voice_channels}\nCategories: {categories}",
+                value=f"```Text: {text_channels}\nVoice: {voice_channels}\nCategories: {categories}```",
                 inline=True
             )
 
             # Role stats
             embed.add_field(
                 name="Roles",
-                value=str(len(guild.roles)),
+                value=f"```{len(guild.roles):,} roles```",
                 inline=True
             )
 
@@ -203,14 +202,14 @@ class InfoCog(commands.Cog):
             if features_list:
                 embed.add_field(
                     name="Features",
-                    value='\n'.join(features_list),
+                    value=f"```{chr(10).join(features_list)}```",
                     inline=False
                 )
 
             # Boost status
             embed.add_field(
                 name="Boost Status",
-                value=f"Level {guild.premium_tier}\n{guild.premium_subscription_count} Boosts",
+                value=f"```Level {guild.premium_tier}\n{guild.premium_subscription_count:,} Boosts```",
                 inline=True
             )
 
@@ -223,13 +222,14 @@ class InfoCog(commands.Cog):
             xp_settings = await self.bot.db_manager.get_section(guild.id, 'xp_settings')
 
             # Add feature status
-            features_status = []
-            features_status.append(f"Whisper System: {'Enabled' if whisper_config.get('enabled', True) else 'Disabled'}")
-            features_status.append(f"XP System: {'Enabled' if xp_settings.get('enabled', True) else 'Disabled'}")
+            features_status = [
+                f"Whisper System: {'✅ Enabled' if whisper_config.get('enabled', True) else '❌ Disabled'}",
+                f"XP System: {'✅ Enabled' if xp_settings.get('enabled', True) else '❌ Disabled'}"
+            ]
 
             embed.add_field(
                 name="Bot Features",
-                value='\n'.join(features_status),
+                value=f"```{chr(10).join(features_status)}```",
                 inline=False
             )
 
@@ -248,7 +248,6 @@ class InfoCog(commands.Cog):
     async def info_bot(self, interaction: discord.Interaction):
         """Show detailed bot information"""
         try:
-            # Create embed using UI manager
             embed = self.bot.ui_manager.info_embed(
                 f"Bot Info: {self.bot.user.name}",
                 ""
@@ -257,12 +256,12 @@ class InfoCog(commands.Cog):
             # Basic info
             embed.add_field(
                 name="Bot ID",
-                value=self.bot.user.id,
+                value=f"```{self.bot.user.id}```",
                 inline=True
             )
             embed.add_field(
                 name="Created",
-                value=discord.utils.format_dt(self.bot.user.created_at, style='R'),
+                value=f"<t:{int(self.bot.user.created_at.timestamp())}:R>",
                 inline=True
             )
 
@@ -275,7 +274,7 @@ class InfoCog(commands.Cog):
 
             embed.add_field(
                 name="Uptime",
-                value=uptime_str,
+                value=f"```{uptime_str}```",
                 inline=True
             )
 
@@ -283,7 +282,7 @@ class InfoCog(commands.Cog):
             total_members = sum(g.member_count for g in self.bot.guilds)
             embed.add_field(
                 name="Stats",
-                value=f"Servers: {len(self.bot.guilds)}\nUsers: {total_members}\nCommands: {len(self.bot.tree.get_commands())}",
+                value=f"```Servers: {len(self.bot.guilds):,}\nUsers: {total_members:,}\nCommands: {len(self.bot.tree.get_commands()):,}```",
                 inline=True
             )
 
@@ -295,7 +294,7 @@ class InfoCog(commands.Cog):
 
             embed.add_field(
                 name="System",
-                value=f"CPU Usage: {cpu_percent}%\nMemory: {mem.rss/1024/1024:.1f}MB ({mem_percent:.1f}%)\nPython: {platform.python_version()}",
+                value=f"```CPU Usage: {cpu_percent}%\nMemory: {mem.rss/1024/1024:.1f}MB ({mem_percent:.1f}%)\nPython: {platform.python_version()}```",
                 inline=True
             )
 
@@ -308,7 +307,7 @@ class InfoCog(commands.Cog):
             if stats:
                 embed.add_field(
                     name="Usage",
-                    value=f"Commands Used: {stats.get('commands_used', 0):,}\nMessages Seen: {stats.get('messages_seen', 0):,}",
+                    value=f"```Commands Used: {stats.get('commands_used', 0):,}\nMessages Seen: {stats.get('messages_seen', 0):,}```",
                     inline=False
                 )
 
@@ -417,42 +416,40 @@ class InfoCog(commands.Cog):
     ):
         """Show detailed information about a role"""
         try:
-            # Create embed using UI manager
             embed = self.bot.ui_manager.info_embed(
                 f"Role Info: {role.name}",
                 ""
             )
-            embed.color = role.color  # Keep role's color
+            embed.color = role.color
 
             # Basic info
             embed.add_field(
                 name="Role ID",
-                value=role.id,
+                value=f"```{role.id}```",
                 inline=True
             )
             embed.add_field(
                 name="Created",
-                value=discord.utils.format_dt(role.created_at, style='R'),
+                value=f"<t:{int(role.created_at.timestamp())}:R>",
                 inline=True
             )
             embed.add_field(
                 name="Color",
-                value=str(role.color),
+                value=f"```{str(role.color)}```",
                 inline=True
             )
 
             # Member count
-            member_count = len(role.members)
             embed.add_field(
                 name="Members",
-                value=str(member_count),
+                value=f"```{len(role.members):,} members```",
                 inline=True
             )
 
             # Position info
             embed.add_field(
                 name="Position",
-                value=f"{role.position}/{len(interaction.guild.roles)}",
+                value=f"```{role.position}/{len(interaction.guild.roles)}```",
                 inline=True
             )
 
@@ -476,7 +473,7 @@ class InfoCog(commands.Cog):
             if key_perms:
                 embed.add_field(
                     name="Key Permissions",
-                    value=", ".join(key_perms),
+                    value=f"```{', '.join(key_perms)}```",
                     inline=False
                 )
 
@@ -492,7 +489,7 @@ class InfoCog(commands.Cog):
             if properties:
                 embed.add_field(
                     name="Properties",
-                    value=", ".join(properties),
+                    value=f"```{', '.join(properties)}```",
                     inline=False
                 )
 
@@ -516,17 +513,22 @@ class InfoCog(commands.Cog):
             minutes, seconds = divmod(remainder, 60)
             days, hours = divmod(hours, 24)
 
+            start_timestamp = int((datetime.utcnow() - uptime).timestamp())
             embed = self.bot.ui_manager.info_embed(
                 "Bot Uptime",
-                f"Online for {days}d {hours}h {minutes}m {seconds}s"
+                f"Online since <t:{start_timestamp}:R>"
+            )
+
+            embed.add_field(
+                name="Detailed Uptime",
+                value=f"```{days}d {hours}h {minutes}m {seconds}s```",
+                inline=False
             )
 
             # Add some basic stats
             embed.add_field(
                 name="Status",
-                value=f"Serving {len(self.bot.guilds):,} servers\n"
-                      f"Watching {sum(g.member_count for g in self.bot.guilds):,} users\n"
-                      f"Latency: {round(self.bot.latency * 1000)}ms",
+                value=f"```Servers: {len(self.bot.guilds):,}\nUsers: {sum(g.member_count for g in self.bot.guilds):,}\nLatency: {round(self.bot.latency * 1000)}ms```",
                 inline=False
             )
 

@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
+from typing import Optional
 
 class WhisperCog(commands.Cog):
     def __init__(self, bot):
@@ -69,8 +70,17 @@ class WhisperCog(commands.Cog):
             if not staff_role:
                 raise self.bot.WhisperNotConfigured("Staff role not found")
 
-            # Create private thread
-            thread = await interaction.channel.create_thread(
+            # Get whisper channel
+            channel_id = config.get('channel_id')
+            if not channel_id:
+                raise self.bot.WhisperNotConfigured("No whisper channel has been configured. An admin must run /config_whisper_channel first")
+
+            channel = interaction.guild.get_channel(int(channel_id))
+            if not channel:
+                raise self.bot.WhisperNotConfigured("Configured whisper channel no longer exists")
+
+            # Create private thread in the whisper channel
+            thread = await channel.create_thread(
                 name=f"whisper-{interaction.user.name}",
                 type=discord.ChannelType.private_thread,
                 reason=f"Whisper thread created by {interaction.user}"
@@ -81,13 +91,13 @@ class WhisperCog(commands.Cog):
                 interaction.guild_id,
                 str(thread.id),
                 str(interaction.user.id),
-                str(interaction.channel.id)
+                str(channel.id)
             )
 
             # Send initial messages
             await thread.send(
                 f"{staff_role.mention} New whisper from {interaction.user.mention}",
-                embed=self.bot.ui_manager.info_embed(
+                embed=self.bot.ui_manager.whisper_embed(
                     "New Whisper Thread",
                     message
                 )
@@ -260,6 +270,83 @@ class WhisperCog(commands.Cog):
         except ValueError as e:
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.error_embed("Invalid Value", str(e)),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="config_whisper_channel",
+        description="Create and set up the whisper channel"
+    )
+    @app_commands.describe(
+        channel="The channel to use for whispers (one will be created if not specified)"
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def config_whisper_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: Optional[discord.TextChannel] = None
+    ):
+        """Create and configure the whisper channel"""
+        try:
+            if not interaction.user.guild_permissions.administrator:
+                raise commands.MissingPermissions(["administrator"])
+
+            config = await self.bot.db_manager.get_section(interaction.guild_id, 'whisper_config')
+            
+            # Create new channel if none specified
+            if not channel:
+                channel = await interaction.guild.create_text_channel(
+                    name="whispers",
+                    topic="Private threads for communicating with staff",
+                    reason="Created for whisper system"
+                )
+
+            # Update whisper config with channel
+            await self.bot.db_manager.update_whisper_config(interaction.guild_id, 'channel_id', str(channel.id))
+            
+            # Configure channel permissions
+            await channel.set_permissions(interaction.guild.default_role, view_channel=True, send_messages=False)
+            
+            # Enable threads in channel
+            await channel.edit(default_auto_archive_duration=1440) # 24 hours
+            
+            # Get staff role and set permissions if configured
+            staff_role_id = config.get('staff_role')
+            if staff_role_id:
+                staff_role = interaction.guild.get_role(int(staff_role_id))
+                if staff_role:
+                    await channel.set_permissions(staff_role, view_channel=True, send_messages=True, manage_threads=True)
+
+            # Send success message
+            embed = self.bot.ui_manager.success_embed(
+                "Whisper Channel Set",
+                f"Successfully configured {channel.mention} as the whisper channel.\n\n"
+                f"Users can now use `/whisper` to create private threads in this channel."
+            )
+            await interaction.response.send_message(embed=embed)
+
+            # Send welcome message in the channel
+            welcome_embed = self.bot.ui_manager.info_embed(
+                "Whisper Channel",
+                "This channel is for private communication with staff members.\n\n"
+                "To start a conversation:\n"
+                "1. Use `/whisper <message>` anywhere in the server\n"
+                "2. A private thread will be created here\n"
+                "3. Staff members will be notified and can respond in the thread"
+            )
+            await channel.send(embed=welcome_embed)
+
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Missing Permissions",
+                    "I need the Manage Channels and Manage Threads permissions to set up the whisper channel."
+                ),
                 ephemeral=True
             )
         except Exception as e:

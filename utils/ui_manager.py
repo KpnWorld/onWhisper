@@ -383,22 +383,20 @@ class UIManager:
                 category = select_menu.values[0]
                 commands = []
                 
-                for command in self.bot.commands:
-                    if command.hidden:
-                        continue
-                        
-                    if category == "leveling" and command.cog_name in ["Leveling"]:
-                        commands.append(command)
-                    elif category == "moderation" and command.cog_name in ["Moderation"]:
-                        commands.append(command)
-                    elif category == "config" and command.cog_name in ["Admin"]:
-                        commands.append(command)
-                    elif category == "roles" and command.cog_name in ["Roles", "AutoRole"]:
-                        commands.append(command)
-                    elif category == "tickets" and command.cog_name in ["Tickets"]:
-                        commands.append(command)
-                    elif category == "info" and command.cog_name in ["Info"]:
-                        commands.append(command)
+                # Get all application commands
+                for cmd in self.bot.tree.get_commands():
+                    if category == "leveling" and cmd.name.startswith(("xp_", "level_", "config_xp_")):
+                        commands.append(cmd)
+                    elif category == "moderation" and cmd.name.startswith(("warn", "kick", "ban", "timeout", "mute", "purge", "clear", "lockdown")):
+                        commands.append(cmd)
+                    elif category == "config" and cmd.name.startswith("config_"):
+                        commands.append(cmd)
+                    elif category == "roles" and cmd.name.startswith(("roles_", "role_")):
+                        commands.append(cmd)
+                    elif category == "tickets" and cmd.name.startswith(("whisper_", "ticket_")):
+                        commands.append(cmd)
+                    elif category == "info" and cmd.name.startswith("info_"):
+                        commands.append(cmd)
 
                 # Create embed for category
                 embed = self.ui.info_embed(
@@ -408,7 +406,7 @@ class UIManager:
 
                 # Add commands to embed
                 if commands:
-                    value = "\n".join(f"• `/{cmd.qualified_name}` - {cmd.help}" for cmd in sorted(commands, key=lambda x: x.qualified_name))
+                    value = "\n".join(f"• `/{cmd.name}` - {cmd.description}" for cmd in sorted(commands, key=lambda x: x.name))
                     if len(value) > 1024:
                         value = value[:1021] + "..."
                     embed.add_field(name="Available Commands", value=value, inline=False)

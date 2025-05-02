@@ -410,19 +410,27 @@ class DBManager:
             print(f"Error getting level rewards: {e}")
             return []
 
-    async def add_reaction_role(self, message_id: int, emoji: str, role_id: int):
+    async def add_reaction_role(self, guild_id: int, message_id: int, emoji: str, role_id: int):
         """Add a reaction role binding to a message"""
         try:
             data = await self.get_data('reaction_roles', str(message_id)) or {}
             data[emoji] = role_id
             await self.set_data('reaction_roles', str(message_id), data)
+            
+            # Also update in guild data for consistency
+            reaction_roles = await self.get_section(guild_id, 'reaction_roles')
+            if str(message_id) not in reaction_roles:
+                reaction_roles[str(message_id)] = {}
+            reaction_roles[str(message_id)][emoji] = str(role_id)
+            await self.update_guild_data(guild_id, 'reaction_roles', reaction_roles)
         except Exception as e:
             print(f"Error adding reaction role: {e}")
             raise
 
-    async def remove_reaction_role(self, message_id: int, emoji: str):
+    async def remove_reaction_role(self, guild_id: int, message_id: int, emoji: str):
         """Remove a reaction role binding from a message"""
         try:
+            # Remove from reaction_roles collection
             data = await self.get_data('reaction_roles', str(message_id))
             if data and emoji in data:
                 del data[emoji]
@@ -430,6 +438,14 @@ class DBManager:
                     await self.set_data('reaction_roles', str(message_id), data)
                 else:
                     await self.delete_data('reaction_roles', str(message_id))
+            
+            # Also remove from guild data
+            reaction_roles = await self.get_section(guild_id, 'reaction_roles')
+            if str(message_id) in reaction_roles and emoji in reaction_roles[str(message_id)]:
+                del reaction_roles[str(message_id)][emoji]
+                if not reaction_roles[str(message_id)]:
+                    del reaction_roles[str(message_id)]
+                await self.update_guild_data(guild_id, 'reaction_roles', reaction_roles)
                 return True
             return False
         except Exception as e:
@@ -482,6 +498,24 @@ class DBManager:
     async def get_active_whispers(self, guild_id: int) -> list:
         """Get only active whispers"""
         return await self.get_whispers(guild_id, include_closed=False)
+
+    async def add_whisper(self, guild_id: int, thread_id: str, user_id: str, channel_id: str) -> bool:
+        """Add a new whisper entry"""
+        try:
+            whisper = {
+                'thread_id': thread_id,
+                'user_id': user_id,
+                'channel_id': channel_id,
+                'created_at': datetime.utcnow().isoformat(),
+                'closed_at': None
+            }
+            whispers = await self.get_section(guild_id, 'whispers')
+            whispers.append(whisper)
+            await self.update_guild_data(guild_id, 'whispers', whispers)
+            return True
+        except Exception as e:
+            print(f"Error adding whisper: {e}")
+            return False
 
     # Whisper System Methods
     async def update_whisper_config(self, guild_id: int, setting: str, value: Any) -> bool:
