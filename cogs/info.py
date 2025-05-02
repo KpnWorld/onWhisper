@@ -11,13 +11,13 @@ class InfoCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(
-        name="userinfo",
-        description="Show information about a user"
+        name="info_user",
+        description="Show user profile information"
     )
     @app_commands.describe(
         user="The user to get info about (leave empty for yourself)"
     )
-    async def userinfo(
+    async def info_user(
         self,
         interaction: discord.Interaction,
         user: Optional[discord.Member] = None
@@ -27,10 +27,11 @@ class InfoCog(commands.Cog):
             target = user or interaction.user
 
             # Create embed
-            embed = discord.Embed(
-                title=f"User Info: {target.display_name}",
-                color=target.color
+            embed = self.bot.ui_manager.info_embed(
+                f"User Info: {target.display_name}",
+                ""
             )
+            embed.color = target.color  # Keep user's color
             
             # Basic info
             embed.add_field(
@@ -137,18 +138,18 @@ class InfoCog(commands.Cog):
             )
 
     @app_commands.command(
-        name="serverinfo",
-        description="Show information about the server"
+        name="info_server",
+        description="Show server statistics"
     )
-    async def serverinfo(self, interaction: discord.Interaction):
+    async def info_server(self, interaction: discord.Interaction):
         """Show detailed server information"""
         try:
             guild = interaction.guild
 
-            # Create embed
-            embed = discord.Embed(
-                title=f"Server Info: {guild.name}",
-                color=discord.Color.blurple()
+            # Create embed using UI manager
+            embed = self.bot.ui_manager.info_embed(
+                f"Server Info: {guild.name}",
+                ""
             )
 
             # Basic info
@@ -241,16 +242,16 @@ class InfoCog(commands.Cog):
             )
 
     @app_commands.command(
-        name="botinfo",
-        description="Show information about the bot"
+        name="info_bot",
+        description="Show bot stats and latency"
     )
-    async def botinfo(self, interaction: discord.Interaction):
+    async def info_bot(self, interaction: discord.Interaction):
         """Show detailed bot information"""
         try:
-            # Create embed
-            embed = discord.Embed(
-                title=f"Bot Info: {self.bot.user.name}",
-                color=discord.Color.blurple()
+            # Create embed using UI manager
+            embed = self.bot.ui_manager.info_embed(
+                f"Bot Info: {self.bot.user.name}",
+                ""
             )
 
             # Basic info
@@ -320,13 +321,13 @@ class InfoCog(commands.Cog):
             )
 
     @app_commands.command(
-        name="help",
-        description="Show bot help and commands"
+        name="info_help",
+        description="Show help menu or command info"
     )
     @app_commands.describe(
         command="Get help for a specific command"
     )
-    async def help(
+    async def info_help(
         self,
         interaction: discord.Interaction,
         command: Optional[str] = None
@@ -396,6 +397,141 @@ class InfoCog(commands.Cog):
                 embed=self.bot.ui_manager.error_embed("Command Not Found", str(e)),
                 ephemeral=True
             )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="info_role",
+        description="Show detailed role information"
+    )
+    @app_commands.describe(
+        role="The role to get info about"
+    )
+    async def info_role(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role
+    ):
+        """Show detailed information about a role"""
+        try:
+            # Create embed using UI manager
+            embed = self.bot.ui_manager.info_embed(
+                f"Role Info: {role.name}",
+                ""
+            )
+            embed.color = role.color  # Keep role's color
+
+            # Basic info
+            embed.add_field(
+                name="Role ID",
+                value=role.id,
+                inline=True
+            )
+            embed.add_field(
+                name="Created",
+                value=discord.utils.format_dt(role.created_at, style='R'),
+                inline=True
+            )
+            embed.add_field(
+                name="Color",
+                value=str(role.color),
+                inline=True
+            )
+
+            # Member count
+            member_count = len(role.members)
+            embed.add_field(
+                name="Members",
+                value=str(member_count),
+                inline=True
+            )
+
+            # Position info
+            embed.add_field(
+                name="Position",
+                value=f"{role.position}/{len(interaction.guild.roles)}",
+                inline=True
+            )
+
+            # Permissions
+            key_perms = []
+            if role.permissions.administrator:
+                key_perms.append("Administrator")
+            if role.permissions.manage_guild:
+                key_perms.append("Manage Server")
+            if role.permissions.manage_roles:
+                key_perms.append("Manage Roles")
+            if role.permissions.manage_channels:
+                key_perms.append("Manage Channels")
+            if role.permissions.manage_messages:
+                key_perms.append("Manage Messages")
+            if role.permissions.kick_members:
+                key_perms.append("Kick Members")
+            if role.permissions.ban_members:
+                key_perms.append("Ban Members")
+
+            if key_perms:
+                embed.add_field(
+                    name="Key Permissions",
+                    value=", ".join(key_perms),
+                    inline=False
+                )
+
+            # Properties
+            properties = []
+            if role.hoist:
+                properties.append("Displayed separately")
+            if role.mentionable:
+                properties.append("Mentionable")
+            if role.managed:
+                properties.append("Managed by integration")
+
+            if properties:
+                embed.add_field(
+                    name="Properties",
+                    value=", ".join(properties),
+                    inline=False
+                )
+
+            await interaction.response.send_message(embed=embed)
+
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="info_uptime",
+        description="Show bot uptime"
+    )
+    async def info_uptime(self, interaction: discord.Interaction):
+        """Show bot uptime"""
+        try:
+            uptime = datetime.utcnow() - self.bot.start_time
+            hours, remainder = divmod(int(uptime.total_seconds()), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            days, hours = divmod(hours, 24)
+
+            embed = self.bot.ui_manager.info_embed(
+                "Bot Uptime",
+                f"Online for {days}d {hours}h {minutes}m {seconds}s"
+            )
+
+            # Add some basic stats
+            embed.add_field(
+                name="Status",
+                value=f"Serving {len(self.bot.guilds):,} servers\n"
+                      f"Watching {sum(g.member_count for g in self.bot.guilds):,} users\n"
+                      f"Latency: {round(self.bot.latency * 1000)}ms",
+                inline=False
+            )
+
+            await interaction.response.send_message(embed=embed)
+
         except Exception as e:
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),

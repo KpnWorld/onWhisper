@@ -8,6 +8,20 @@ from typing import Optional
 class ModerationCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.last_deleted = {}  # Channel ID -> Last deleted message
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message):
+        """Store last deleted message per channel"""
+        if not message.guild or message.author.bot:
+            return
+            
+        self.last_deleted[message.channel.id] = {
+            'content': message.content,
+            'author': message.author.id,
+            'timestamp': message.created_at.isoformat(),
+            'attachments': [a.url for a in message.attachments]
+        }
 
     @app_commands.command(
         name="warn",
@@ -566,6 +580,202 @@ class ModerationCog(commands.Cog):
                 embed=self.bot.ui_manager.error_embed(
                     "Missing Permissions",
                     "You need the Manage Messages permission to use this command."
+                ),
+                ephemeral=True
+            )
+        except ValueError as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Invalid Value", str(e)),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="snipe",
+        description="View the last deleted message in this channel"
+    )
+    @app_commands.default_permissions(manage_messages=True)
+    async def snipe(self, interaction: discord.Interaction):
+        """Show the last deleted message"""
+        try:
+            if not interaction.user.guild_permissions.manage_messages:
+                raise commands.MissingPermissions(["manage_messages"])
+
+            # Get last deleted message
+            deleted = self.last_deleted.get(interaction.channel.id)
+            if not deleted:
+                raise commands.CommandError("No recently deleted messages found in this channel")
+
+            # Create embed
+            author = interaction.guild.get_member(deleted['author'])
+            embed = self.bot.ui_manager.info_embed(
+                "Last Deleted Message",
+                deleted['content'] if deleted['content'] else "*No content*"
+            )
+
+            if author:
+                embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
+
+            # Add timestamp
+            embed.add_field(
+                name="Sent",
+                value=discord.utils.format_dt(datetime.fromisoformat(deleted['timestamp']), style='R'),
+                inline=False
+            )
+
+            # Add attachments if any
+            if deleted['attachments']:
+                embed.add_field(
+                    name="Attachments",
+                    value="\n".join(deleted['attachments']),
+                    inline=False
+                )
+
+            await interaction.response.send_message(embed=embed)
+
+        except commands.MissingPermissions as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Missing Permissions",
+                    "You need the Manage Messages permission to use this command."
+                ),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="purge",
+        description="Delete multiple messages at once"
+    )
+    @app_commands.describe(
+        amount="Number of messages to delete (1-100)"
+    )
+    @app_commands.default_permissions(manage_messages=True)
+    async def purge(
+        self,
+        interaction: discord.Interaction,
+        amount: int
+    ):
+        """Bulk delete messages"""
+        try:
+            if not interaction.user.guild_permissions.manage_messages:
+                raise commands.MissingPermissions(["manage_messages"])
+
+            if amount < 1 or amount > 100:
+                raise ValueError("Amount must be between 1 and 100")
+
+            await interaction.response.defer(ephemeral=True)
+
+            # Delete messages
+            deleted = await interaction.channel.purge(
+                limit=amount,
+                reason=f"Purge command used by {interaction.user}"
+            )
+
+            embed = self.bot.ui_manager.success_embed(
+                "Messages Deleted",
+                f"Successfully deleted {len(deleted)} messages"
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except commands.MissingPermissions as e:
+            await interaction.followup.send(
+                embed=self.bot.ui_manager.error_embed(
+                    "Missing Permissions",
+                    "You need the Manage Messages permission to use this command."
+                ),
+                ephemeral=True
+            )
+        except ValueError as e:
+            await interaction.followup.send(
+                embed=self.bot.ui_manager.error_embed("Invalid Value", str(e)),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="timeout",
+        description="Timeout a user for a specified duration"
+    )
+    @app_commands.describe(
+        user="The user to timeout",
+        duration="Duration in minutes",
+        reason="Reason for the timeout"
+    )
+    @app_commands.default_permissions(moderate_members=True)
+    async def timeout(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        duration: int,
+        reason: str = "No reason provided"
+    ):
+        """Timeout a user"""
+        try:
+            if not interaction.user.guild_permissions.moderate_members:
+                raise commands.MissingPermissions(["moderate_members"])
+
+            if duration < 1:
+                raise ValueError("Duration must be at least 1 minute")
+
+            if user.top_role >= interaction.user.top_role:
+                raise commands.CommandError("You cannot timeout someone with a higher or equal role")
+
+            # Apply timeout
+            until = discord.utils.utcnow() + timedelta(minutes=duration)
+            await user.timeout(until, reason=f"Timeout by {interaction.user}: {reason}")
+
+            # Log the action
+            await self.bot.db_manager.add_mod_action(
+                interaction.guild_id,
+                "timeout",
+                user.id,
+                f"Timeout by {interaction.user} for {duration} minutes: {reason}",
+                until
+            )
+
+            embed = self.bot.ui_manager.mod_embed(
+                "User Timed Out",
+                f"**User:** {user.mention}\n**Duration:** {duration} minutes\n**Reason:** {reason}"
+            )
+            embed.set_thumbnail(url=user.display_avatar.url)
+
+            # Try to DM user
+            try:
+                await user.send(
+                    embed=self.bot.ui_manager.warning_embed(
+                        "You Have Been Timed Out",
+                        f"You have been timed out in {interaction.guild.name}\n"
+                        f"**Duration:** {duration} minutes\n"
+                        f"**Reason:** {reason}"
+                    )
+                )
+            except:
+                embed.add_field(
+                    name="Note",
+                    value="Could not DM user about the timeout",
+                    inline=False
+                )
+
+            await interaction.response.send_message(embed=embed)
+
+        except commands.MissingPermissions as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Missing Permissions",
+                    "You need the Moderate Members permission to use this command."
                 ),
                 ephemeral=True
             )
