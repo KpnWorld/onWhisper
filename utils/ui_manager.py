@@ -89,9 +89,11 @@ class UIManager:
         embed.set_footer(text="onWhisper • Moderation")
         return embed
 
-    def log_embed(self, title: str, description: str) -> Embed:
+    def log_embed(self, title: str, description: str, author: Optional[discord.Member] = None) -> Embed:
         """Create a log-themed embed"""
         embed = self.base_embed(title, description, self.colors['log'])
+        if author:
+            embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
         embed.set_footer(text="onWhisper • Log")
         return embed
 
