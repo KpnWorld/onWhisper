@@ -70,8 +70,13 @@ class ModerationCog(commands.Cog):
             if not interaction.user.guild_permissions.moderate_members:
                 raise commands.MissingPermissions(["moderate_members"])
 
-            if user.top_role >= interaction.user.top_role:
-                raise commands.CommandError("You cannot warn someone with a higher or equal role.")
+            # Check bot's role hierarchy
+            if user.top_role >= interaction.guild.me.top_role:
+                raise commands.CommandError("I cannot warn this user as their role is higher than or equal to my highest role")
+
+            # Check command user's role hierarchy
+            if user.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
+                raise commands.CommandError("You cannot warn someone with a higher or equal role")
 
             if reason is None:
                 reason = "No reason provided"
@@ -93,7 +98,6 @@ class ModerationCog(commands.Cog):
             # Add warning to database with timeout
             try:
                 async with asyncio.timeout(10.0):
-                    # Assuming db_manager has an add_warning method
                     await self.bot.db_manager.add_warning(
                         guild_id=interaction.guild.id,
                         user_id=user.id,
@@ -122,7 +126,7 @@ class ModerationCog(commands.Cog):
             await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed(
                     "Error",
-                    f"An error occurred while warning the user: {str(e)}"
+                    str(e)
                 ),
                 ephemeral=True
             )

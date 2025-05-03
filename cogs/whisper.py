@@ -103,6 +103,9 @@ class WhisperCog(commands.Cog):
     async def whisper(self, interaction: discord.Interaction, message: str):
         """Start a private whisper thread to staff"""
         try:
+            # Defer the response immediately to prevent timeout
+            await interaction.response.defer(ephemeral=True)
+            
             # Check if whispers are enabled
             config = await self.bot.db_manager.get_section(interaction.guild_id, 'whisper_config')
             if not config.get('enabled', True):
@@ -154,21 +157,13 @@ class WhisperCog(commands.Cog):
                     embed.add_field(name="Thread", value=thread.mention)
                     await log_channel.send(embed=embed)
 
-            # Send initial messages
+            # Send initial message in thread
             await thread.send(
                 f"{staff_role.mention} New whisper from {interaction.user.mention}",
                 embed=self.bot.ui_manager.whisper_embed(
                     "New Whisper Thread",
                     message
                 )
-            )
-
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.success_embed(
-                    "Thread Created",
-                    f"I've created a private thread for your message: {thread.mention}"
-                ),
-                ephemeral=True
             )
 
             # Add user and notify about auto-close
@@ -181,13 +176,22 @@ class WhisperCog(commands.Cog):
                 )
             )
 
+            # Send success message to user
+            await interaction.followup.send(
+                embed=self.bot.ui_manager.success_embed(
+                    "Thread Created",
+                    f"I've created a private thread for your message. Click here to join: {thread.mention}\n\nThe thread will close automatically after {timeout} minutes of inactivity."
+                ),
+                ephemeral=True
+            )
+
         except self.bot.WhisperError as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=self.bot.ui_manager.error_to_embed(e),
                 ephemeral=True
             )
         except Exception as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),
                 ephemeral=True
             )
