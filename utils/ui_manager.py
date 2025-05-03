@@ -40,7 +40,8 @@ class UIManager:
             'info': 0x5865F2,       # Blurple for info
             'whisper': 0x9C84EF,    # Purple for whisper system
             'xp': 0x2ECC71,         # Green for leveling system
-            'mod': 0xF1C40F         # Yellow for moderation
+            'mod': 0xF1C40F,        # Yellow for moderation
+            'log': 0x95A5A6         # Gray for logs
         }
 
     def base_embed(self, title: str, description: Optional[str] = None, color: int = None) -> Embed:
@@ -86,6 +87,12 @@ class UIManager:
         """Create a moderation themed embed"""
         embed = self.base_embed(title, description, self.colors['mod'])
         embed.set_footer(text="onWhisper • Moderation")
+        return embed
+
+    def log_embed(self, title: str, description: str) -> Embed:
+        """Create a log-themed embed"""
+        embed = self.base_embed(title, description, self.colors['log'])
+        embed.set_footer(text="onWhisper • Log")
         return embed
 
     def feature_error_embed(self, feature: str, error_type: str, details: str) -> Embed:
@@ -256,7 +263,7 @@ class UIManager:
                 self.value = None
                 self.message = None
 
-            @discord.ui.button(label=confirm_label, style=discord.ButtonStyle.green)
+            @discord.ui.button(label=confirm_label, style=discord.ButtonStyle.success)
             async def confirm(self, button: discord.ui.Button, button_interaction: discord.Interaction):
                 self.value = True
                 for item in self.children:
@@ -265,7 +272,7 @@ class UIManager:
                 await self.message.edit(view=self)
                 self.stop()
 
-            @discord.ui.button(label=cancel_label, style=discord.ButtonStyle.grey)
+            @discord.ui.button(label=cancel_label, style=discord.ButtonStyle.secondary)
             async def cancel(self, button: discord.ui.Button, button_interaction: discord.Interaction):
                 self.value = False
                 for item in self.children:

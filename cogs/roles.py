@@ -15,6 +15,20 @@ class RolesCog(commands.Cog):
             return False
         return True
 
+    async def _handle_bulk_role_update(self, member: discord.Member, role: discord.Role, action: str) -> bool:
+        """Helper method to handle role updates for a single member
+        Returns True if successful, False if failed"""
+        try:
+            if action == "add":
+                if role not in member.roles:
+                    await member.add_roles(role, reason="Bulk role addition")
+            else:  # remove
+                if role in member.roles:
+                    await member.remove_roles(role, reason="Bulk role removal")
+            return True
+        except Exception:
+            return False
+
     @app_commands.command(
         name="roles_auto_set",
         description="Enable auto-role for new members"
@@ -219,24 +233,6 @@ class RolesCog(commands.Cog):
                 ephemeral=True
             )
 
-    async def _handle_bulk_role_update(self, member: discord.Member, role: discord.Role, action: str) -> bool:
-        """Handle bulk role update for a single member"""
-        try:
-            if not await self._can_manage_role(member.guild, role):
-                return False
-                
-            if action == "add":
-                await member.add_roles(role)
-            else:
-                await member.remove_roles(role)
-            return True
-        except discord.Forbidden:
-            print(f"Missing permissions to {'add' if action == 'add' else 'remove'} role {role.id} {'to' if action == 'add' else 'from'} member {member.id}")
-            return False
-        except Exception as e:
-            print(f"Error in bulk role update: {e}")
-            return False
-
     @app_commands.command(
         name="roles_bulk",
         description="Add or remove a role from multiple users"
@@ -261,15 +257,34 @@ class RolesCog(commands.Cog):
         """Bulk add/remove roles"""
         try:
             if not interaction.user.guild_permissions.manage_roles:
-                raise commands.MissingPermissions(["manage_roles"])
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Missing Permissions",
+                        "You need the Manage Roles permission to use this command."
+                    ),
+                    ephemeral=True
+                )
+                return
 
             if not interaction.guild.me.guild_permissions.manage_roles:
-                raise commands.BotMissingPermissions(["manage_roles"])
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Missing Permissions",
+                        "I need the Manage Roles permission to execute this command."
+                    ),
+                    ephemeral=True
+                )
+                return
 
             if role >= interaction.guild.me.top_role:
-                raise commands.CommandError("I cannot manage this role as it's higher than my highest role")
-
-            await interaction.response.defer()
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Invalid Role",
+                        "I cannot manage this role as it's higher than my highest role"
+                    ),
+                    ephemeral=True
+                )
+                return
 
             # Handle @everyone case
             if users.lower() == "@everyone":
@@ -287,7 +302,17 @@ class RolesCog(commands.Cog):
                             user_ids.append(int(user_id))
 
             if not user_ids:
-                raise commands.CommandError("No valid user IDs or mentions found")
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Invalid Input",
+                        "No valid user IDs or mentions found"
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Defer the response before confirmation
+            await interaction.response.defer()
 
             # Add confirmation for @everyone
             if users.lower() == "@everyone":
@@ -311,9 +336,8 @@ class RolesCog(commands.Cog):
             total_users = len(user_ids)
             success = []
             failed = []
-            progress_message = None
             last_update = 0
-            update_interval = max(1, min(10, total_users // 10))  # Update every 10% or at least every user
+            update_interval = max(1, min(10, total_users // 10))
 
             # Create initial progress message
             progress_embed = self.bot.ui_manager.info_embed(
@@ -323,6 +347,7 @@ class RolesCog(commands.Cog):
             )
             progress_message = await interaction.followup.send(embed=progress_embed)
 
+            # Process users
             for i, user_id in enumerate(user_ids, 1):
                 member = interaction.guild.get_member(user_id)
                 if member:
@@ -331,7 +356,6 @@ class RolesCog(commands.Cog):
                     else:
                         failed.append(member.mention)
 
-                # Update progress every 10% or for smaller amounts, every user
                 if i - last_update >= update_interval:
                     progress_percent = (i / total_users) * 100
                     progress_embed = self.bot.ui_manager.info_embed(
@@ -348,9 +372,8 @@ class RolesCog(commands.Cog):
                 "Bulk Role Update Complete",
                 f"Role {'added to' if action == 'add' else 'removed from'} {len(success)} users"
             )
-            
+
             if success:
-                # For @everyone, just show the count
                 if users.lower() == "@everyone":
                     embed.add_field(
                         name="Successful",
@@ -363,7 +386,7 @@ class RolesCog(commands.Cog):
                         value=", ".join(success[:10]) + ("..." if len(success) > 10 else ""),
                         inline=False
                     )
-            
+
             if failed:
                 embed.add_field(
                     name="Failed",
@@ -371,28 +394,8 @@ class RolesCog(commands.Cog):
                     inline=False
                 )
 
-            # Edit the progress message with the final result
             await progress_message.edit(embed=embed)
 
-        except commands.MissingPermissions as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed(
-                    "Missing Permissions",
-                    "You need the Manage Roles permission to use this command."
-                ),
-                ephemeral=True
-            )
-        except commands.CommandError as e:
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                    ephemeral=True
-                )
-            else:
-                await interaction.followup.send(
-                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                    ephemeral=True
-                )
         except Exception as e:
             if not interaction.response.is_done():
                 await interaction.response.send_message(

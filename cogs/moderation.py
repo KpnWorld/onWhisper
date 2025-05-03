@@ -53,78 +53,77 @@ class ModerationCog(commands.Cog):
     )
     @app_commands.describe(
         user="The user to warn",
-        reason="The reason for the warning"
+        reason="The reason for warning the user"
     )
     @app_commands.default_permissions(moderate_members=True)
     async def warn(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        reason: str
+        reason: str = None
     ):
-        """Warn a user and log the action"""
+        """Warn a user"""
         try:
+            # Defer the response immediately to prevent timeout
+            await interaction.response.defer()
+
             if not interaction.user.guild_permissions.moderate_members:
                 raise commands.MissingPermissions(["moderate_members"])
 
-            # Add warning
-            success = await self.bot.db_manager.add_warning(
-                interaction.guild_id,
-                user.id,
-                interaction.user.id,
-                reason
-            )
+            if user.top_role >= interaction.user.top_role:
+                raise commands.CommandError("You cannot warn someone with a higher or equal role.")
 
-            if not success:
-                raise Exception("Failed to save warning")
+            if reason is None:
+                reason = "No reason provided"
 
-            # Get user's warnings
-            warnings = await self.bot.db_manager.get_user_warnings(interaction.guild_id, user.id)
+            # Try to DM the user first with a timeout
+            try:
+                await asyncio.wait_for(
+                    user.send(
+                        embed=self.bot.ui_manager.warning_embed(
+                            "Warning",
+                            f"You were warned in {interaction.guild.name}\n**Reason:** {reason}"
+                        )
+                    ),
+                    timeout=5.0
+                )
+            except (discord.Forbidden, asyncio.TimeoutError):
+                pass
 
-            # Create warn embed
+            # Add warning to database with timeout
+            try:
+                async with asyncio.timeout(10.0):
+                    # Assuming db_manager has an add_warning method
+                    await self.bot.db_manager.add_warning(
+                        guild_id=interaction.guild.id,
+                        user_id=user.id,
+                        moderator_id=interaction.user.id,
+                        reason=reason
+                    )
+            except asyncio.TimeoutError:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Error",
+                        "The warning operation timed out while updating the database. Please try again."
+                    ),
+                    ephemeral=True
+                )
+                return
+
             embed = self.bot.ui_manager.mod_embed(
                 "User Warned",
-                f"**User:** {user.mention}\n**Reason:** {reason}\n**Total Warnings:** {len(warnings)}"
+                f"**User:** {user}\n**Reason:** {reason}"
             )
             embed.set_thumbnail(url=user.display_avatar.url)
 
-            # Log the action to both DB and logging channel
-            await self.bot.db_manager.add_mod_action(
-                interaction.guild_id,
-                "warn",
-                user.id,
-                f"Warning by {interaction.user}: {reason}"
-            )
-            await self.log_mod_action(interaction.guild_id, "warned", user, interaction.user, reason)
+            await interaction.followup.send(embed=embed)
 
-            # Notify the user
-            try:
-                await user.send(
-                    embed=self.bot.ui_manager.warning_embed(
-                        "Warning Received",
-                        f"You were warned in {interaction.guild.name}\n**Reason:** {reason}"
-                    )
-                )
-            except discord.Forbidden:
-                embed.add_field(
-                    name="Note",
-                    value="Could not DM user about the warning",
-                    inline=False
-                )
-
-            await interaction.response.send_message(embed=embed)
-
-        except commands.MissingPermissions as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed(
-                    "Missing Permissions",
-                    "You need the Moderate Members permission to use this command."
-                ),
-                ephemeral=True
-            )
         except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+            await interaction.followup.send(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    f"An error occurred while warning the user: {str(e)}"
+                ),
                 ephemeral=True
             )
 
@@ -213,69 +212,73 @@ class ModerationCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        reason: str
+        reason: str = None
     ):
         """Kick a user from the server"""
         try:
+            # Defer the response immediately to prevent timeout
+            await interaction.response.defer()
+
             if not interaction.user.guild_permissions.kick_members:
                 raise commands.MissingPermissions(["kick_members"])
 
             if user.top_role >= interaction.user.top_role:
                 raise commands.CommandError("You cannot kick someone with a higher or equal role.")
 
-            # Ask for confirmation
-            confirmed = await self.bot.ui_manager.confirm_action(
-                interaction,
-                "Confirm Kick",
-                f"Are you sure you want to kick {user.mention}?",
-                confirm_label="Kick",
-                cancel_label="Cancel"
-            )
+            if reason is None:
+                reason = "No reason provided"
 
-            if not confirmed:
-                return
-
-            # Try to DM the user
+            # Try to DM the user first with a timeout
             try:
-                await user.send(
-                    embed=self.bot.ui_manager.warning_embed(
-                        "Kicked",
-                        f"You were kicked from {interaction.guild.name}\n**Reason:** {reason}"
-                    )
+                await asyncio.wait_for(
+                    user.send(
+                        embed=self.bot.ui_manager.warning_embed(
+                            "Kicked",
+                            f"You were kicked from {interaction.guild.name}\n**Reason:** {reason}"
+                        )
+                    ),
+                    timeout=5.0
                 )
-            except:
-                pass
+            except (discord.Forbidden, asyncio.TimeoutError):
+                pass  # Continue even if DM fails
 
-            # Kick the user
-            await user.kick(reason=f"Kicked by {interaction.user}: {reason}")
-
-            # Log the action
-            await self.bot.db_manager.add_mod_action(
-                interaction.guild_id,
-                "kick",
-                user.id,
-                f"Kicked by {interaction.user}: {reason}"
-            )
+            # Perform the kick with timeout
+            try:
+                async with asyncio.timeout(10.0):
+                    await user.kick(reason=reason)
+            except asyncio.TimeoutError:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Error",
+                        "The kick operation timed out. Please try again."
+                    ),
+                    ephemeral=True
+                )
+                return
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Error",
+                        "I don't have permission to kick this user."
+                    ),
+                    ephemeral=True
+                )
+                return
 
             embed = self.bot.ui_manager.mod_embed(
                 "User Kicked",
-                f"**User:** {user.mention}\n**Reason:** {reason}"
+                f"**User:** {user}\n**Reason:** {reason}"
             )
             embed.set_thumbnail(url=user.display_avatar.url)
 
             await interaction.followup.send(embed=embed)
 
-        except commands.MissingPermissions as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed(
-                    "Missing Permissions",
-                    "You need the Kick Members permission to use this command."
-                ),
-                ephemeral=True
-            )
         except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+            await interaction.followup.send(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    f"An error occurred while kicking the user: {str(e)}"
+                ),
                 ephemeral=True
             )
 
@@ -298,6 +301,9 @@ class ModerationCog(commands.Cog):
     ):
         """Ban a user from the server"""
         try:
+            # Defer the response immediately to prevent timeout
+            await interaction.response.defer()
+
             if not interaction.user.guild_permissions.ban_members:
                 raise commands.MissingPermissions(["ban_members"])
 
@@ -391,6 +397,9 @@ class ModerationCog(commands.Cog):
     ):
         """Lock down a channel"""
         try:
+            # Defer the response immediately to prevent timeout
+            await interaction.response.defer()
+
             if not interaction.user.guild_permissions.manage_channels:
                 raise commands.MissingPermissions(["manage_channels"])
 
@@ -416,7 +425,7 @@ class ModerationCog(commands.Cog):
                 f"🔒 {target_channel.mention} has been locked {duration_text}\n**Reason:** {reason}"
             )
 
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
             # If duration set, schedule unlock
             if duration:
@@ -437,7 +446,7 @@ class ModerationCog(commands.Cog):
                     pass
 
         except commands.MissingPermissions as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed(
                     "Missing Permissions",
                     "You need the Manage Channels permission to use this command."
@@ -445,7 +454,7 @@ class ModerationCog(commands.Cog):
                 ephemeral=True
             )
         except Exception as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),
                 ephemeral=True
             )
@@ -696,6 +705,9 @@ class ModerationCog(commands.Cog):
     ):
         """Timeout a user"""
         try:
+            # Defer the response immediately to prevent timeout
+            await interaction.response.defer()
+
             if not interaction.user.guild_permissions.moderate_members:
                 raise commands.MissingPermissions(["moderate_members"])
 
@@ -725,27 +737,10 @@ class ModerationCog(commands.Cog):
             )
             embed.set_thumbnail(url=user.display_avatar.url)
 
-            # Try to DM user
-            try:
-                await user.send(
-                    embed=self.bot.ui_manager.warning_embed(
-                        "You Have Been Timed Out",
-                        f"You have been timed out in {interaction.guild.name}\n"
-                        f"**Duration:** {duration} minutes\n"
-                        f"**Reason:** {reason}"
-                    )
-                )
-            except:
-                embed.add_field(
-                    name="Note",
-                    value="Could not DM user about the timeout",
-                    inline=False
-                )
-
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
         except commands.MissingPermissions as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed(
                     "Missing Permissions",
                     "You need the Moderate Members permission to use this command."
@@ -753,15 +748,12 @@ class ModerationCog(commands.Cog):
                 ephemeral=True
             )
         except ValueError as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed("Invalid Value", str(e)),
                 ephemeral=True
             )
         except Exception as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),
                 ephemeral=True
             )
-
-async def setup(bot):
-    await bot.add_cog(ModerationCog(bot))

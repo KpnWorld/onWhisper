@@ -32,11 +32,16 @@ class WhisperCog(commands.Cog):
                     if not thread:
                         continue
 
-                    last_message = await thread.history(limit=1).flatten()
+                    # Get last message properly with async for
+                    last_message = None
+                    async for message in thread.history(limit=1):
+                        last_message = message
+                        break
+
                     if not last_message:
                         continue
 
-                    inactive_time = datetime.utcnow() - last_message[0].created_at
+                    inactive_time = datetime.utcnow() - last_message.created_at
                     if inactive_time > timedelta(minutes=timeout):
                         await thread.send(embed=self.bot.ui_manager.warning_embed(
                             "Thread Closing",

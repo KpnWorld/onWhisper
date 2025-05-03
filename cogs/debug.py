@@ -335,6 +335,23 @@ class DebugCog(commands.Cog):
                     "Maintenance Mode Enabled",
                     "Bot is now in maintenance mode. Only owner commands will work."
                 )
+                
+                # Notify all servers with logging enabled
+                for guild in self.bot.guilds:
+                    try:
+                        guild_data = await self.bot.db_manager.get_guild_data(guild.id)
+                        logs_config = guild_data.get('logs_config', {})
+                        
+                        if logs_config.get('enabled') and logs_config.get('mod_channel'):
+                            log_channel = guild.get_channel(int(logs_config['mod_channel']))
+                            if log_channel:
+                                log_embed = self.bot.ui_manager.warning_embed(
+                                    "Bot Maintenance Mode",
+                                    "The bot has entered maintenance mode. Only essential functions will be available until maintenance is complete."
+                                )
+                                await log_channel.send(embed=log_embed)
+                    except Exception as e:
+                        print(f"Failed to send maintenance notification to guild {guild.id}: {e}")
             else:
                 # Reset status
                 await self.bot.change_presence(
@@ -345,6 +362,23 @@ class DebugCog(commands.Cog):
                     "Maintenance Mode Disabled",
                     "Bot has returned to normal operation."
                 )
+                
+                # Notify all servers with logging enabled
+                for guild in self.bot.guilds:
+                    try:
+                        guild_data = await self.bot.db_manager.get_guild_data(guild.id)
+                        logs_config = guild_data.get('logs_config', {})
+                        
+                        if logs_config.get('enabled') and logs_config.get('mod_channel'):
+                            log_channel = guild.get_channel(int(logs_config['mod_channel']))
+                            if log_channel:
+                                log_embed = self.bot.ui_manager.success_embed(
+                                    "Bot Maintenance Complete",
+                                    "The bot has exited maintenance mode and all functions are now available."
+                                )
+                                await log_channel.send(embed=log_embed)
+                    except Exception as e:
+                        print(f"Failed to send maintenance notification to guild {guild.id}: {e}")
 
             await interaction.response.send_message(embed=embed)
 
