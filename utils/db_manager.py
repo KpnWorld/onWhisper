@@ -845,3 +845,58 @@ class DBManager:
         except Exception as e:
             print(f"Error calculating database size: {e}")
             return 0
+
+    async def cleanup_old_logs(self, guild_id: int, days: int = 30) -> bool:
+        """Clean up old logs"""
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            
+            # Clean up events
+            events = await self.get_section(guild_id, 'events')
+            if events:
+                events = [
+                    event for event in events 
+                    if datetime.fromisoformat(event['timestamp']) > cutoff
+                ]
+                await self.update_guild_data(guild_id, 'events', events)
+            
+            # Clean up mod actions
+            actions = await self.get_section(guild_id, 'mod_actions')
+            if actions:
+                actions = [
+                    action for action in actions 
+                    if datetime.fromisoformat(action['timestamp']) > cutoff
+                ]
+                await self.update_guild_data(guild_id, 'mod_actions', actions)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error cleaning up logs: {e}")
+            return False
+
+    async def get_logging_config(self, guild_id: int) -> dict:
+        """Get logging configuration"""
+        try:
+            config = await self.get_section(guild_id, 'logging_config')
+            if not config:
+                config = {
+                    'log_channel': None,
+                    'logging_enabled': False
+                }
+                await self.update_guild_data(guild_id, 'logging_config', config)
+            return config
+        except Exception as e:
+            print(f"Error getting logging config: {e}")
+            return {}
+
+    async def update_logging_config(self, guild_id: int, updates: dict) -> bool:
+        """Update logging configuration"""
+        try:
+            config = await self.get_logging_config(guild_id)
+            config.update(updates)
+            await self.update_guild_data(guild_id, 'logging_config', config)
+            return True
+        except Exception as e:
+            print(f"Error updating logging config: {e}")
+            return False

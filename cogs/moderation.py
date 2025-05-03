@@ -10,6 +10,30 @@ class ModerationCog(commands.Cog):
         self.bot = bot
         self.last_deleted = {}  # Channel ID -> Last deleted message
 
+    # Helper method to log moderation events
+    async def log_mod_action(self, guild_id: int, action: str, user: discord.Member, mod: discord.Member, reason: str = None):
+        """Log a moderation action to the moderation log channel"""
+        embed = discord.Embed(
+            title=f"Moderation Action: {action.title()}",
+            description=f"{user.mention} was {action} by {mod.mention}",
+            color=discord.Color.red(),
+            timestamp=datetime.utcnow()
+        )
+        
+        if reason:
+            embed.add_field(name="Reason", value=reason, inline=False)
+            
+        embed.set_thumbnail(url=user.display_avatar.url)
+        embed.set_footer(text=f"User ID: {user.id}")
+        
+        try:
+            # Get the logging cog
+            logging_cog = self.bot.get_cog('LoggingCog')
+            if logging_cog:
+                await logging_cog.log_event(guild_id, "moderation", embed)
+        except Exception as e:
+            print(f"Error sending moderation log: {e}")
+
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         """Store last deleted message per channel"""
@@ -64,13 +88,14 @@ class ModerationCog(commands.Cog):
             )
             embed.set_thumbnail(url=user.display_avatar.url)
 
-            # Log the action
+            # Log the action to both DB and logging channel
             await self.bot.db_manager.add_mod_action(
                 interaction.guild_id,
                 "warn",
                 user.id,
                 f"Warning by {interaction.user}: {reason}"
             )
+            await self.log_mod_action(interaction.guild_id, "warned", user, interaction.user, reason)
 
             # Notify the user
             try:
@@ -311,13 +336,14 @@ class ModerationCog(commands.Cog):
                 delete_message_days=delete_days
             )
 
-            # Log the action
+            # Log the action to both DB and logging channel
             await self.bot.db_manager.add_mod_action(
                 interaction.guild_id,
                 "ban",
                 user.id,
                 f"Banned by {interaction.user}: {reason}"
             )
+            await self.log_mod_action(interaction.guild_id, "banned", user, interaction.user, reason)
 
             embed = self.bot.ui_manager.mod_embed(
                 "User Banned",
@@ -683,14 +709,15 @@ class ModerationCog(commands.Cog):
             until = discord.utils.utcnow() + timedelta(minutes=duration)
             await user.timeout(until, reason=f"Timeout by {interaction.user}: {reason}")
 
-            # Log the action
+            # Log the action to both DB and logging channel
             await self.bot.db_manager.add_mod_action(
                 interaction.guild_id,
                 "timeout",
                 user.id,
-                f"Timeout by {interaction.user} for {duration} minutes: {reason}",
+                f"Timed out by {interaction.user} for {duration} minutes: {reason}",
                 until
             )
+            await self.log_mod_action(interaction.guild_id, "timed out", user, interaction.user, f"{duration} minutes - {reason}")
 
             embed = self.bot.ui_manager.mod_embed(
                 "User Timed Out",

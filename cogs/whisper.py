@@ -43,6 +43,19 @@ class WhisperCog(commands.Cog):
                         await thread.edit(archived=True, locked=True)
                         await self.bot.db_manager.close_whisper(guild.id, str(thread.id))
 
+                        # Log auto-closure
+                        log_config = await self.bot.db_manager.get_logging_config(guild.id)
+                        if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
+                            log_channel = guild.get_channel(int(log_config['log_channel']))
+                            if log_channel:
+                                embed = self.bot.ui_manager.log_embed(
+                                    "Whisper Auto-Closed",
+                                    f"Whisper thread automatically closed due to {timeout} minutes of inactivity",
+                                    self.bot.user
+                                )
+                                embed.add_field(name="Thread", value=thread.mention)
+                                await log_channel.send(embed=embed)
+
         except Exception as e:
             print(f"Error in thread checker: {e}")
 
@@ -93,6 +106,19 @@ class WhisperCog(commands.Cog):
                 str(interaction.user.id),
                 str(channel.id)
             )
+
+            # Log whisper creation
+            log_config = await self.bot.db_manager.get_logging_config(interaction.guild_id)
+            if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
+                log_channel = interaction.guild.get_channel(int(log_config['log_channel']))
+                if log_channel:
+                    embed = self.bot.ui_manager.log_embed(
+                        "Whisper Created",
+                        f"A new whisper thread was created by {interaction.user.mention}",
+                        interaction.user
+                    )
+                    embed.add_field(name="Thread", value=thread.mention)
+                    await log_channel.send(embed=embed)
 
             # Send initial messages
             await thread.send(
@@ -157,6 +183,19 @@ class WhisperCog(commands.Cog):
             ))
             await interaction.channel.edit(archived=True, locked=True)
             await self.bot.db_manager.close_whisper(interaction.guild_id, str(interaction.channel.id))
+
+            # Log whisper closure
+            log_config = await self.bot.db_manager.get_logging_config(interaction.guild_id)
+            if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
+                log_channel = interaction.guild.get_channel(int(log_config['log_channel']))
+                if log_channel:
+                    embed = self.bot.ui_manager.log_embed(
+                        "Whisper Closed",
+                        f"Whisper thread closed by {interaction.user.mention}",
+                        interaction.user
+                    )
+                    embed.add_field(name="Thread", value=interaction.channel.mention)
+                    await log_channel.send(embed=embed)
 
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.success_embed(
