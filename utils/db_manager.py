@@ -876,27 +876,40 @@ class DBManager:
             return False
 
     async def get_logging_config(self, guild_id: int) -> dict:
-        """Get logging configuration"""
+        """Get logging configuration for a guild"""
         try:
-            config = await self.get_section(guild_id, 'logging_config')
-            if not config:
-                config = {
-                    'log_channel': None,
-                    'logging_enabled': False
-                }
-                await self.update_guild_data(guild_id, 'logging_config', config)
-            return config
+            guild_data = await self.get_guild_data(guild_id)
+            return guild_data.get('logs_config', {
+                'mod_channel': None,
+                'join_channel': None,
+                'enabled': False
+            })
         except Exception as e:
             print(f"Error getting logging config: {e}")
-            return {}
+            return {
+                'mod_channel': None,
+                'join_channel': None,
+                'enabled': False
+            }
 
-    async def update_logging_config(self, guild_id: int, updates: dict) -> bool:
+    async def update_logging_config(self, guild_id: int, updates: dict):
         """Update logging configuration"""
         try:
-            config = await self.get_logging_config(guild_id)
+            guild_data = await self.get_guild_data(guild_id)
+            
+            # Get existing config or create default
+            config = guild_data.get('logs_config', {
+                'mod_channel': None,
+                'join_channel': None,
+                'enabled': False
+            })
+            
+            # Update with new values
             config.update(updates)
-            await self.update_guild_data(guild_id, 'logging_config', config)
-            return True
+            
+            # Save back to guild data
+            guild_data['logs_config'] = config
+            await self.update_guild_data(guild_id, 'logs_config', config)
         except Exception as e:
             print(f"Error updating logging config: {e}")
-            return False
+            raise
