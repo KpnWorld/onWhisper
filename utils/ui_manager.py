@@ -254,16 +254,15 @@ class UIManager:
             def __init__(self):
                 super().__init__(timeout=timeout)
                 self.value = None
+                self.message = None
 
             @discord.ui.button(label=confirm_label, style=discord.ButtonStyle.green)
             async def confirm(self, button: discord.ui.Button, button_interaction: discord.Interaction):
                 self.value = True
                 for item in self.children:
                     item.disabled = True
-                try:
-                    await button_interaction.response.edit_message(view=self)
-                except discord.InteractionResponded:
-                    await button_interaction.edit_original_response(view=self)
+                await button_interaction.response.defer()
+                await self.message.edit(view=self)
                 self.stop()
 
             @discord.ui.button(label=cancel_label, style=discord.ButtonStyle.grey)
@@ -271,20 +270,17 @@ class UIManager:
                 self.value = False
                 for item in self.children:
                     item.disabled = True
-                try:
-                    await button_interaction.response.edit_message(view=self)
-                except discord.InteractionResponded:
-                    await button_interaction.edit_original_response(view=self)
+                await button_interaction.response.defer()
+                await self.message.edit(view=self)
                 self.stop()
 
             async def on_timeout(self):
-                self.value = False
-                for item in self.children:
-                    item.disabled = True
-                try:
-                    await interaction.edit_original_response(view=self)
-                except:
-                    pass
+                if self.message:
+                    self.value = False
+                    for item in self.children:
+                        item.disabled = True
+                    await self.message.edit(view=self)
+                self.stop()
 
         view = ConfirmView()
         embed = self.info_embed(
@@ -293,6 +289,7 @@ class UIManager:
         )
         
         await interaction.response.send_message(embed=embed, view=view, ephemeral=ephemeral)
+        view.message = await interaction.original_response()
         await view.wait()
         return view.value
 
