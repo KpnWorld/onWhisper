@@ -757,3 +757,6 @@ class ModerationCog(commands.Cog):
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),
                 ephemeral=True
             )
+
+async def setup(bot):
+    await bot.add_cog(ModerationCog(bot))
