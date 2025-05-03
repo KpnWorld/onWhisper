@@ -206,30 +206,28 @@ class LoggingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         """Log member join events"""
-        embed = discord.Embed(
-            title="Member Joined",
-            description=f"{member.mention} joined the server",
-            color=discord.Color.green(),
-            timestamp=datetime.utcnow()
+        embed = self.bot.ui_manager.success_embed(
+            "Member Joined",
+            f"{member.mention} joined the server"
         )
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="Account Created", value=member.created_at.strftime("%Y-%m-%d %H:%M UTC"))
-        embed.set_footer(text=f"ID: {member.id}")
+        embed.add_field(name="Account Created", value=discord.utils.format_dt(member.created_at, style='R'), inline=True)
+        embed.set_footer(text=f"Member ID: {member.id}")
         
         await self.log_event(member.guild.id, "member", embed)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
         """Log member leave events"""
-        embed = discord.Embed(
-            title="Member Left",
-            description=f"{member.mention} left the server",
-            color=discord.Color.red(),
-            timestamp=datetime.utcnow()
+        embed = self.bot.ui_manager.error_embed(
+            "Member Left",
+            f"{member.mention} left the server"
         )
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="Joined At", value=member.joined_at.strftime("%Y-%m-%d %H:%M UTC") if member.joined_at else "Unknown")
-        embed.set_footer(text=f"ID: {member.id}")
+        if member.joined_at:
+            embed.add_field(name="Joined Server", value=discord.utils.format_dt(member.joined_at, style='R'), inline=True)
+        embed.add_field(name="Account Created", value=discord.utils.format_dt(member.created_at, style='R'), inline=True)
+        embed.set_footer(text=f"Member ID: {member.id}")
         
         await self.log_event(member.guild.id, "member", embed)
 
@@ -239,17 +237,17 @@ class LoggingCog(commands.Cog):
         if message.author.bot:
             return
 
-        embed = discord.Embed(
-            title="Message Deleted",
-            description=f"Message by {message.author.mention} deleted in {message.channel.mention}",
-            color=discord.Color.red(),
-            timestamp=datetime.utcnow()
+        embed = self.bot.ui_manager.warning_embed(
+            "Message Deleted",
+            f"A message was deleted in {message.channel.mention}"
         )
+        embed.add_field(name="Author", value=message.author.mention, inline=True)
         if message.content:
             embed.add_field(name="Content", value=message.content[:1024], inline=False)
         if message.attachments:
             embed.add_field(name="Attachments", value="\n".join(a.url for a in message.attachments)[:1024], inline=False)
-        embed.set_footer(text=f"Author ID: {message.author.id} | Message ID: {message.id}")
+        embed.set_thumbnail(url=message.author.display_avatar.url)
+        embed.set_footer(text=f"Message ID: {message.id}")
         
         await self.log_event(message.guild.id, "message", embed)
 
@@ -259,28 +257,26 @@ class LoggingCog(commands.Cog):
         if before.author.bot or before.content == after.content:
             return
 
-        embed = discord.Embed(
-            title="Message Edited",
-            description=f"Message by {before.author.mention} edited in {before.channel.mention}",
-            color=discord.Color.blue(),
-            timestamp=datetime.utcnow()
+        embed = self.bot.ui_manager.info_embed(
+            "Message Edited",
+            f"A message was edited in {before.channel.mention}"
         )
+        embed.add_field(name="Author", value=before.author.mention, inline=True)
         embed.add_field(name="Before", value=before.content[:1024] if before.content else "*Empty*", inline=False)
         embed.add_field(name="After", value=after.content[:1024] if after.content else "*Empty*", inline=False)
-        embed.set_footer(text=f"Author ID: {before.author.id} | Message ID: {before.id}")
+        embed.set_thumbnail(url=before.author.display_avatar.url)
+        embed.set_footer(text=f"Message ID: {before.id}")
         
         await self.log_event(before.guild.id, "message", embed)
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
         """Log channel creation"""
-        embed = discord.Embed(
-            title="Channel Created",
-            description=f"Channel {channel.mention} was created",
-            color=discord.Color.green(),
-            timestamp=datetime.utcnow()
+        embed = self.bot.ui_manager.success_embed(
+            "Channel Created",
+            f"Channel {channel.mention} was created"
         )
-        embed.add_field(name="Type", value=str(channel.type))
+        embed.add_field(name="Type", value=str(channel.type).title(), inline=True)
         embed.set_footer(text=f"Channel ID: {channel.id}")
         
         await self.log_event(channel.guild.id, "server", embed)
@@ -288,13 +284,11 @@ class LoggingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         """Log channel deletion"""
-        embed = discord.Embed(
-            title="Channel Deleted",
-            description=f"Channel #{channel.name} was deleted",
-            color=discord.Color.red(),
-            timestamp=datetime.utcnow()
+        embed = self.bot.ui_manager.error_embed(
+            "Channel Deleted",
+            f"Channel #{channel.name} was deleted"
         )
-        embed.add_field(name="Type", value=str(channel.type))
+        embed.add_field(name="Type", value=str(channel.type).title(), inline=True)
         embed.set_footer(text=f"Channel ID: {channel.id}")
         
         await self.log_event(channel.guild.id, "server", embed)
@@ -302,12 +296,13 @@ class LoggingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
         """Log role creation"""
-        embed = discord.Embed(
-            title="Role Created",
-            description=f"Role {role.mention} was created",
-            color=role.color,
-            timestamp=datetime.utcnow()
+        embed = self.bot.ui_manager.success_embed(
+            "Role Created",
+            f"Role {role.mention} was created"
         )
+        embed.add_field(name="Color", value=str(role.color), inline=True)
+        embed.add_field(name="Hoisted", value=str(role.hoist), inline=True)
+        embed.add_field(name="Mentionable", value=str(role.mentionable), inline=True)
         embed.set_footer(text=f"Role ID: {role.id}")
         
         await self.log_event(role.guild.id, "server", embed)
@@ -315,12 +310,12 @@ class LoggingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
         """Log role deletion"""
-        embed = discord.Embed(
-            title="Role Deleted",
-            description=f"Role @{role.name} was deleted",
-            color=role.color,
-            timestamp=datetime.utcnow()
+        embed = self.bot.ui_manager.error_embed(
+            "Role Deleted",
+            f"Role @{role.name} was deleted"
         )
+        embed.add_field(name="Color", value=str(role.color), inline=True)
+        embed.add_field(name="Position", value=str(role.position), inline=True)
         embed.set_footer(text=f"Role ID: {role.id}")
         
         await self.log_event(role.guild.id, "server", embed)

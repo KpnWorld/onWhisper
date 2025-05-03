@@ -520,6 +520,31 @@ class DBManager:
             print(f"Error adding whisper: {e}")
             return False
 
+    async def cleanup_old_whispers(self, guild_id: int, days: int = 30) -> bool:
+        """Delete whispers that have been closed for more than the specified number of days"""
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            current_time = datetime.utcnow()
+            
+            # Filter out whispers that are closed and older than the specified days
+            active_whispers = []
+            for whisper in whispers:
+                if not whisper.get('closed_at'):
+                    active_whispers.append(whisper)
+                    continue
+                    
+                closed_at = datetime.fromisoformat(whisper['closed_at'])
+                if (current_time - closed_at).days < days:
+                    active_whispers.append(whisper)
+            
+            if len(active_whispers) < len(whispers):
+                await self.update_guild_data(guild_id, 'whispers', active_whispers)
+                return True
+            return False
+        except Exception as e:
+            print(f"Error cleaning up old whispers: {e}")
+            return False
+
     # Whisper System Methods
     async def update_whisper_config(self, guild_id: int, setting: str, value: Any) -> bool:
         """Update whisper system configuration"""

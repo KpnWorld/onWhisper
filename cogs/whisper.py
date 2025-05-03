@@ -8,10 +8,12 @@ class WhisperCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.check_threads.start()
+        self.cleanup_old_whispers.start()
         self._cd = commands.CooldownMapping.from_cooldown(1, 300, commands.BucketType.member)  # 5 min cooldown
 
     def cog_unload(self):
         self.check_threads.cancel()
+        self.cleanup_old_whispers.cancel()
 
     @tasks.loop(minutes=5.0)
     async def check_threads(self):
@@ -58,6 +60,33 @@ class WhisperCog(commands.Cog):
 
         except Exception as e:
             print(f"Error in thread checker: {e}")
+
+    @tasks.loop(hours=24.0)
+    async def cleanup_old_whispers(self):
+        """Cleanup old whispers from the database daily"""
+        try:
+            for guild in self.bot.guilds:
+                config = await self.bot.db_manager.get_section(guild.id, 'whisper_config')
+                if not config.get('enabled', True):
+                    continue
+                
+                retention_days = config.get('retention_days', 30)  # Default 30 days retention
+                cleaned = await self.bot.db_manager.cleanup_old_whispers(guild.id, retention_days)
+                
+                if cleaned:
+                    # Log cleanup if logging is enabled
+                    log_config = await self.bot.db_manager.get_logging_config(guild.id)
+                    if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
+                        log_channel = guild.get_channel(int(log_config['log_channel']))
+                        if log_channel:
+                            embed = self.bot.ui_manager.log_embed(
+                                "Whispers Cleaned Up",
+                                f"Old whispers (closed > {retention_days} days ago) have been cleaned from the database",
+                                self.bot.user
+                            )
+                            await log_channel.send(embed=embed)
+        except Exception as e:
+            print(f"Error in whisper cleanup: {e}")
 
     @app_commands.command(
         name="whisper",
@@ -385,6 +414,164 @@ class WhisperCog(commands.Cog):
                 embed=self.bot.ui_manager.error_embed(
                     "Missing Permissions",
                     "I need the Manage Channels and Manage Threads permissions to set up the whisper channel."
+                ),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="config_whisper_retention",
+        description="Set how long to keep closed whispers in the database"
+    )
+    @app_commands.describe(
+        days="Number of days to keep closed whispers (minimum: 1)"
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def config_whisper_retention(
+        self,
+        interaction: discord.Interaction,
+        days: int
+    ):
+        """Set whisper retention period"""
+        try:
+            if not interaction.user.guild_permissions.administrator:
+                raise commands.MissingPermissions(["administrator"])
+
+            if days < 1:
+                raise ValueError("Retention period must be at least 1 day")
+
+            await self.bot.db_manager.update_whisper_config(interaction.guild_id, 'retention_days', days)
+            
+            embed = self.bot.ui_manager.success_embed(
+                "Retention Period Updated",
+                f"Closed whispers will now be kept for {days} days before being automatically deleted"
+            )
+            await interaction.response.send_message(embed=embed)
+
+        except ValueError as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Invalid Value", str(e)),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="whisper_cleanup",
+        description="Manually cleanup old whispers from the database"
+    )
+    @app_commands.describe(
+        days="Delete whispers closed more than this many days ago (default: uses configured retention period)"
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def whisper_cleanup(
+        self,
+        interaction: discord.Interaction,
+        days: Optional[int] = None
+    ):
+        """Manually trigger whisper cleanup"""
+        try:
+            if not interaction.user.guild_permissions.administrator:
+                raise commands.MissingPermissions(["administrator"])
+
+            config = await self.bot.db_manager.get_section(interaction.guild_id, 'whisper_config')
+            retention_days = days if days is not None else config.get('retention_days', 30)
+
+            if retention_days < 1:
+                raise ValueError("Cleanup period must be at least 1 day")
+
+            cleaned = await self.bot.db_manager.cleanup_old_whispers(interaction.guild_id, retention_days)
+            
+            if cleaned:
+                embed = self.bot.ui_manager.success_embed(
+                    "Whispers Cleaned Up",
+                    f"Successfully removed whispers that were closed more than {retention_days} days ago"
+                )
+            else:
+                embed = self.bot.ui_manager.info_embed(
+                    "No Cleanup Needed",
+                    "No whispers were old enough to be cleaned up"
+                )
+            
+            await interaction.response.send_message(embed=embed)
+
+        except ValueError as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Invalid Value", str(e)),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="delete_old_whispers",
+        description="Manually delete whispers older than specified days"
+    )
+    @app_commands.describe(
+        days="Number of days. Whispers closed longer than this will be deleted"
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def delete_old_whispers(self, interaction: discord.Interaction, days: int = 30):
+        """Manually trigger deletion of old whispers"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            cleaned = await self.bot.db_manager.cleanup_old_whispers(interaction.guild_id, days)
+            
+            if cleaned:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.success_embed(
+                        "Whispers Cleaned Up",
+                        f"Successfully deleted whispers that were closed more than {days} days ago"
+                    ),
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.info_embed(
+                        "No Cleanup Needed",
+                        "No whispers found that meet the deletion criteria"
+                    ),
+                    ephemeral=True
+                )
+        except Exception as e:
+            await interaction.followup.send(
+                embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="set_whisper_retention",
+        description="Set how many days to keep closed whispers before automatic deletion"
+    )
+    @app_commands.describe(
+        days="Number of days to keep closed whispers"
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def set_whisper_retention(self, interaction: discord.Interaction, days: int):
+        """Set the retention period for closed whispers"""
+        try:
+            if days < 1:
+                raise ValueError("Retention period must be at least 1 day")
+                
+            config = await self.bot.db_manager.get_section(interaction.guild_id, 'whisper_config')
+            config['retention_days'] = days
+            await self.bot.db_manager.update_guild_data(interaction.guild_id, 'whisper_config', config)
+            
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.success_embed(
+                    "Retention Period Updated",
+                    f"Closed whispers will now be automatically deleted after {days} days"
                 ),
                 ephemeral=True
             )

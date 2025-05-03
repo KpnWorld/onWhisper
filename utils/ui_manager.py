@@ -260,7 +260,10 @@ class UIManager:
                 self.value = True
                 for item in self.children:
                     item.disabled = True
-                await button_interaction.response.edit_message(view=self)
+                try:
+                    await button_interaction.response.edit_message(view=self)
+                except discord.InteractionResponded:
+                    await button_interaction.edit_original_response(view=self)
                 self.stop()
 
             @discord.ui.button(label=cancel_label, style=discord.ButtonStyle.grey)
@@ -268,10 +271,14 @@ class UIManager:
                 self.value = False
                 for item in self.children:
                     item.disabled = True
-                await button_interaction.response.edit_message(view=self)
+                try:
+                    await button_interaction.response.edit_message(view=self)
+                except discord.InteractionResponded:
+                    await button_interaction.edit_original_response(view=self)
                 self.stop()
 
             async def on_timeout(self):
+                self.value = False
                 for item in self.children:
                     item.disabled = True
                 try:
