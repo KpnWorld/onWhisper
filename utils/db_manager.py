@@ -1028,3 +1028,21 @@ class DBManager:
         except Exception as e:
             print(f"Error updating logging config: {e}")
             raise
+
+    async def get_color_roles(self, guild_id: int) -> List[str]:
+        """Get list of allowed color role IDs for a guild"""
+        try:
+            data = await self.get_guild_data(guild_id)
+            return data.get('color_roles', [])
+        except Exception as e:
+            print(f"Error getting color roles: {e}")
+            return []
+
+    async def update_color_roles(self, guild_id: int, role_ids: List[str]) -> bool:
+        """Update the list of allowed color roles for a guild"""
+        try:
+            await self.update_guild_data(guild_id, 'color_roles', role_ids)
+            return True
+        except Exception as e:
+            print(f"Error updating color roles: {e}")
+            return False

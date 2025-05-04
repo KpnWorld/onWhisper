@@ -7,6 +7,7 @@ import platform
 from typing import Optional
 
 class InfoCog(commands.Cog):
+    """Provides information commands for the bot"""
     def __init__(self, bot):
         self.bot = bot
 
@@ -80,7 +81,7 @@ class InfoCog(commands.Cog):
                     await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
-                # Show category selection menu for general help
+                # Updated category selection menu for general help
                 categories = {
                     "Moderation": [
                         "warn - Warn a user",
@@ -101,19 +102,18 @@ class InfoCog(commands.Cog):
                         "roles bulk_remove - Remove role from multiple users",
                         "roles react_bind - Create reaction role",
                         "roles react_unbind - Remove reaction roles",
-                        "roles react_list - List reaction roles"
+                        "roles react_list - List reaction roles",
+                        "roles color - Set or clear your color role"
                     ],
-                    "Leveling": [
-                        "config_xp - Configure XP system settings",
-                        "config_level - Configure level-up role rewards"
+                    "Configuration": [
+                        "config logs - Configure logging settings",
+                        "config whisper - Configure whisper system",
+                        "config xp - Configure XP system settings",
+                        "config level - Configure level-up role rewards",
+                        "config color - Manage color roles"
                     ],
                     "Whispers": [
-                        "whisper - Start a private thread with staff",
-                        "whisper_close - Close your whisper thread",
-                        "config_whisper - Configure whisper system"
-                    ],
-                    "Logging": [
-                        "config_logs - Configure logging settings"
+                        "whisper - Manage whisper threads",
                     ],
                     "Information": [
                         "info help - Show command help",
@@ -146,7 +146,6 @@ class InfoCog(commands.Cog):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
 
             elif type == "user":
-                # User info code
                 target = user or interaction.user
                 embed = self.bot.ui_manager.info_embed(
                     f"User Info: {target}",
@@ -169,6 +168,15 @@ class InfoCog(commands.Cog):
                     value=f"<t:{int(target.joined_at.timestamp())}:R>" if target.joined_at else "```Unknown```",
                     inline=True
                 )
+
+                # Last seen info if available
+                last_seen = await self.bot.db_manager.get_user_last_seen(interaction.guild_id, target.id)
+                if last_seen:
+                    embed.add_field(
+                        name="Last Seen",
+                        value=f"<t:{int(datetime.fromisoformat(last_seen).timestamp())}:R>",
+                        inline=True
+                    )
 
                 # Roles
                 role_list = [role.mention for role in reversed(target.roles[1:])]
@@ -193,6 +201,8 @@ class InfoCog(commands.Cog):
                     key_perms.append("Manage Channels")
                 if target.guild_permissions.manage_messages:
                     key_perms.append("Manage Messages")
+                if target.guild_permissions.moderate_members:
+                    key_perms.append("Moderate Members")
                 if target.guild_permissions.kick_members:
                     key_perms.append("Kick Members")
                 if target.guild_permissions.ban_members:
@@ -221,7 +231,7 @@ class InfoCog(commands.Cog):
                         status_text.append(f"Streaming {target.activity.name}")
                     elif isinstance(target.activity, discord.Spotify):
                         status_text.append(f"Listening to {target.activity.title} by {target.activity.artist}")
-                    elif isinstance(target.activity, discord.CustomActivity):
+                    elif isinstance(target.activity, discord.CustomActivity) and target.activity.name:
                         status_text.append(target.activity.name)
 
                 embed.add_field(
@@ -243,6 +253,15 @@ class InfoCog(commands.Cog):
                             value=f"```Level: {data.get('level', 0)}\nXP: {data.get('xp', 0):,}```",
                             inline=True
                         )
+
+                # Add warning count if any
+                warnings = await self.bot.db_manager.get_user_warnings(interaction.guild_id, target.id)
+                if warnings:
+                    embed.add_field(
+                        name="Warnings",
+                        value=f"```{len(warnings)} warning(s)```",
+                        inline=True
+                    )
 
                 await interaction.response.send_message(embed=embed)
 
@@ -274,10 +293,11 @@ class InfoCog(commands.Cog):
                 total_members = guild.member_count
                 online_members = len([m for m in guild.members if m.status != discord.Status.offline])
                 bot_count = len([m for m in guild.members if m.bot])
+                human_count = total_members - bot_count
 
                 embed.add_field(
                     name="Members",
-                    value=f"```Total: {total_members:,}\nOnline: {online_members:,}\nBots: {bot_count:,}```",
+                    value=f"```Total: {total_members:,}\nHumans: {human_count:,}\nBots: {bot_count:,}\nOnline: {online_members:,}```",
                     inline=True
                 )
 
@@ -285,18 +305,32 @@ class InfoCog(commands.Cog):
                 text_channels = len(guild.text_channels)
                 voice_channels = len(guild.voice_channels)
                 categories = len(guild.categories)
+                threads = len(guild.threads)
 
                 embed.add_field(
                     name="Channels",
-                    value=f"```Text: {text_channels}\nVoice: {voice_channels}\nCategories: {categories}```",
+                    value=f"```Text: {text_channels}\nVoice: {voice_channels}\nThreads: {threads}\nCategories: {categories}```",
                     inline=True
                 )
 
                 # Role stats
+                managed_roles = len([r for r in guild.roles if r.managed])
                 embed.add_field(
                     name="Roles",
-                    value=f"```{len(guild.roles):,} roles```",
+                    value=f"```Total: {len(guild.roles):,}\nManaged: {managed_roles:,}```",
                     inline=True
+                )
+
+                # Server settings
+                settings = []
+                settings.append(f"Verification: {str(guild.verification_level).title()}")
+                settings.append(f"Content Filter: {str(guild.explicit_content_filter).replace('_', ' ').title()}")
+                settings.append(f"2FA Required: {'Yes' if guild.mfa_level else 'No'}")
+                
+                embed.add_field(
+                    name="Settings",
+                    value=f"```{chr(10).join(settings)}```",
+                    inline=False
                 )
 
                 # Features
@@ -309,24 +343,35 @@ class InfoCog(commands.Cog):
                     )
 
                 # Boost status
+                boost_tier_features = {
+                    0: "No bonus features",
+                    1: "50 emoji slots, 128Kbps audio",
+                    2: "100 emoji slots, 256Kbps audio, server banner",
+                    3: "250 emoji slots, 384Kbps audio, vanity URL"
+                }
+                
                 embed.add_field(
                     name="Boost Status",
-                    value=f"```Level {guild.premium_tier}\n{guild.premium_subscription_count:,} Boosts```",
+                    value=f"```Level {guild.premium_tier}\n{guild.premium_subscription_count:,} Boosts\n{boost_tier_features[guild.premium_tier]}```",
                     inline=True
                 )
 
-                # Set icon
+                # Set icon and banner
                 if guild.icon:
                     embed.set_thumbnail(url=guild.icon.url)
+                if guild.banner:
+                    embed.set_image(url=guild.banner.url)
 
                 # Get guild settings
                 whisper_config = await self.bot.db_manager.get_section(guild.id, 'whisper_config')
                 xp_settings = await self.bot.db_manager.get_section(guild.id, 'xp_settings')
+                logging_config = await self.bot.db_manager.get_section(guild.id, 'logging_config')
 
                 # Add feature status
                 features_status = [
                     f"Whisper System: {'✅ Enabled' if whisper_config.get('enabled', True) else '❌ Disabled'}",
-                    f"XP System: {'✅ Enabled' if xp_settings.get('enabled', True) else '❌ Disabled'}"
+                    f"XP System: {'✅ Enabled' if xp_settings.get('enabled', True) else '❌ Disabled'}",
+                    f"Logging: {'✅ Enabled' if logging_config.get('logging_enabled', False) else '❌ Disabled'}"
                 ]
 
                 embed.add_field(
@@ -340,7 +385,7 @@ class InfoCog(commands.Cog):
             elif type == "bot":
                 embed = self.bot.ui_manager.info_embed(
                     f"Bot Info: {self.bot.user.name}",
-                    ""
+                    self.bot.description or ""
                 )
 
                 # Basic info
@@ -355,6 +400,18 @@ class InfoCog(commands.Cog):
                     inline=True
                 )
 
+                # Version info if available
+                try:
+                    with open('version.txt', 'r') as f:
+                        version = f.read().strip()
+                        embed.add_field(
+                            name="Version",
+                            value=f"```{version}```",
+                            inline=True
+                        )
+                except:
+                    pass
+
                 # Uptime
                 uptime = datetime.utcnow() - self.bot.start_time
                 hours, remainder = divmod(int(uptime.total_seconds()), 3600)
@@ -367,6 +424,14 @@ class InfoCog(commands.Cog):
                     value=f"```{uptime_str}```",
                     inline=True
                 )
+
+                # Shard info
+                if self.bot.shard_count and self.bot.shard_count > 1:
+                    embed.add_field(
+                        name="Shards",
+                        value=f"```Current: {interaction.guild.shard_id}\nTotal: {self.bot.shard_count}```",
+                        inline=True
+                    )
 
                 # Stats
                 total_members = sum(g.member_count for g in self.bot.guilds)
@@ -384,7 +449,14 @@ class InfoCog(commands.Cog):
 
                 embed.add_field(
                     name="System",
-                    value=f"```CPU Usage: {cpu_percent}%\nMemory: {mem.rss/1024/1024:.1f}MB ({mem_percent:.1f}%)\nPython: {platform.python_version()}```",
+                    value=f"```CPU Usage: {cpu_percent}%\nMemory: {mem.rss/1024/1024:.1f}MB ({mem_percent:.1f}%)\nPython: {platform.python_version()}\nDiscord.py: {discord.__version__}```",
+                    inline=True
+                )
+
+                # Connection info
+                embed.add_field(
+                    name="Connection",
+                    value=f"```Latency: {round(self.bot.latency * 1000)}ms\nWebsocket: {round(interaction.client.latency * 1000)}ms```",
                     inline=True
                 )
 
@@ -404,6 +476,7 @@ class InfoCog(commands.Cog):
                 await interaction.response.send_message(embed=embed)
 
             elif type == "role":
+                # Role info code
                 if not role:
                     raise ValueError("Role is required for role info")
 
@@ -487,6 +560,7 @@ class InfoCog(commands.Cog):
                 await interaction.response.send_message(embed=embed)
 
             elif type == "uptime":
+                # Uptime code
                 uptime = datetime.utcnow() - self.bot.start_time
                 hours, remainder = divmod(int(uptime.total_seconds()), 3600)
                 minutes, seconds = divmod(remainder, 60)

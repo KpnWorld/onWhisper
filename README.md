@@ -63,11 +63,16 @@ A feature-rich Discord bot built with py-cord that includes leveling, whispers, 
 ### Role Management
 - `/roles auto_set <role>` - Enable auto-role for new members
 - `/roles auto_disable` - Disable automatic role
-- `/roles bulk_add <role> <users>` - Assign role to multiple users
+- `/roles color set <role>` - Set your color role
+- `/roles color clear` - Remove your color role
+- `/roles bulk_add <role> <users>` - Add role to multiple users
 - `/roles bulk_remove <role> <users>` - Remove role from multiple users
 - `/roles react_bind <message_id> <emoji> <role>` - Create reaction role
 - `/roles react_unbind <message_id>` - Remove reaction roles
-- `/roles react_list` - List all reaction roles
+- `/roles react_list` - List reaction roles
+- `/config color add <role>` - Add a role to allowed color roles
+- `/config color remove <role>` - Remove a role from allowed color roles
+- `/config color list` - Show all configured color roles
 
 ### Leveling System
 - `/config_xp rate <amount>` - Set XP per message (1-100)
