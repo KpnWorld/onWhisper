@@ -1,6 +1,6 @@
 # onWhisperBot
 
-A feature-rich Discord bot built with py-cord that includes leveling, tickets, moderation, autoroles, and logging functionalities.
+A feature-rich Discord bot built with py-cord that includes leveling, whispers, moderation, autoroles, and logging functionalities.
 
 ## Features
 
@@ -11,12 +11,13 @@ A feature-rich Discord bot built with py-cord that includes leveling, tickets, m
 - Server-wide leaderboards
 - XP rewards based on message activity
 
-### 🎫 Ticket System
-- Thread-based support tickets
-- Customizable ticket categories
-- Staff role assignments 
-- Automatic ticket closure
-- Ticket logging and archival
+### 💬 Whisper System
+- Thread-based private communication
+- Staff role management
+- Auto-close for inactive threads
+- Configurable retention periods
+- Anonymous reporting option
+- Comprehensive logging
 
 ### 👮 Moderation
 - Core moderation commands (kick, ban, timeout)
@@ -47,65 +48,64 @@ A feature-rich Discord bot built with py-cord that includes leveling, tickets, m
 
 ## Commands
 
-### Configuration (`/config`)
-- `/config xp rate <amount>` - Set XP per message (1-100)
-- `/config xp cooldown <seconds>` - Set XP gain cooldown
-- `/config xp toggle` - Toggle XP system
-
-- `/config level add <level> <role>` - Set role reward for level
-- `/config level remove <level>` - Remove level reward
-- `/config level list` - List all level rewards
-
-- `/config logs set <type> <channel>` - Set log channel (mod/member/message/server)
-- `/config logs toggle` - Enable/disable logging
-
-- `/config tickets category <channel>` - Set tickets category
-- `/config tickets staff <role>` - Set support staff role
-
-- `/config autorole set <role>` - Set auto-role for new members
-- `/config autorole remove` - Disable auto-role
-
-### Create Commands (`/create`)
-- `/create ticket-panel <channel> <message>` - Generate a support ticket panel
-- `/create reaction-role <channel> <emoji> <role> <message>` - Create a reaction role message
-- `/create log-channel <type> <channel>` - Auto-setup a log channel
-- `/create welcome-message <channel> <message>` - Preview/set welcome message
-- `/create level-message <channel> <message>` - Preview/set level-up message
-
-### Role Management (`/roles`)
-- `/roles auto set <role>` - Enable auto-role
-- `/roles auto remove` - Disable auto-role
-
-- `/roles react bind <message_id> <emoji> <role>` - Bind emoji to role on message
-- `/roles react unbind <message_id>` - Remove all reactions/roles from message
-- `/roles react list` - Show all reaction role bindings
-
-- `/roles bulk add <role> <users...>` - Assign role to multiple users
-- `/roles bulk remove <role> <users...>` - Remove role from multiple users
-
 ### Moderation
 - `/warn <user> <reason>` - Issue a warning
 - `/warnings <user>` - View a user's warnings
 - `/kick <user> [reason]` - Kick a member
-- `/ban <user> [reason]` - Ban a member
+- `/ban <user> [reason] [delete_days]` - Ban a member
 - `/timeout <user> <duration> [reason]` - Temporarily mute a user
-- `/lockdown [channel] [duration]` - Lock a channel temporarily
+- `/lockdown [channel] [duration] [reason]` - Lock a channel temporarily
+- `/unlock [channel]` - Remove a channel lockdown
 - `/slowmode <seconds> [channel]` - Set slowmode in a channel
 - `/clear <amount> [user]` - Bulk delete messages (1-100)
-- `/snipe` - Retrieve last deleted message
+- `/snipe <type>` - Show recently deleted/edited messages
+
+### Role Management
+- `/roles auto_set <role>` - Enable auto-role for new members
+- `/roles auto_disable` - Disable automatic role
+- `/roles bulk_add <role> <users>` - Assign role to multiple users
+- `/roles bulk_remove <role> <users>` - Remove role from multiple users
+- `/roles react_bind <message_id> <emoji> <role>` - Create reaction role
+- `/roles react_unbind <message_id>` - Remove reaction roles
+- `/roles react_list` - List all reaction roles
+
+### Leveling System
+- `/config_xp rate <amount>` - Set XP per message (1-100)
+- `/config_xp cooldown <seconds>` - Set XP gain cooldown
+- `/config_xp toggle` - Toggle XP system
+- `/config_level add <level> <role>` - Set role reward for level
+- `/config_level remove <level>` - Remove level reward
+- `/config_level list` - List all level rewards
+
+### Whisper System
+- `/whisper <message>` - Start a private thread with staff
+- `/whisper_close` - Close your whisper thread
+- `/config_whisper channel [channel]` - Set whisper channel
+- `/config_whisper staff <role>` - Set staff role
+- `/config_whisper timeout <minutes>` - Set auto-close timeout
+- `/config_whisper retention <days>` - Set thread retention period
+- `/config_whisper toggle` - Toggle whisper system
+
+### Logging
+- `/config_logs enable <type> <channel>` - Enable logging for specified type
+- `/config_logs disable <type>` - Disable logging for specified type
 
 ### Information
-- `/info help [command]` - Show help for a command
-- `/info bot` - Show bot stats and ping
+- `/info help [command]` - Show command help
+- `/info bot` - Show bot stats and info
 - `/info server` - Show server information
 - `/info user [user]` - Show user information
-- `/info role <role>` - Display role details
+- `/info role <role>` - Show role information
 - `/info uptime` - Show bot uptime
 
 ### Debug (Owner Only)
-- `/debug sync` - Sync application commands
-- `/debug reload <cog>` - Reload a cog
-- `/debug cleanup [limit]` - Clean up bot messages
+- `/debug_db` - Get database diagnostics
+- `/debug_system` - Get system diagnostics 
+- `/maintenance` - Toggle maintenance mode
+- `!sync [guild|global]` - Sync slash commands
+- `!load <cog>` - Load a cog
+- `!unload <cog>` - Unload a cog
+- `!reload <cog>` - Reload a cog
 
 ## Setup & Configuration
 
@@ -147,10 +147,10 @@ The bot uses Replit Database with nested JSON structures. Each guild has its own
     "level_roles": {
         "level": "role_id"
     },
-    "tickets": {
-        "open_tickets": [
+    "whispers": {
+        "active_threads": [
             {
-                "channel_id": number,
+                "thread_id": number,
                 "user_id": number,
                 "created_at": "ISO datetime",
                 "closed_at": "ISO datetime or null"
@@ -184,7 +184,7 @@ The bot uses Replit Database with nested JSON structures. Each guild has its own
 
 ### Configuration Collections
 - `logging_config`: Logging channel settings and filters
-- `tickets_config`: Ticket category and support role settings
+- `whisper_config`: Whisper system settings and staff roles
 - `moderation_config`: Moderation roles and warning settings
 - `xp_config`: XP gain rate and cooldown settings
 - `level_roles`: Level-based role reward mappings
@@ -196,10 +196,10 @@ Event logs are stored with automatic cleanup after 30 days:
 - Role changes
 - Channel updates
 - Moderation actions
-- Ticket activity
+- Whisper activity
 
 ### Data Management
-- Automatic cleanup of old logs and closed tickets (30 days)
+- Automatic cleanup of old logs and closed whispers (30 days)
 - Optimization of database structure weekly
 - Backup system for critical data (coming soon)
 

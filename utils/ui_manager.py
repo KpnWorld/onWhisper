@@ -377,10 +377,10 @@ class UIManager:
                         emoji="👥"
                     ),
                     discord.SelectOption(
-                        label="Tickets",
-                        description="Ticket system commands",
-                        value="tickets",
-                        emoji="🎫"
+                        label="Whispers",
+                        description="Private thread commands",
+                        value="whispers",
+                        emoji="💬"
                     ),
                     discord.SelectOption(
                         label="Information",
@@ -398,7 +398,7 @@ class UIManager:
                 
                 # Get all application commands
                 for cmd in self.bot.tree.get_commands():
-                    if category == "leveling" and cmd.name.startswith(("xp_", "level_", "config_xp_")):
+                    if category == "leveling" and cmd.name.startswith(("xp_", "level_", "config_xp")):
                         commands.append(cmd)
                     elif category == "moderation" and cmd.name.startswith(("warn", "kick", "ban", "timeout", "mute", "purge", "clear", "lockdown")):
                         commands.append(cmd)
@@ -406,15 +406,15 @@ class UIManager:
                         commands.append(cmd)
                     elif category == "roles" and cmd.name.startswith(("roles_", "role_")):
                         commands.append(cmd)
-                    elif category == "tickets" and cmd.name.startswith(("whisper_", "ticket_")):
+                    elif category == "whispers" and cmd.name.startswith("whisper"):
                         commands.append(cmd)
-                    elif category == "info" and cmd.name.startswith("info_"):
+                    elif category == "info" and cmd.name.startswith("info"):
                         commands.append(cmd)
 
                 # Create embed for category
                 embed = self.ui.info_embed(
                     f"{select_menu.values[0].title()} Commands",
-                    "Use `/help <command>` for detailed information about a specific command."
+                    "Use `/info help <command>` for detailed information about a specific command."
                 )
 
                 # Add commands to embed

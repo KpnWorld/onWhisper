@@ -311,18 +311,18 @@ class DBManager:
             print(f"Error getting reaction roles: {e}")
             return {}
 
-    async def get_ticket_logs(self, guild_id: int, user_id: int = None) -> list:
-        """Get ticket logs, optionally filtered by user"""
+    async def get_whisper_logs(self, guild_id: int, user_id: int = None) -> list:
+        """Get whisper logs, optionally filtered by user"""
         try:
             guild_data = await self.get_guild_data(guild_id)
-            logs = guild_data.get('data', {}).get('tickets', {}).get('logs', [])
+            logs = guild_data.get('data', {}).get('whispers', {}).get('logs', [])
             
             if user_id:
                 logs = [log for log in logs if log.get('user_id') == user_id]
                 
             return sorted(logs, key=lambda x: datetime.fromisoformat(x.get('timestamp')), reverse=True)
         except Exception as e:
-            print(f"Error getting ticket logs: {e}")
+            print(f"Error getting whisper logs: {e}")
             return []
 
     async def get_last_deleted(self, channel_id: int) -> dict:

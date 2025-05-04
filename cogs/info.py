@@ -81,30 +81,78 @@ class InfoCog(commands.Cog):
                     return
 
                 # Show category selection menu for general help
-                view = self.bot.ui_manager.HelpMenuView(self.bot, self.bot.ui_manager)
+                categories = {
+                    "Moderation": [
+                        "warn - Warn a user",
+                        "warnings - View warnings for a user",
+                        "kick - Kick a user from the server",
+                        "ban - Ban a user from the server",
+                        "timeout - Timeout a user for a specified duration",
+                        "lockdown - Lock a channel temporarily",
+                        "unlock - Remove a channel lockdown",
+                        "slowmode - Set channel slowmode",
+                        "clear - Clear messages in a channel",
+                        "snipe - Show recently deleted/edited messages"
+                    ],
+                    "Roles": [
+                        "roles auto_set - Set automatic role for new members",
+                        "roles auto_disable - Disable automatic role",
+                        "roles bulk_add - Add role to multiple users",
+                        "roles bulk_remove - Remove role from multiple users",
+                        "roles react_bind - Create reaction role",
+                        "roles react_unbind - Remove reaction roles",
+                        "roles react_list - List reaction roles"
+                    ],
+                    "Leveling": [
+                        "config_xp - Configure XP system settings",
+                        "config_level - Configure level-up role rewards"
+                    ],
+                    "Whispers": [
+                        "whisper - Start a private thread with staff",
+                        "whisper_close - Close your whisper thread",
+                        "config_whisper - Configure whisper system"
+                    ],
+                    "Logging": [
+                        "config_logs - Configure logging settings"
+                    ],
+                    "Information": [
+                        "info help - Show command help",
+                        "info user - Show user information", 
+                        "info server - Show server information",
+                        "info bot - Show bot information",
+                        "info role - Show role information",
+                        "info uptime - Show bot uptime"
+                    ]
+                }
+
                 embed = self.bot.ui_manager.info_embed(
                     "Bot Help",
-                    "Select a category from the menu below to view available commands."
+                    "Select a category to view available commands.\nUse `/info help <command>` for detailed command help."
                 )
+
+                for category, commands in categories.items():
+                    embed.add_field(
+                        name=category,
+                        value="```" + "\n".join(commands) + "```",
+                        inline=False
+                    )
+
                 embed.add_field(
                     name="Need help?",
-                    value="If you need assistance, use the whisper command to contact staff.",
+                    value="Use `/whisper` to contact staff for assistance.",
                     inline=False
                 )
 
-                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-                view.message = await interaction.original_response()
+                await interaction.response.send_message(embed=embed, ephemeral=True)
 
             elif type == "user":
+                # User info code
                 target = user or interaction.user
-
-                # Create embed
                 embed = self.bot.ui_manager.info_embed(
-                    f"User Info: {target.display_name}",
+                    f"User Info: {target}",
                     ""
                 )
-                embed.color = target.color
-                
+
                 # Basic info
                 embed.add_field(
                     name="User ID",
@@ -112,17 +160,12 @@ class InfoCog(commands.Cog):
                     inline=True
                 )
                 embed.add_field(
-                    name="Nickname",
-                    value=f"```{target.nick or 'None'}```",
-                    inline=True
-                )
-                embed.add_field(
-                    name="Account Created",
+                    name="Created",
                     value=f"<t:{int(target.created_at.timestamp())}:R>",
                     inline=True
                 )
                 embed.add_field(
-                    name="Joined Server",
+                    name="Joined",
                     value=f"<t:{int(target.joined_at.timestamp())}:R>" if target.joined_at else "```Unknown```",
                     inline=True
                 )

@@ -117,7 +117,7 @@ class ModerationCog(commands.Cog):
                     await self.bot.db_manager.add_warning(
                         guild_id=interaction.guild.id,
                         user_id=user.id,
-                        moderator_id=interaction.user.id,
+                        mod_id=interaction.user.id,  # Changed from moderator_id to mod_id
                         reason=reason
                     )
             except asyncio.TimeoutError:
