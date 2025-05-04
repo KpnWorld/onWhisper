@@ -264,5 +264,66 @@ class LoggingCog(commands.Cog):
         
         await self.log_event(role.guild.id, "server", embed)
 
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """Log member role changes"""
+        # Check if roles were changed
+        if before.roles != after.roles:
+            # Find added and removed roles
+            added_roles = [role for role in after.roles if role not in before.roles]
+            removed_roles = [role for role in before.roles if role not in after.roles]
+
+            if added_roles:
+                embed = self.bot.ui_manager.success_embed(
+                    "Roles Added",
+                    f"Roles were added to {after.mention}"
+                )
+                roles_str = ", ".join([role.mention for role in added_roles])
+                embed.add_field(name="Added Roles", value=roles_str, inline=False)
+                embed.set_thumbnail(url=after.display_avatar.url)
+                embed.set_footer(text=f"Member ID: {after.id}")
+                await self.log_event(after.guild.id, "role", embed)
+
+            if removed_roles:
+                embed = self.bot.ui_manager.warning_embed(
+                    "Roles Removed",
+                    f"Roles were removed from {after.mention}"
+                )
+                roles_str = ", ".join([role.mention for role in removed_roles])
+                embed.add_field(name="Removed Roles", value=roles_str, inline=False)
+                embed.set_thumbnail(url=after.display_avatar.url)
+                embed.set_footer(text=f"Member ID: {after.id}")
+                await self.log_event(after.guild.id, "role", embed)
+
+    @commands.Cog.listener()
+    async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
+        """Log role permission/configuration changes"""
+        changes = []
+
+        if before.name != after.name:
+            changes.append(f"Name: {before.name} → {after.name}")
+        if before.color != after.color:
+            changes.append(f"Color: {before.color} → {after.color}")
+        if before.hoist != after.hoist:
+            changes.append(f"Hoisted: {before.hoist} → {after.hoist}")
+        if before.mentionable != after.mentionable:
+            changes.append(f"Mentionable: {before.mentionable} → {after.mentionable}")
+        if before.permissions != after.permissions:
+            # Find changed permissions
+            for perm, value in dict(after.permissions).items():
+                if dict(before.permissions).get(perm) != value:
+                    changes.append(f"Permission {perm}: {dict(before.permissions).get(perm)} → {value}")
+
+        if changes:
+            embed = self.bot.ui_manager.info_embed(
+                "Role Updated",
+                f"Role {after.mention} was updated"
+            )
+            embed.add_field(name="Changes", value="\n".join(changes[:25]), inline=False)  # Limit to 25 changes
+            if len(changes) > 25:
+                embed.add_field(name="Note", value="Some changes were omitted due to length", inline=False)
+            embed.set_footer(text=f"Role ID: {after.id}")
+            await self.log_event(after.guild.id, "role", embed)
+
 async def setup(bot):
     await bot.add_cog(LoggingCog(bot))
