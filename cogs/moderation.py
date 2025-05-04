@@ -769,7 +769,7 @@ class ModerationCog(commands.Cog):
                 raise commands.CommandError("You cannot timeout someone with a higher or equal role")
 
             # Apply timeout using aware datetime
-            until = datetime.now(discord.utils.utc) + timedelta(minutes=duration)
+            until = datetime.now(datetime.timezone.utc) + timedelta(minutes=duration)
             await user.timeout(until, reason=f"Timeout by {interaction.user}: {reason}")
 
             # Log the action to both DB and logging channel

@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 from replit import db  # Add database backend import
 from typing import Optional, Dict, Any, List, Union
@@ -237,7 +237,7 @@ class DBManager:
         """Add a moderation action"""
         try:
             # Ensure we're using UTC for timestamps
-            now = datetime.now(discord.utils.utc)
+            now = datetime.now(datetime.timezone.utc)
             
             mod_action = {
                 'action': action,

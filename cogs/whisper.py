@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import asyncio
 
@@ -59,7 +59,8 @@ class WhisperCog(commands.Cog):
                         if not last_message:
                             continue
 
-                        inactive_time = datetime.now(discord.utils.utc) - last_message.created_at
+                        # Use timezone-aware datetime comparison
+                        inactive_time = datetime.now(timezone.utc) - last_message.created_at
                         if inactive_time > timedelta(minutes=timeout):
                             try:
                                 # Attempt to send closing message
