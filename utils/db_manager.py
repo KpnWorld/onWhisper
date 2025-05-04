@@ -32,14 +32,25 @@ class DBManager:
             self.initializing = True
             self.db = db
             
-            # Test write operation
+            # Test write operation with transaction simulation
             test_key = f"{self.prefix}test"
-            self.db[test_key] = "test"
-            read_value = self.db[test_key]
-            del self.db[test_key]
+            backup = None
+            if test_key in self.db:
+                backup = self.db[test_key]
+                
+            try:
+                self.db[test_key] = "test"
+                read_value = self.db[test_key]
+                if read_value != "test":
+                    raise Exception("Database read/write verification failed")
+            finally:
+                if backup:
+                    self.db[test_key] = backup
+                else:
+                    del self.db[test_key]
             
-            if read_value != "test":
-                raise Exception("Database read/write verification failed")
+            # Run migrations if needed
+            await self._run_migrations()
                 
             self.initialized = True
             return True
@@ -61,12 +72,16 @@ class DBManager:
 
     async def ensure_connection(self) -> bool:
         """Ensure database is connected and initialized"""
-        if not self.initialized:
-            return await self.initialize()
-        if not await self.check_connection():
-            self.initialized = False
-            return await self.initialize()
-        return True
+        try:
+            if not self.initialized:
+                return await self.initialize()
+            if not await self.check_connection():
+                self.initialized = False
+                return await self.initialize()
+            return True
+        except Exception as e:
+            print(f"Connection error: {e}")
+            return False
 
     async def check_connection(self) -> bool:
         """Verify database connection is working"""
@@ -87,6 +102,127 @@ class DBManager:
                 
         except Exception:
             return False
+
+    async def _run_migrations(self) -> None:
+        """Run any necessary database migrations"""
+        try:
+            version_key = f"{self.prefix}db_version"
+            current_version = 0
+            
+            try:
+                stored_version = self.db.get(version_key)
+                if stored_version:
+                    current_version = int(stored_version)
+            except:
+                pass
+            
+            # Migration 1: Convert old guild data format to new
+            if current_version < 1:
+                await self._migrate_guild_data()
+                current_version = 1
+            
+            # Migration 2: Convert role IDs to strings
+            if current_version < 2:
+                await self._migrate_role_ids()
+                current_version = 2
+            
+            # Save current version
+            self.db[version_key] = str(current_version)
+            
+        except Exception as e:
+            print(f"Migration error: {e}")
+            raise
+
+    async def _migrate_guild_data(self) -> None:
+        """Migrate old guild data format to new structure"""
+        try:
+            for key in self.db.keys():
+                if key.startswith(f"{self.prefix}guild:"):
+                    try:
+                        data = json.loads(self.db[key])
+                        
+                        # Back up data
+                        backup_key = f"{key}.bak"
+                        self.db[backup_key] = self.db[key]
+                        
+                        try:
+                            # Migrate whispers structure
+                            if 'whispers' in data and isinstance(data['whispers'], list):
+                                data['whispers'] = {
+                                    'active_threads': data['whispers'],
+                                    'closed_threads': [],
+                                    'saved_threads': {}
+                                }
+                            
+                            # Update data
+                            self.db[key] = json.dumps(data)
+                            
+                            # Remove backup if successful
+                            del self.db[backup_key]
+                            
+                        except Exception as e:
+                            # Restore from backup
+                            self.db[key] = self.db[backup_key]
+                            del self.db[backup_key]
+                            raise e
+                            
+                    except Exception as e:
+                        print(f"Error migrating guild {key}: {e}")
+                        continue
+                        
+        except Exception as e:
+            print(f"Guild data migration error: {e}")
+            raise
+
+    async def _migrate_role_ids(self) -> None:
+        """Convert all role IDs to strings for consistency"""
+        try:
+            for key in self.db.keys():
+                if key.startswith(f"{self.prefix}guild:"):
+                    try:
+                        data = json.loads(self.db[key])
+                        
+                        # Back up data
+                        backup_key = f"{key}.bak"
+                        self.db[backup_key] = self.db[key]
+                        
+                        try:
+                            # Convert role IDs in color roles
+                            if 'color_roles' in data:
+                                data['color_roles'] = [str(role_id) for role_id in data['color_roles']]
+                            
+                            # Convert role IDs in level roles
+                            if 'level_roles' in data:
+                                new_roles = {}
+                                for level, role_id in data['level_roles'].items():
+                                    new_roles[str(level)] = str(role_id)
+                                data['level_roles'] = new_roles
+                            
+                            # Convert role IDs in reaction roles
+                            if 'reaction_roles' in data:
+                                for msg_id, bindings in data['reaction_roles'].items():
+                                    for emoji, role_id in bindings.items():
+                                        bindings[emoji] = str(role_id)
+                            
+                            # Update data
+                            self.db[key] = json.dumps(data)
+                            
+                            # Remove backup if successful
+                            del self.db[backup_key]
+                            
+                        except Exception as e:
+                            # Restore from backup
+                            self.db[key] = self.db[backup_key]
+                            del self.db[backup_key]
+                            raise e
+                            
+                    except Exception as e:
+                        print(f"Error migrating roles for guild {key}: {e}")
+                        continue
+                        
+        except Exception as e:
+            print(f"Role ID migration error: {e}")
+            raise
 
     async def ensure_guild_exists(self, guild_id: int, guild_name: str = None) -> bool:
         """Ensure guild data exists with proper structure"""

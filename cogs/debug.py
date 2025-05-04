@@ -16,9 +16,34 @@ class DebugCog(commands.Cog):
         """Only allow bot owner to use these commands"""
         return await self.bot.is_owner(ctx.author)
 
+    async def cog_before_invoke(self, ctx: commands.Context) -> bool:
+        """Log debug command usage"""
+        try:
+            await self.bot.db_manager.log_event(
+                ctx.guild.id if ctx.guild else 0,
+                ctx.author.id,
+                "debug_command",
+                f"Used debug command: {ctx.command.name} {ctx.message.content}"
+            )
+        except Exception as e:
+            print(f"Failed to log debug command: {e}")
+        return True
+
     @commands.command(name='load', hidden=True)
     async def load_cog(self, ctx, *, cog: str):
         """Load a cog"""
+        confirm = await self.bot.ui_manager.confirm_action(
+            ctx,
+            "Load Cog",
+            f"Are you sure you want to load the {cog} cog?",
+            confirm_label="Load",
+            cancel_label="Cancel"
+        )
+        
+        if not confirm:
+            await ctx.send("Cog load cancelled.")
+            return
+            
         try:
             await self.bot.load_extension(f'cogs.{cog}')
             embed = self.bot.ui_manager.success_embed(
@@ -312,17 +337,42 @@ class DebugCog(commands.Cog):
             return
 
         try:
-            # Toggle maintenance mode in database
+            # Get current maintenance status
             config = await self.bot.db_manager.get_data('bot_config', 'maintenance')
-            maintenance_mode = not config.get('enabled', False) if config else True
+            current_mode = config.get('enabled', False) if config else False
+            
+            # Ask for confirmation
+            confirm = await self.bot.ui_manager.confirm_action(
+                interaction,
+                "Maintenance Mode",
+                f"Are you sure you want to {'disable' if current_mode else 'enable'} maintenance mode?",
+                confirm_label="Confirm",
+                cancel_label="Cancel"
+            )
+            
+            if not confirm:
+                await interaction.response.send_message("Maintenance mode change cancelled.", ephemeral=True)
+                return
+
+            # Toggle maintenance mode in database
+            maintenance_mode = not current_mode
 
             await self.bot.db_manager.set_data(
                 'bot_config',
                 'maintenance',
-                {'enabled': maintenance_mode, 'timestamp': datetime.utcnow().isoformat()}
+                {
+                    'enabled': maintenance_mode,
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'toggled_by': str(interaction.user.id)
+                }
             )
 
             if maintenance_mode:
+                # Verify all important systems before entering maintenance
+                db_health = await self.bot.db_manager.check_connection()
+                if not db_health:
+                    raise Exception("Database health check failed before entering maintenance mode")
+                    
                 # Set status to maintenance mode
                 await self.bot.change_presence(
                     activity=discord.Activity(
@@ -334,6 +384,14 @@ class DebugCog(commands.Cog):
                 embed = self.bot.ui_manager.warning_embed(
                     "Maintenance Mode Enabled",
                     "Bot is now in maintenance mode. Only owner commands will work."
+                )
+                
+                # Log maintenance start
+                await self.bot.db_manager.log_event(
+                    0,  # Global event
+                    interaction.user.id,
+                    "maintenance_start",
+                    "Bot entered maintenance mode"
                 )
                 
                 # Notify all servers with logging enabled
@@ -353,6 +411,11 @@ class DebugCog(commands.Cog):
                     except Exception as e:
                         print(f"Failed to send maintenance notification to guild {guild.id}: {e}")
             else:
+                # Verify systems are healthy before exiting maintenance
+                db_health = await self.bot.db_manager.check_connection()
+                if not db_health:
+                    raise Exception("Database health check failed, cannot exit maintenance mode")
+                
                 # Reset status
                 await self.bot.change_presence(
                     activity=discord.Game(name="with commands"),
@@ -361,6 +424,14 @@ class DebugCog(commands.Cog):
                 embed = self.bot.ui_manager.success_embed(
                     "Maintenance Mode Disabled",
                     "Bot has returned to normal operation."
+                )
+                
+                # Log maintenance end
+                await self.bot.db_manager.log_event(
+                    0,  # Global event
+                    interaction.user.id,
+                    "maintenance_end",
+                    "Bot exited maintenance mode"
                 )
                 
                 # Notify all servers with logging enabled
@@ -391,6 +462,22 @@ class DebugCog(commands.Cog):
     @commands.command(name='cleanup_db', hidden=True)
     async def cleanup_db(self, ctx, days: int = 30):
         """Clean up old database entries"""
+        if days < 7:
+            await ctx.send("Minimum cleanup period is 7 days for safety.")
+            return
+            
+        confirm = await self.bot.ui_manager.confirm_action(
+            ctx,
+            "Database Cleanup",
+            f"⚠️ This will delete data older than {days} days. This action cannot be undone.\nAre you sure?",
+            confirm_label="Clean Up",
+            cancel_label="Cancel"
+        )
+        
+        if not confirm:
+            await ctx.send("Database cleanup cancelled.")
+            return
+            
         try:
             message = await ctx.send("Starting database cleanup...")
             result = await self.bot.db_manager.cleanup_old_data(days)
