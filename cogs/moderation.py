@@ -9,6 +9,9 @@ class ModerationCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.last_deleted = {}  # Channel ID -> Last deleted message
+        # Store last deleted/edited messages per channel
+        self.deleted_messages = {}
+        self.edited_messages = {}
 
     # Helper method to log moderation events
     async def log_mod_action(self, guild_id: int, action: str, user: discord.Member, mod: discord.Member, reason: str = None):
@@ -40,11 +43,24 @@ class ModerationCog(commands.Cog):
         if not message.guild or message.author.bot:
             return
             
-        self.last_deleted[message.channel.id] = {
+        self.deleted_messages[message.channel.id] = {
             'content': message.content,
-            'author': message.author.id,
-            'timestamp': message.created_at.isoformat(),
+            'author': message.author,
+            'timestamp': message.created_at,
             'attachments': [a.url for a in message.attachments]
+        }
+
+    @commands.Cog.listener()
+    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        """Store last edited message per channel"""
+        if not before.guild or before.author.bot or before.content == after.content:
+            return
+
+        self.edited_messages[before.channel.id] = {
+            'before': before.content,
+            'after': after.content,
+            'author': before.author,
+            'timestamp': after.edited_at or discord.utils.utcnow()
         }
 
     @app_commands.command(
@@ -635,52 +651,83 @@ class ModerationCog(commands.Cog):
 
     @app_commands.command(
         name="snipe",
-        description="View the last deleted message in this channel"
+        description="Show the last deleted or edited message in the channel"
     )
+    @app_commands.describe(
+        type="Type of message to snipe (deleted or edited)"
+    )
+    @app_commands.choices(type=[
+        app_commands.Choice(name="Deleted message", value="deleted"),
+        app_commands.Choice(name="Edited message", value="edited")
+    ])
     @app_commands.default_permissions(manage_messages=True)
-    async def snipe(self, interaction: discord.Interaction):
-        """Show the last deleted message"""
+    async def snipe(
+        self,
+        interaction: discord.Interaction,
+        type: str
+    ):
+        """Show recently deleted or edited messages"""
         try:
             if not interaction.user.guild_permissions.manage_messages:
                 raise commands.MissingPermissions(["manage_messages"])
 
-            # Get last deleted message
-            deleted = self.last_deleted.get(interaction.channel.id)
-            if not deleted:
-                raise commands.CommandError("No recently deleted messages found in this channel")
+            # Get message from memory
+            messages = self.deleted_messages if type == "deleted" else self.edited_messages
+            message_data = messages.get(interaction.channel.id)
+            
+            if not message_data:
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "No Messages Found",
+                        "No recently deleted or edited messages found in this channel"
+                    ),
+                    ephemeral=True
+                )
+                return
 
-            # Create embed
-            author = interaction.guild.get_member(deleted['author'])
-            embed = self.bot.ui_manager.info_embed(
-                "Last Deleted Message",
-                deleted['content'] if deleted['content'] else "*No content*"
+            # Create snipe embed
+            embed = self.bot.ui_manager.mod_embed(
+                f"Sniped Message ({type.title()})",
+                message_data['content'] if type == "deleted" else message_data['after']
             )
 
-            if author:
-                embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
+            # Add author info
+            embed.add_field(
+                name="Author",
+                value=message_data['author'].mention,
+                inline=True
+            )
 
             # Add timestamp
             embed.add_field(
-                name="Sent",
-                value=discord.utils.format_dt(datetime.fromisoformat(deleted['timestamp']), style='R'),
-                inline=False
+                name="When",
+                value=discord.utils.format_dt(message_data['timestamp'], style='R'),
+                inline=True
             )
 
-            # Add attachments if any
-            if deleted['attachments']:
+            # For edited messages, show both versions
+            if type == "edited":
+                embed.add_field(
+                    name="Original Content",
+                    value=message_data['before'],
+                    inline=False
+                )
+
+            # Add attachments if any (for deleted messages)
+            if type == "deleted" and message_data.get('attachments'):
                 embed.add_field(
                     name="Attachments",
-                    value="\n".join(deleted['attachments']),
+                    value="\n".join(message_data['attachments']),
                     inline=False
                 )
 
             await interaction.response.send_message(embed=embed)
 
-        except commands.MissingPermissions as e:
+        except commands.MissingPermissions:
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.error_embed(
                     "Missing Permissions",
-                    "You need the Manage Messages permission to use this command."
+                    "You need Manage Messages permission to use this command"
                 ),
                 ephemeral=True
             )
@@ -721,8 +768,8 @@ class ModerationCog(commands.Cog):
             if user.top_role >= interaction.user.top_role:
                 raise commands.CommandError("You cannot timeout someone with a higher or equal role")
 
-            # Apply timeout
-            until = discord.utils.utcnow() + timedelta(minutes=duration)
+            # Apply timeout using aware datetime
+            until = datetime.now(discord.utils.utc) + timedelta(minutes=duration)
             await user.timeout(until, reason=f"Timeout by {interaction.user}: {reason}")
 
             # Log the action to both DB and logging channel

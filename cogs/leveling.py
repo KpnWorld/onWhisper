@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 from datetime import datetime, timedelta
 import math
+from typing import Optional
 
 class LevelingCog(commands.Cog):
     def __init__(self, bot):
@@ -17,32 +18,60 @@ class LevelingCog(commands.Cog):
         return math.floor((xp / 100) ** (1/1.5))
 
     @app_commands.command(
-        name="config_xp_rate",
-        description="Set XP gained per message"
+        name="config_xp",
+        description="Configure XP system settings"
     )
     @app_commands.describe(
-        amount="XP per message (1-100)"
+        action="The setting to configure",
+        value="The value to set (required for rate and cooldown)"
     )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="Set XP rate (1-100)", value="rate"),
+        app_commands.Choice(name="Set cooldown (seconds)", value="cooldown"),
+        app_commands.Choice(name="Toggle system", value="toggle")
+    ])
     @app_commands.default_permissions(administrator=True)
-    async def config_xp_rate(
+    async def config_xp(
         self,
         interaction: discord.Interaction,
-        amount: int
+        action: str,
+        value: Optional[int] = None
     ):
-        """Set XP gain rate"""
+        """Configure XP system settings"""
         try:
             if not interaction.user.guild_permissions.administrator:
                 raise commands.MissingPermissions(["administrator"])
 
-            if amount < 1 or amount > 100:
-                raise ValueError("XP rate must be between 1 and 100")
+            if action in ["rate", "cooldown"] and value is None:
+                raise ValueError(f"Value is required for {action} configuration")
 
-            await self.bot.db_manager.update_xp_config(interaction.guild_id, 'rate', amount)
+            if action == "rate":
+                if value < 1 or value > 100:
+                    raise ValueError("XP rate must be between 1 and 100")
+                await self.bot.db_manager.update_xp_config(interaction.guild_id, 'rate', value)
+                embed = self.bot.ui_manager.success_embed(
+                    "XP Rate Updated",
+                    f"Members will now gain {value} XP per message"
+                )
 
-            embed = self.bot.ui_manager.success_embed(
-                "XP Rate Updated",
-                f"Members will now gain {amount} XP per message"
-            )
+            elif action == "cooldown":
+                if value < 0:
+                    raise ValueError("Cooldown cannot be negative")
+                await self.bot.db_manager.update_xp_config(interaction.guild_id, 'cooldown', value)
+                embed = self.bot.ui_manager.success_embed(
+                    "XP Cooldown Updated",
+                    f"Members must now wait {value} seconds between XP gains"
+                )
+
+            else:  # toggle
+                settings = await self.bot.db_manager.get_section(interaction.guild_id, 'xp_settings')
+                enabled = not settings.get('enabled', True)
+                await self.bot.db_manager.update_xp_config(interaction.guild_id, 'enabled', enabled)
+                embed = self.bot.ui_manager.success_embed(
+                    "XP System Updated",
+                    f"XP gain has been {'enabled' if enabled else 'disabled'}"
+                )
+
             await interaction.response.send_message(embed=embed)
 
         except Exception as e:
@@ -52,171 +81,86 @@ class LevelingCog(commands.Cog):
             )
 
     @app_commands.command(
-        name="config_xp_cooldown",
-        description="Set cooldown between XP gains"
+        name="config_level",
+        description="Configure level-up role rewards"
     )
     @app_commands.describe(
-        seconds="Cooldown in seconds"
+        action="Whether to add, remove, or list level rewards",
+        level="The level to configure (not needed for list)",
+        role="The role to give as a reward (only needed for adding)"
     )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="Add reward", value="add"),
+        app_commands.Choice(name="Remove reward", value="remove"),
+        app_commands.Choice(name="List rewards", value="list")
+    ])
     @app_commands.default_permissions(administrator=True)
-    async def config_xp_cooldown(
+    async def config_level(
         self,
         interaction: discord.Interaction,
-        seconds: int
+        action: str,
+        level: Optional[int] = None,
+        role: Optional[discord.Role] = None
     ):
-        """Set XP gain cooldown"""
+        """Configure level-up role rewards"""
         try:
             if not interaction.user.guild_permissions.administrator:
                 raise commands.MissingPermissions(["administrator"])
 
-            if seconds < 0:
-                raise ValueError("Cooldown cannot be negative")
+            if action == "list":
+                rewards = await self.bot.db_manager.get_level_roles(interaction.guild_id)
 
-            await self.bot.db_manager.update_xp_config(interaction.guild_id, 'cooldown', seconds)
+                if not rewards:
+                    embed = self.bot.ui_manager.info_embed(
+                        "No Level Rewards",
+                        "No level-up role rewards have been set"
+                    )
+                    await interaction.response.send_message(embed=embed)
+                    return
 
-            embed = self.bot.ui_manager.success_embed(
-                "XP Cooldown Updated",
-                f"Members must now wait {seconds} seconds between XP gains"
-            )
-            await interaction.response.send_message(embed=embed)
+                embed = self.bot.ui_manager.info_embed(
+                    "Level Rewards",
+                    "Current level-up role rewards:"
+                )
 
-        except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
+                for level, role_id in sorted(rewards):
+                    role = interaction.guild.get_role(int(role_id))
+                    if role:
+                        embed.add_field(
+                            name=f"Level {level}",
+                            value=role.mention,
+                            inline=False
+                        )
 
-    @app_commands.command(
-        name="config_xp_toggle",
-        description="Enable or disable XP gain"
-    )
-    @app_commands.default_permissions(administrator=True)
-    async def config_xp_toggle(self, interaction: discord.Interaction):
-        """Toggle XP system"""
-        try:
-            if not interaction.user.guild_permissions.administrator:
-                raise commands.MissingPermissions(["administrator"])
+                await interaction.response.send_message(embed=embed)
+                return
 
-            settings = await self.bot.db_manager.get_section(interaction.guild_id, 'xp_settings')
-            enabled = not settings.get('enabled', True)
-
-            await self.bot.db_manager.update_xp_config(interaction.guild_id, 'enabled', enabled)
-
-            embed = self.bot.ui_manager.success_embed(
-                "XP System Updated",
-                f"XP gain has been {'enabled' if enabled else 'disabled'}"
-            )
-            await interaction.response.send_message(embed=embed)
-
-        except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
-
-    @app_commands.command(
-        name="config_level_add",
-        description="Add a level-up role reward"
-    )
-    @app_commands.describe(
-        level="The level to assign this role at",
-        role="The role to give as a reward"
-    )
-    @app_commands.default_permissions(administrator=True)
-    async def config_level_add(
-        self,
-        interaction: discord.Interaction,
-        level: int,
-        role: discord.Role
-    ):
-        """Add a level-up role reward"""
-        try:
-            if not interaction.user.guild_permissions.administrator:
-                raise commands.MissingPermissions(["administrator"])
+            # For add/remove actions, level is required
+            if level is None:
+                raise ValueError("Level is required for add/remove actions")
 
             if level < 1:
                 raise ValueError("Level must be at least 1")
 
-            await self.bot.db_manager.add_level_role(interaction.guild_id, level, role.id)
-
-            embed = self.bot.ui_manager.success_embed(
-                "Level Reward Added",
-                f"Members will receive the {role.mention} role at level {level}"
-            )
-            await interaction.response.send_message(embed=embed)
-
-        except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
-
-    @app_commands.command(
-        name="config_level_remove",
-        description="Remove a level-up role reward"
-    )
-    @app_commands.describe(
-        level="The level to remove the reward from"
-    )
-    @app_commands.default_permissions(administrator=True)
-    async def config_level_remove(
-        self,
-        interaction: discord.Interaction,
-        level: int
-    ):
-        """Remove a level-up role reward"""
-        try:
-            if not interaction.user.guild_permissions.administrator:
-                raise commands.MissingPermissions(["administrator"])
-
-            if await self.bot.db_manager.remove_level_role(interaction.guild_id, level):
+            if action == "add":
+                if not role:
+                    raise ValueError("Role is required when adding a reward")
+                
+                await self.bot.db_manager.add_level_role(interaction.guild_id, level, role.id)
                 embed = self.bot.ui_manager.success_embed(
-                    "Level Reward Removed",
-                    f"Removed the role reward for level {level}"
+                    "Level Reward Added",
+                    f"Members will receive the {role.mention} role at level {level}"
                 )
-            else:
-                embed = self.bot.ui_manager.error_embed(
-                    "Not Found",
-                    f"No role reward found for level {level}"
-                )
-
-            await interaction.response.send_message(embed=embed)
-
-        except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
-
-    @app_commands.command(
-        name="config_level_list",
-        description="View all level-up role rewards"
-    )
-    async def config_level_list(self, interaction: discord.Interaction):
-        """List all level-up role rewards"""
-        try:
-            rewards = await self.bot.db_manager.get_level_roles(interaction.guild_id)
-
-            if not rewards:
-                embed = self.bot.ui_manager.info_embed(
-                    "No Level Rewards",
-                    "No level-up role rewards have been set"
-                )
-                await interaction.response.send_message(embed=embed)
-                return
-
-            embed = self.bot.ui_manager.info_embed(
-                "Level Rewards",
-                "Current level-up role rewards:"
-            )
-
-            for level, role_id in sorted(rewards):
-                role = interaction.guild.get_role(int(role_id))
-                if role:
-                    embed.add_field(
-                        name=f"Level {level}",
-                        value=role.mention,
-                        inline=False
+            else:  # remove
+                if await self.bot.db_manager.remove_level_role(interaction.guild_id, level):
+                    embed = self.bot.ui_manager.success_embed(
+                        "Level Reward Removed",
+                        f"Removed the role reward for level {level}"
+                    )
+                else:
+                    embed = self.bot.ui_manager.error_embed(
+                        "Not Found",
+                        f"No role reward found for level {level}"
                     )
 
             await interaction.response.send_message(embed=embed)

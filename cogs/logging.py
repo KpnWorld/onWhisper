@@ -23,47 +23,100 @@ class LoggingCog(commands.Cog):
         )
 
     @app_commands.command(
-        name="config_logging",
+        name="config_logs",
         description="Configure logging settings"
     )
     @app_commands.describe(
-        channel="Channel to use for logging (will create one if not specified)",
-        enabled="Enable or disable logging"
+        action="Whether to enable or disable logging",
+        channel="Channel to use for logging (required when enabling)",
+        type="Type of logs to configure"
+    )
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Enable", value="enable"),
+            app_commands.Choice(name="Disable", value="disable")
+        ],
+        type=[
+            app_commands.Choice(name="All logs", value="all"),
+            app_commands.Choice(name="Moderation logs", value="mod"),
+            app_commands.Choice(name="Member logs", value="member"),
+            app_commands.Choice(name="Message logs", value="message"),
+            app_commands.Choice(name="Server logs", value="server")
+        ]
     )
     @app_commands.default_permissions(administrator=True)
-    async def config_logging(
+    async def config_logs(
         self,
         interaction: discord.Interaction,
-        channel: Optional[discord.TextChannel] = None,
-        enabled: Optional[bool] = True
+        action: str,
+        type: str,
+        channel: Optional[discord.TextChannel] = None
     ):
         """Configure logging settings"""
         try:
             if not interaction.user.guild_permissions.administrator:
                 raise commands.MissingPermissions(["administrator"])
 
-            # Create channel if not specified and enabled
-            if not channel and enabled:
-                channel = await self.create_log_channel(interaction.guild)
+            if action == "enable" and not channel:
+                raise ValueError("Channel is required when enabling logging")
 
-            # Update config in database
-            updates = {
-                "log_channel": str(channel.id) if channel else None,
-                "logging_enabled": enabled
-            }
-            
-            await self.bot.db_manager.update_logging_config(interaction.guild_id, updates)
+            # Create channel if needed when enabling
+            if action == "enable":
+                if not channel:
+                    channel = await self.create_log_channel(interaction.guild, type)
+                
+                # Update config in database
+                updates = {}
+                if type == "all":
+                    updates = {
+                        "log_channel": str(channel.id),
+                        "logging_enabled": True
+                    }
+                elif type == "mod":
+                    updates = {"mod_channel": str(channel.id)}
+                elif type == "member":
+                    updates = {"join_channel": str(channel.id)}
+                elif type == "message":
+                    updates = {"message_channel": str(channel.id)}
+                elif type == "server":
+                    updates = {"server_channel": str(channel.id)}
+                
+                await self.bot.db_manager.update_logging_config(interaction.guild_id, updates)
+                embed = self.bot.ui_manager.success_embed(
+                    "Logging Enabled",
+                    f"{type.title()} logs will now be sent to {channel.mention}"
+                )
 
-            # Send confirmation
-            status = "enabled" if enabled else "disabled"
-            channel_text = f"in {channel.mention}" if channel else ""
-            embed = self.bot.ui_manager.success_embed(
-                "Logging Updated",
-                f"Logging has been {status} {channel_text}"
-            )
+            else:  # disable
+                updates = {}
+                if type == "all":
+                    updates = {
+                        "logging_enabled": False,
+                        "log_channel": None
+                    }
+                elif type == "mod":
+                    updates = {"mod_channel": None}
+                elif type == "member":
+                    updates = {"join_channel": None}
+                elif type == "message":
+                    updates = {"message_channel": None}
+                elif type == "server":
+                    updates = {"server_channel": None}
+
+                await self.bot.db_manager.update_logging_config(interaction.guild_id, updates)
+                embed = self.bot.ui_manager.success_embed(
+                    "Logging Disabled",
+                    f"{type.title()} logging has been disabled"
+                )
+
             await interaction.response.send_message(embed=embed)
 
-        except commands.MissingPermissions as e:
+        except ValueError as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Invalid Input", str(e)),
+                ephemeral=True
+            )
+        except commands.MissingPermissions:
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.error_embed(
                     "Missing Permissions",
@@ -71,115 +124,6 @@ class LoggingCog(commands.Cog):
                 ),
                 ephemeral=True
             )
-        except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
-
-    @app_commands.command(
-        name="config_mod_logs",
-        description="Configure the moderation logging channel"
-    )
-    @app_commands.describe(
-        channel="The channel to use for moderation logs (will create one if not specified)"
-    )
-    @app_commands.default_permissions(administrator=True)
-    async def config_mod_logs(
-        self,
-        interaction: discord.Interaction,
-        channel: Optional[discord.TextChannel] = None
-    ):
-        """Configure moderation logging channel"""
-        try:
-            if not interaction.user.guild_permissions.administrator:
-                raise commands.MissingPermissions(["administrator"])
-
-            if not channel:
-                channel = await self.create_log_channel(interaction.guild, "mod")
-
-            await self.bot.db_manager.update_logging_config(interaction.guild_id, {
-                "mod_channel": str(channel.id)
-            })
-
-            embed = self.bot.ui_manager.success_embed(
-                "Mod Logs Configured",
-                f"Moderation actions will now be logged in {channel.mention}"
-            )
-            await interaction.response.send_message(embed=embed)
-
-        except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
-
-    @app_commands.command(
-        name="config_join_logs",
-        description="Configure the member join/leave logging channel"
-    )
-    @app_commands.describe(
-        channel="The channel to use for member logs (will create one if not specified)"
-    )
-    @app_commands.default_permissions(administrator=True)
-    async def config_join_logs(
-        self,
-        interaction: discord.Interaction,
-        channel: Optional[discord.TextChannel] = None
-    ):
-        """Configure member join/leave logging channel"""
-        try:
-            if not interaction.user.guild_permissions.administrator:
-                raise commands.MissingPermissions(["administrator"])
-
-            if not channel:
-                channel = await self.create_log_channel(interaction.guild, "member")
-
-            await self.bot.db_manager.update_logging_config(interaction.guild_id, {
-                "join_channel": str(channel.id)
-            })
-
-            embed = self.bot.ui_manager.success_embed(
-                "Member Logs Configured",
-                f"Member join/leave events will now be logged in {channel.mention}"
-            )
-            await interaction.response.send_message(embed=embed)
-
-        except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
-
-    @app_commands.command(
-        name="config_logs_toggle",
-        description="Enable or disable logging"
-    )
-    @app_commands.describe(
-        enabled="Whether logging should be enabled"
-    )
-    @app_commands.default_permissions(administrator=True)
-    async def config_logs_toggle(
-        self,
-        interaction: discord.Interaction,
-        enabled: bool
-    ):
-        """Toggle logging system"""
-        try:
-            if not interaction.user.guild_permissions.administrator:
-                raise commands.MissingPermissions(["administrator"])
-
-            await self.bot.db_manager.update_logging_config(interaction.guild_id, {
-                "enabled": enabled
-            })
-
-            status = "enabled" if enabled else "disabled"
-            embed = self.bot.ui_manager.success_embed(
-                "Logging Updated",
-                f"Logging has been {status}"
-            )
-            await interaction.response.send_message(embed=embed)
-
         except Exception as e:
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),

@@ -236,11 +236,14 @@ class DBManager:
                             expires: datetime = None):
         """Add a moderation action"""
         try:
+            # Ensure we're using UTC for timestamps
+            now = datetime.now(discord.utils.utc)
+            
             mod_action = {
                 'action': action,
                 'user_id': str(user_id),
                 'details': details,
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': now.isoformat(),
                 'expires': expires.isoformat() if expires else None
             }
             
