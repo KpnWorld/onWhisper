@@ -458,56 +458,34 @@ class DBManager:
             print(f"Error removing reaction role: {e}")
             return False
 
-    async def create_whisper_thread(self, guild_id: int, user_id: int, thread_id: int, message: str) -> bool:
-        """Create a new whisper thread"""
-        try:
-            whisper = {
-                'user_id': str(user_id),
-                'thread_id': str(thread_id),
-                'initial_message': message,
-                'created_at': datetime.utcnow().isoformat(),
-                'closed_at': None
-            }
-            whispers = await self.get_section(guild_id, 'whispers')
-            whispers.append(whisper)
-            await self.update_guild_data(guild_id, 'whispers', whispers)
-            return True
-        except Exception as e:
-            print(f"Error creating whisper: {e}")
-            return False
-
-    async def close_whisper(self, guild_id: int, thread_id: str) -> bool:
-        """Close a whisper thread"""
-        try:
-            whispers = await self.get_section(guild_id, 'whispers')
-            for whisper in whispers:
-                if whisper['thread_id'] == thread_id:
-                    whisper['closed_at'] = datetime.utcnow().isoformat()
-                    await self.update_guild_data(guild_id, 'whispers', whispers)
-                    return True
-            return False
-        except Exception as e:
-            print(f"Error closing whisper: {e}")
-            return False
-
-    async def get_whispers(self, guild_id: int, include_closed: bool = False) -> list:
-        """Get all whispers for a guild"""
-        try:
-            whispers = await self.get_section(guild_id, 'whispers')
-            if include_closed:
-                return whispers
-            return [w for w in whispers if not w.get('closed_at')]
-        except Exception as e:
-            print(f"Error getting whispers: {e}")
-            return []
-
     async def get_active_whispers(self, guild_id: int) -> list:
         """Get only active whispers"""
-        return await self.get_whispers(guild_id, include_closed=False)
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            if not isinstance(whispers, dict):
+                # Migrate old format to new format
+                whispers = {
+                    'active_threads': whispers if whispers else [],
+                    'closed_threads': [],
+                    'saved_threads': {}
+                }
+                await self.set_section(guild_id, 'whispers', whispers)
+            return whispers.get('active_threads', [])
+        except Exception as e:
+            print(f"Error getting active whispers: {e}")
+            return []
 
     async def add_whisper(self, guild_id: int, thread_id: str, user_id: str, channel_id: str) -> bool:
         """Add a new whisper entry"""
         try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            if not isinstance(whispers, dict):
+                whispers = {
+                    'active_threads': [],
+                    'closed_threads': [],
+                    'saved_threads': {}
+                }
+            
             whisper = {
                 'thread_id': thread_id,
                 'user_id': user_id,
@@ -515,12 +493,70 @@ class DBManager:
                 'created_at': datetime.utcnow().isoformat(),
                 'closed_at': None
             }
-            whispers = await self.get_section(guild_id, 'whispers')
-            whispers.append(whisper)
-            await self.update_guild_data(guild_id, 'whispers', whispers)
+            
+            if 'active_threads' not in whispers:
+                whispers['active_threads'] = []
+            
+            whispers['active_threads'].append(whisper)
+            await self.set_section(guild_id, 'whispers', whispers)
             return True
         except Exception as e:
             print(f"Error adding whisper: {e}")
+            return False
+
+    async def close_whisper(self, guild_id: int, thread_id: str) -> bool:
+        """Close a whisper thread"""
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            if not isinstance(whispers, dict):
+                return False
+
+            # Find whisper in active threads
+            active_whispers = whispers.get('active_threads', [])
+            whisper = next((w for w in active_whispers if w['thread_id'] == thread_id), None)
+            
+            if whisper:
+                # Remove from active threads
+                whispers['active_threads'] = [w for w in active_whispers if w['thread_id'] != thread_id]
+                
+                # Add to closed threads
+                if 'closed_threads' not in whispers:
+                    whispers['closed_threads'] = []
+                    
+                whisper['closed_at'] = datetime.utcnow().isoformat()
+                whispers['closed_threads'].append(whisper)
+                
+                await self.set_section(guild_id, 'whispers', whispers)
+                return True
+            return False
+        except Exception as e:
+            print(f"Error closing whisper: {e}")
+            return False
+
+    async def delete_whisper(self, guild_id: int, thread_id: str) -> bool:
+        """Completely remove a whisper from the database"""
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            if not isinstance(whispers, dict):
+                return False
+
+            # Remove from active threads
+            if 'active_threads' in whispers:
+                whispers['active_threads'] = [w for w in whispers['active_threads'] if w['thread_id'] != thread_id]
+
+            # Remove from closed threads
+            if 'closed_threads' in whispers:
+                whispers['closed_threads'] = [w for w in whispers['closed_threads'] if w['thread_id'] != thread_id]
+
+            # Remove saved history
+            if 'saved_threads' in whispers and thread_id in whispers['saved_threads']:
+                del whispers['saved_threads'][thread_id]
+
+            await self.set_section(guild_id, 'whispers', whispers)
+            return True
+
+        except Exception as e:
+            print(f"Error deleting whisper: {e}")
             return False
 
     async def cleanup_old_whispers(self, guild_id: int, days: int = 30) -> bool:
@@ -607,32 +643,6 @@ class DBManager:
 
         except Exception as e:
             print(f"Error saving whisper history: {e}")
-            return False
-
-    async def delete_whisper(self, guild_id: int, thread_id: str) -> bool:
-        """Completely remove a whisper from the database"""
-        try:
-            whispers = await self.get_section(guild_id, 'whispers')
-            if not whispers:
-                return False
-
-            # Remove from active threads
-            if 'active_threads' in whispers:
-                whispers['active_threads'] = [w for w in whispers['active_threads'] if w['thread_id'] != thread_id]
-
-            # Remove from closed threads
-            if 'closed_threads' in whispers:
-                whispers['closed_threads'] = [w for w in whispers['closed_threads'] if w['thread_id'] != thread_id]
-
-            # Remove saved history unless explicitly saved
-            if 'saved_threads' in whispers and thread_id in whispers['saved_threads']:
-                del whispers['saved_threads'][thread_id]
-
-            await self.set_section(guild_id, 'whispers', whispers)
-            return True
-
-        except Exception as e:
-            print(f"Error deleting whisper: {e}")
             return False
 
     # Whisper System Methods
@@ -1033,7 +1043,9 @@ class DBManager:
         """Get list of allowed color role IDs for a guild"""
         try:
             data = await self.get_guild_data(guild_id)
-            return data.get('color_roles', [])
+            roles = data.get('color_roles', [])
+            # Ensure all role IDs are strings
+            return [str(role_id) for role_id in roles]
         except Exception as e:
             print(f"Error getting color roles: {e}")
             return []
@@ -1041,7 +1053,9 @@ class DBManager:
     async def update_color_roles(self, guild_id: int, role_ids: List[str]) -> bool:
         """Update the list of allowed color roles for a guild"""
         try:
-            await self.update_guild_data(guild_id, 'color_roles', role_ids)
+            # Ensure all role IDs are strings
+            roles = [str(role_id) for role_id in role_ids]
+            await self.update_guild_data(guild_id, 'color_roles', roles)
             return True
         except Exception as e:
             print(f"Error updating color roles: {e}")

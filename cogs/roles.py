@@ -11,9 +11,21 @@ class RolesCog(commands.Cog):
     
     async def _can_manage_role(self, guild: discord.Guild, role: discord.Role) -> bool:
         """Check if the bot can manage a role"""
-        if role >= guild.me.top_role:
+        bot_member = guild.me
+        
+        # Check if role is not higher than bot's highest role
+        if role >= bot_member.top_role:
             return False
-        return guild.me.guild_permissions.manage_roles
+            
+        # Check if bot has Manage Roles permission
+        if not bot_member.guild_permissions.manage_roles:
+            return False
+            
+        # Check if role is managed by integration (bot roles, etc)
+        if role.managed:
+            return False
+            
+        return True
 
     async def _handle_bulk_role_update(self, member: discord.Member, role: discord.Role, action: str) -> bool:
         """Handle adding/removing roles with proper error handling"""
@@ -449,13 +461,36 @@ class RolesCog(commands.Cog):
 
                     role = guild.get_role(int(bindings[emoji]))
                     if not role:
+                        # Role was deleted - clean up the binding
+                        del bindings[emoji]
+                        if not bindings:
+                            del reaction_roles[str(payload.message_id)]
+                        await self.bot.db_manager.update_guild_data(payload.guild_id, 'reaction_roles', reaction_roles)
                         return
 
                     member = guild.get_member(payload.user_id)
                     if not member:
                         return
 
-                    await member.add_roles(role)
+                    # Check if we can manage this role
+                    if not await self._can_manage_role(guild, role):
+                        # Remove the reaction since we can't manage the role
+                        channel = guild.get_channel(payload.channel_id)
+                        if channel:
+                            message = await channel.fetch_message(payload.message_id)
+                            if message:
+                                await message.remove_reaction(payload.emoji, member)
+                        return
+
+                    try:
+                        await member.add_roles(role)
+                    except discord.Forbidden:
+                        # Remove the reaction if we don't have permission
+                        channel = guild.get_channel(payload.channel_id)
+                        if channel:
+                            message = await channel.fetch_message(payload.message_id)
+                            if message:
+                                await message.remove_reaction(payload.emoji, member)
 
         except Exception as e:
             print(f"Error handling reaction role: {e}")
@@ -480,13 +515,25 @@ class RolesCog(commands.Cog):
 
                     role = guild.get_role(int(bindings[emoji]))
                     if not role:
+                        # Role was deleted - clean up the binding
+                        del bindings[emoji]
+                        if not bindings:
+                            del reaction_roles[str(payload.message_id)]
+                        await self.bot.db_manager.update_guild_data(payload.guild_id, 'reaction_roles', reaction_roles)
                         return
 
                     member = guild.get_member(payload.user_id)
                     if not member:
                         return
 
-                    await member.remove_roles(role)
+                    # Check if we can manage this role before trying to remove it
+                    if not await self._can_manage_role(guild, role):
+                        return
+
+                    try:
+                        await member.remove_roles(role)
+                    except discord.Forbidden:
+                        pass  # We already checked permissions, but handle any race conditions
 
         except Exception as e:
             print(f"Error handling reaction role removal: {e}")

@@ -59,31 +59,34 @@ class LevelingCog(commands.Cog):
 
             # Handle level up
             if new_level > old_level:
-                # Check for role rewards
+                # Get level roles and sort by level to ensure roles are given in order
                 level_roles = await self.bot.db_manager.get_level_roles(message.guild.id)
+                level_roles.sort(key=lambda x: x[0])  # Sort by level
+                
+                awarded_roles = []
                 for level, role_id in level_roles:
+                    # Check if this role should be awarded
                     if old_level < level <= new_level:
                         role = message.guild.get_role(int(role_id))
                         if role:
                             try:
                                 await message.author.add_roles(role)
-                                embed = self.bot.ui_manager.xp_embed(
-                                    "Level Up!",
-                                    f"🎉 {message.author.mention} reached level {new_level} and earned the {role.mention} role!"
-                                )
+                                awarded_roles.append(role.mention)
                             except discord.Forbidden:
-                                embed = self.bot.ui_manager.xp_embed(
-                                    "Level Up!",
-                                    f"🎉 {message.author.mention} reached level {new_level}!\n⚠️ Could not assign role {role.mention} - missing permissions."
-                                )
-                            await message.channel.send(embed=embed)
-                            return
+                                # Log permission error but continue with other roles
+                                print(f"Failed to give role {role.name} due to permissions")
 
-                # If no role rewards, just show level up message
-                embed = self.bot.ui_manager.xp_embed(
-                    "Level Up!",
-                    f"🎉 {message.author.mention} reached level {new_level}!"
-                )
+                # Create level up message
+                if awarded_roles:
+                    embed = self.bot.ui_manager.xp_embed(
+                        "Level Up!",
+                        f"🎉 {message.author.mention} reached level {new_level} and earned: {', '.join(awarded_roles)}!"
+                    )
+                else:
+                    embed = self.bot.ui_manager.xp_embed(
+                        "Level Up!",
+                        f"🎉 {message.author.mention} reached level {new_level}!"
+                    )
                 await message.channel.send(embed=embed)
 
         except Exception as e:

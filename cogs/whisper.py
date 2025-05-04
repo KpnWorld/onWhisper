@@ -4,131 +4,103 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import asyncio
+import re
+from better_profanity import profanity
 
 class WhisperCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Initialize profanity filter
+        profanity.load_censor_words()
+        # Start background tasks
         self.check_threads.start()
         self.cleanup_old_whispers.start()
-        self._cd = commands.CooldownMapping.from_cooldown(1, 300, commands.BucketType.member)  # 5 min cooldown
+        # Track active whispers
+        self.active_whispers = {}
 
     def cog_unload(self):
+        """Clean up when cog is unloaded"""
         self.check_threads.cancel()
         self.cleanup_old_whispers.cancel()
 
+    async def filter_content(self, content: str) -> tuple[bool, str]:
+        """Filter content for inappropriate language
+        Returns: (is_clean, filtered_content)"""
+        if profanity.contains_profanity(content):
+            return False, content
+        return True, content
+
+    async def close_whisper(self, thread_id: str, guild_id: str, user_id: str):
+        whisper = await self.bot.db_manager.get_whisper(guild_id, thread_id)
+        if not whisper:
+            return False, "This is not an active whisper thread"
+            
+        # Check if user has permission to close
+        if str(user_id) != whisper['author_id'] and not await self.bot.is_admin(user_id):
+            return False, "You don't have permission to close this whisper"
+
+        # Mark thread as closed in database
+        await self.bot.db_manager.update_whisper_status(guild_id, thread_id, 'closed')
+        
+        # Update thread permissions
+        thread = self.bot.get_channel(int(thread_id))
+        if thread:
+            await thread.edit(archived=True, locked=True)
+            
+        return True, "Thread closed successfully"
+
     @tasks.loop(minutes=5.0)
     async def check_threads(self):
-        """Check for inactive whisper threads"""
-        try:
-            for guild in self.bot.guilds:
-                config = await self.bot.db_manager.get_section(guild.id, 'whisper_config')
-                if not config.get('enabled', True):
-                    continue
-                    
-                timeout = config.get('timeout', 60)  # Default 60 minutes
-                whispers = await self.bot.db_manager.get_active_whispers(guild.id)
-                
-                for whisper in whispers:
-                    try:
-                        thread = self.bot.get_channel(int(whisper['thread_id']))
-                        
-                        # Handle deleted threads
-                        if not thread:
-                            print(f"Thread {whisper['thread_id']} not found, marking as closed")
-                            await self.bot.db_manager.close_whisper(guild.id, whisper['thread_id'])
-                            continue
+        """Periodically check thread states and update database"""
+        for guild_id, whispers in self.active_whispers.items():
+            for thread_id, whisper in whispers.items():
+                thread = self.bot.get_channel(int(thread_id))
+                if not thread or thread.archived:
+                    # Thread was deleted or archived externally
+                    await self.bot.db_manager.update_whisper_status(
+                        str(guild_id), 
+                        str(thread_id), 
+                        'closed'
+                    )
+                    del self.active_whispers[guild_id][thread_id]
 
-                        # Skip if thread is already archived
-                        if thread.archived:
-                            await self.bot.db_manager.close_whisper(guild.id, str(thread.id))
-                            continue
-
-                        # Get last message properly with async for
-                        last_message = None
-                        try:
-                            async for message in thread.history(limit=1):
-                                last_message = message
-                                break
-                        except discord.Forbidden:
-                            print(f"No permission to read thread {thread.id}")
-                            continue
-                        except discord.HTTPException as e:
-                            print(f"Error reading thread history: {e}")
-                            continue
-
-                        if not last_message:
-                            continue
-
-                        # Use timezone-aware datetime comparison
-                        inactive_time = datetime.now(timezone.utc) - last_message.created_at
-                        if inactive_time > timedelta(minutes=timeout):
-                            try:
-                                # Attempt to send closing message
-                                await thread.send(embed=self.bot.ui_manager.warning_embed(
-                                    "Thread Closing",
-                                    f"This thread has been inactive for {timeout} minutes and will be closed."
-                                ))
-                                
-                                # Close the thread
-                                await thread.edit(archived=True, locked=True)
-                                
-                                # Only mark as closed if archive was successful
-                                await self.bot.db_manager.close_whisper(guild.id, str(thread.id))
-
-                                # Log auto-closure
-                                log_config = await self.bot.db_manager.get_logging_config(guild.id)
-                                if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
-                                    log_channel = guild.get_channel(int(log_config['log_channel']))
-                                    if log_channel:
-                                        embed = self.bot.ui_manager.log_embed(
-                                            "Whisper Auto-Closed",
-                                            f"Whisper thread automatically closed due to {timeout} minutes of inactivity",
-                                            self.bot.user
-                                        )
-                                        embed.add_field(name="Thread", value=thread.mention)
-                                        await log_channel.send(embed=embed)
-                            except discord.Forbidden:
-                                print(f"Missing permissions to close thread {thread.id}")
-                            except discord.HTTPException as e:
-                                print(f"Error closing thread {thread.id}: {e}")
-                    except Exception as e:
-                        print(f"Error processing thread {whisper['thread_id']}: {e}")
-                        continue
-
-        except Exception as e:
-            print(f"Error in thread checker: {e}")
-            
     @check_threads.before_loop
     async def before_check_threads(self):
-        """Wait for the bot to be ready before starting the thread checker"""
+        """Wait for bot to be ready before starting loop"""
         await self.bot.wait_until_ready()
+        # Load active whispers
+        for guild in self.bot.guilds:
+            whispers = await self.bot.db_manager.get_active_whispers(str(guild.id))
+            self.active_whispers[guild.id] = {
+                w['thread_id']: w for w in whispers
+            }
 
     @tasks.loop(hours=24.0)
     async def cleanup_old_whispers(self):
-        """Cleanup old whispers from the database daily"""
-        try:
-            for guild in self.bot.guilds:
-                config = await self.bot.db_manager.get_section(guild.id, 'whisper_config')
-                if not config.get('enabled', True):
-                    continue
+        """Clean up whispers older than configured retention period"""
+        retention_days = 30  # Default to 30 days
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        
+        for guild in self.bot.guilds:
+            old_whispers = await self.bot.db_manager.get_old_whispers(
+                str(guild.id),
+                cutoff_date
+            )
+            
+            for whisper in old_whispers:
+                thread_id = whisper['thread_id']
+                thread = self.bot.get_channel(int(thread_id))
                 
-                retention_days = config.get('retention_days', 30)  # Default 30 days retention
-                cleaned = await self.bot.db_manager.cleanup_old_whispers(guild.id, retention_days)
-                
-                if cleaned:
-                    # Log cleanup if logging is enabled
-                    log_config = await self.bot.db_manager.get_logging_config(guild.id)
-                    if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
-                        log_channel = guild.get_channel(int(log_config['log_channel']))
-                        if log_channel:
-                            embed = self.bot.ui_manager.log_embed(
-                                "Whispers Cleaned Up",
-                                f"Old whispers (closed > {retention_days} days ago) have been cleaned from the database",
-                                self.bot.user
-                            )
-                            await log_channel.send(embed=embed)
-        except Exception as e:
-            print(f"Error in whisper cleanup: {e}")
+                if thread:
+                    try:
+                        await thread.delete()
+                    except:
+                        pass  # Thread may already be deleted
+                        
+                await self.bot.db_manager.delete_whisper(
+                    str(guild.id),
+                    thread_id
+                )
 
     @app_commands.command(
         name="whisper",
@@ -151,11 +123,17 @@ class WhisperCog(commands.Cog):
     ):
         """Unified whisper management command"""
         try:
+            # Defer response immediately
             await interaction.response.defer(ephemeral=True)
 
             if action == "create":
                 if not message:
                     raise ValueError("Message is required when creating a whisper")
+
+                # Check content filter
+                allowed, filtered_message = await self.filter_content(message)
+                if not allowed:
+                    raise commands.CommandError(filtered_message)
 
                 # Check if whispers are enabled
                 config = await self.bot.db_manager.get_section(interaction.guild_id, 'whisper_config')
@@ -270,14 +248,38 @@ class WhisperCog(commands.Cog):
             elif action in ["close", "delete"]:
                 # Check if in a thread
                 if not isinstance(interaction.channel, discord.Thread):
-                    raise commands.CommandError("This command can only be used in a whisper thread")
+                    await interaction.followup.send(
+                        embed=self.bot.ui_manager.error_embed(
+                            "Invalid Channel",
+                            "This command can only be used in a whisper thread"
+                        ),
+                        ephemeral=True
+                    )
+                    return
 
-                # Get whisper data
-                whispers = await self.bot.db_manager.get_active_whispers(interaction.guild_id)
-                whisper = next((w for w in whispers if int(w['thread_id']) == interaction.channel.id), None)
-
+                # Get whisper data and validate active status 
+                try:
+                    whispers = await self.bot.db_manager.get_active_whispers(interaction.guild_id)
+                    whisper = next((w for w in whispers if int(w['thread_id']) == interaction.channel.id), None)
+                except Exception as e:
+                    await interaction.followup.send(
+                        embed=self.bot.ui_manager.error_embed(
+                            "Database Error",
+                            "Failed to retrieve whisper data. Please try again."
+                        ),
+                        ephemeral=True
+                    )
+                    return
+                
                 if not whisper:
-                    raise commands.CommandError("This is not an active whisper thread")
+                    await interaction.followup.send(
+                        embed=self.bot.ui_manager.error_embed(
+                            "Invalid Thread",
+                            "This is not an active whisper thread"
+                        ),
+                        ephemeral=True
+                    )
+                    return
 
                 # Check permissions
                 is_admin = interaction.user.guild_permissions.administrator
@@ -290,6 +292,15 @@ class WhisperCog(commands.Cog):
                     raise commands.MissingPermissions(["manage_threads"])
 
                 if action == "close":
+                    # Send initial response quickly
+                    await interaction.followup.send(
+                        embed=self.bot.ui_manager.info_embed(
+                            "Closing Thread",
+                            "Processing your request..."
+                        ),
+                        ephemeral=True
+                    )
+
                     # Show confirmation dialog
                     confirmed = await self.bot.ui_manager.confirm_action(
                         interaction,
@@ -303,36 +314,61 @@ class WhisperCog(commands.Cog):
                     if not confirmed:
                         return
 
-                    await interaction.channel.send(
-                        embed=self.bot.ui_manager.warning_embed(
-                            "Thread Closing",
-                            f"Thread manually closed by {interaction.user.mention}"
+                    try:
+                        # Archive and lock the thread first
+                        await interaction.channel.edit(archived=True, locked=True)
+
+                        # Mark as closed in DB
+                        await self.bot.db_manager.close_whisper(interaction.guild_id, str(interaction.channel.id))
+
+                        await interaction.channel.send(
+                            embed=self.bot.ui_manager.warning_embed(
+                                "Thread Closing",
+                                f"Thread manually closed by {interaction.user.mention}"
+                            )
                         )
-                    )
 
-                    # Archive and lock the thread
-                    await interaction.channel.edit(archived=True, locked=True)
+                        # Send staff controls panel
+                        embed = self.bot.ui_manager.info_embed(
+                            "Support Team Whisper Controls",
+                            "Use these controls to manage the closed whisper thread:"
+                        )
+                        controls_view = self.bot.ui_manager.WhisperControlsView(self.bot)
+                        await interaction.channel.send(embed=embed, view=controls_view)
 
-                    # Mark as closed in DB
-                    await self.bot.db_manager.close_whisper(interaction.guild_id, str(interaction.channel.id))
+                        # Update the initial response
+                        await interaction.edit_original_response(
+                            embed=self.bot.ui_manager.success_embed(
+                                "Thread Closed",
+                                "The whisper thread has been closed and archived."
+                            )
+                        )
+                    except discord.NotFound:
+                        # Thread was already deleted
+                        await interaction.edit_original_response(
+                            embed=self.bot.ui_manager.error_embed(
+                                "Error",
+                                "The thread no longer exists."
+                            )
+                        )
+                    except Exception as e:
+                        await interaction.edit_original_response(
+                            embed=self.bot.ui_manager.error_embed(
+                                "Error",
+                                f"Failed to close thread: {str(e)}"
+                            )
+                        )
 
-                    # Send staff controls panel
-                    embed = self.bot.ui_manager.info_embed(
-                        "Support Team Whisper Controls",
-                        "Use these controls to manage the closed whisper thread:"
-                    )
-                    controls_view = self.bot.ui_manager.WhisperControlsView(self.bot)
-                    await interaction.channel.send(embed=embed, view=controls_view)
-
+                else:  # delete
+                    # Send initial response quickly
                     await interaction.followup.send(
-                        embed=self.bot.ui_manager.success_embed(
-                            "Thread Closed",
-                            "The whisper thread has been closed and archived."
+                        embed=self.bot.ui_manager.info_embed(
+                            "Deleting Thread",
+                            "Processing your request..."
                         ),
                         ephemeral=True
                     )
 
-                else:  # delete
                     # Show confirmation dialog
                     confirmed = await self.bot.ui_manager.confirm_action(
                         interaction,
@@ -344,32 +380,58 @@ class WhisperCog(commands.Cog):
                     )
 
                     if not confirmed:
+                        await interaction.edit_original_response(
+                            embed=self.bot.ui_manager.info_embed(
+                                "Cancelled",
+                                "Thread deletion cancelled."
+                            )
+                        )
                         return
 
-                    # Log deletion first since we'll lose access to channel data
-                    log_config = await self.bot.db_manager.get_logging_config(interaction.guild_id)
-                    if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
-                        log_channel = interaction.guild.get_channel(int(log_config['log_channel']))
-                        if log_channel:
-                            embed = self.bot.ui_manager.log_embed(
-                                "Whisper Deleted",
-                                f"Whisper thread deleted by {interaction.user.mention}",
-                                interaction.user
+                    try:
+                        # Log deletion first since we'll lose access to channel data
+                        log_config = await self.bot.db_manager.get_logging_config(interaction.guild_id)
+                        if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
+                            try:
+                                log_channel = interaction.guild.get_channel(int(log_config['log_channel']))
+                                if log_channel:
+                                    embed = self.bot.ui_manager.log_embed(
+                                        "Whisper Deleted",
+                                        f"Whisper thread deleted by {interaction.user.mention}",
+                                        interaction.user
+                                    )
+                                    embed.add_field(name="Thread", value=f"#{interaction.channel.name}")
+                                    await log_channel.send(embed=embed)
+                            except Exception:
+                                # Don't fail if logging fails
+                                pass
+
+                        # Delete from database first
+                        await self.bot.db_manager.delete_whisper(interaction.guild_id, str(interaction.channel.id))
+                        
+                        # Then delete the Discord thread
+                        await interaction.channel.delete()
+
+                        await interaction.edit_original_response(
+                            embed=self.bot.ui_manager.success_embed(
+                                "Thread Deleted",
+                                "The whisper thread has been permanently deleted."
                             )
-                            embed.add_field(name="Thread", value=f"#{interaction.channel.name}")
-                            await log_channel.send(embed=embed)
-
-                    # Delete from database and Discord
-                    await self.bot.db_manager.delete_whisper(interaction.guild_id, str(interaction.channel.id))
-                    await interaction.channel.delete()
-
-                    await interaction.followup.send(
-                        embed=self.bot.ui_manager.success_embed(
-                            "Thread Deleted",
-                            "The whisper thread has been permanently deleted."
-                        ),
-                        ephemeral=True
-                    )
+                        )
+                    except discord.NotFound:
+                        await interaction.edit_original_response(
+                            embed=self.bot.ui_manager.error_embed(
+                                "Error",
+                                "The thread no longer exists."
+                            )
+                        )
+                    except Exception as e:
+                        await interaction.edit_original_response(
+                            embed=self.bot.ui_manager.error_embed(
+                                "Error",
+                                f"Failed to delete thread: {str(e)}"
+                            )
+                        )
 
         except self.bot.WhisperError as e:
             await interaction.followup.send(
@@ -388,6 +450,145 @@ class WhisperCog(commands.Cog):
             await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),
                 ephemeral=True
+            )
+
+    @commands.hybrid_command(
+        name="whisper",
+        description="Start an anonymous thread in the current channel"
+    )
+    @commands.guild_only()
+    async def whisper(
+        self, 
+        ctx: commands.Context, 
+        *, 
+        message: str
+    ):
+        """Create an anonymous thread with the given message"""
+        # Delete original command message for privacy
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+
+        # Check content
+        is_clean, content = await self.filter_content(message)
+        if not is_clean:
+            await ctx.author.send(
+                "Your message contains inappropriate content and cannot be posted.",
+                ephemeral=True,
+                delete_after=10
+            )
+            return
+
+        # Create thread
+        try:
+            thread = await ctx.channel.create_thread(
+                name=f"Anonymous Whisper",
+                type=discord.ChannelType.public_thread,
+                auto_archive_duration=1440  # 24 hours
+            )
+        except discord.Forbidden:
+            await ctx.send(
+                "I don't have permission to create threads in this channel.",
+                ephemeral=True,
+                delete_after=10
+            )
+            return
+        except discord.HTTPException as e:
+            await ctx.send(
+                f"Failed to create thread: {str(e)}",
+                ephemeral=True,
+                delete_after=10
+            )
+            return
+
+        # Store whisper in database
+        try:
+            await self.bot.db_manager.create_whisper(
+                guild_id=str(ctx.guild.id),
+                channel_id=str(ctx.channel.id),
+                thread_id=str(thread.id),
+                author_id=str(ctx.author.id),
+                content=content,
+                created_at=datetime.now(timezone.utc)
+            )
+        except Exception as e:
+            await thread.delete()
+            await ctx.send(
+                f"Failed to store whisper: {str(e)}",
+                ephemeral=True,
+                delete_after=10
+            )
+            return
+
+        # Track active whisper
+        if ctx.guild.id not in self.active_whispers:
+            self.active_whispers[ctx.guild.id] = {}
+        self.active_whispers[ctx.guild.id][thread.id] = {
+            'thread_id': str(thread.id),
+            'author_id': str(ctx.author.id),
+            'created_at': datetime.now(timezone.utc)
+        }
+
+        # Send initial message
+        try:
+            await thread.send(content)
+        except:
+            await thread.send("*Message content unavailable*")
+
+        # Confirm to user
+        await ctx.send(
+            "Your anonymous whisper has been created!",
+            ephemeral=True,
+            delete_after=10
+        )
+
+    @discord.slash_command(name="support-controls")
+    @commands.has_permissions(administrator=True)
+    async def support_controls(self, ctx):
+        """Support team controls for managing whisper threads"""
+        if not isinstance(ctx.channel, discord.Thread):
+            await ctx.respond(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    "This command can only be used in a thread"
+                ),
+                ephemeral=True
+            )
+            return
+
+        whisper = await self.bot.db_manager.get_whisper(ctx.guild.id, str(ctx.channel.id))
+        if not whisper:
+            await ctx.respond(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    "This is not a whisper thread"
+                ),
+                ephemeral=True
+            )
+            return
+
+        # Create support controls UI
+        # ... rest of support controls implementation ...
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if not isinstance(message.channel, discord.Thread):
+            return
+            
+        # Check if this is a whisper thread
+        whisper = await self.bot.db_manager.get_whisper(message.guild.id, str(message.channel.id))
+        if not whisper:
+            return
+
+        # Check for inappropriate content in thread messages
+        if profanity.contains_profanity(message.content):
+            await message.delete()
+            await message.channel.send(
+                embed=self.bot.ui_manager.error_embed(
+                    "Content Warning",
+                    f"{message.author.mention} Your message was removed due to inappropriate language. Please keep conversations respectful."
+                )
             )
 
 async def setup(bot):

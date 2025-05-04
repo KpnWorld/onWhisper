@@ -19,9 +19,9 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 ACTIVITIES = [
     discord.Game(name="with commands"),
     discord.Activity(type=discord.ActivityType.watching, name="over the server"),
-    discord.Activity(type=discord.ActivityType.listening, name="to commands"),
+    discord.Activity(type=discord.ActivityType.listening, name="commands"),
     discord.Game(name="with Python"),
-    discord.Activity(type=discord.ActivityType.competing, name="in tasks")
+    discord.Activity(type=discord.ActivityType.competing, name="tasks")
 ]
 
 class Bot(commands.Bot):
@@ -104,10 +104,14 @@ class Bot(commands.Bot):
                     command = discord.app_commands.Command(
                         name=cmd["name"],
                         description=cmd["description"],
-                        callback=lambda x: None,  # Placeholder callback
-                        dm_permission=cmd.get("dm_permission", True),
-                        default_member_permissions=discord.Permissions(permissions=int(cmd.get("default_member_permissions", "0"))) if "default_member_permissions" in cmd else None
+                        callback=lambda i: None  # Placeholder callback
                     )
+                    
+                    # Set permissions if specified
+                    if "default_member_permissions" in cmd:
+                        command.default_permissions = discord.Permissions(
+                            permissions=int(cmd.get("default_member_permissions", "0"))
+                        )
                     
                     # Add choices if they exist
                     for option in cmd.get("options", []):
@@ -116,7 +120,7 @@ class Bot(commands.Bot):
                                 discord.app_commands.Choice(name=choice["name"], value=choice["value"])
                                 for choice in option["choices"]
                             ]
-                            command.add_choice(name=option["name"], choices=choices)
+                            command._params[option["name"]].choices = choices
                     
                     self.tree.add_command(command)
 
@@ -180,9 +184,13 @@ class Bot(commands.Bot):
         except Exception as e:
             print(f"Failed to initialize settings for guild {guild.name}: {e}")
 
+    async def on_message(self, message: discord.Message):
+        if not message.author.bot:
+            await self.db_manager.increment_stat(self.user.id, 'messages_seen')
+        await super().on_message(message)
+
     async def on_app_command_completion(self, interaction: discord.Interaction, command: discord.app_commands.Command):
-        """Command completion handler without logging"""
-        pass
+        await self.db_manager.increment_stat(self.user.id, 'commands_used')
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
         """Enhanced error handler for slash commands"""
@@ -256,9 +264,9 @@ class Bot(commands.Bot):
         except Exception as e:
             print(f"Error in error handler: {str(e)}")
 
-    async def on_command_completion(self, ctx):
+    async def on_command_completion(self, ctx: commands.Context):
         """Legacy command completion handler without logging"""
-        pass
+        await self.db_manager.increment_stat(self.user.id, 'commands_used')
 
     async def on_command_error(self, ctx, error):
         """Enhanced error handler for prefix commands"""

@@ -440,54 +440,76 @@ class UIManager:
 
     class WhisperControlsView(discord.ui.View):
         def __init__(self, bot):
-            super().__init__(timeout=None)  # Persistent buttons
+            super().__init__(timeout=None)
             self.bot = bot
 
-        @discord.ui.button(label="Unlock Thread", style=discord.ButtonStyle.success, emoji="🔓")
-        async def unlock_thread(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def handle_control(self, button: discord.ui.Button, interaction: discord.Interaction):
+            """Common handler for control buttons"""
+            if not isinstance(interaction.channel, discord.Thread):
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Error",
+                        "These controls can only be used in whisper threads"
+                    ),
+                    ephemeral=True
+                )
+                return False
+
+            # Get whisper data
+            whispers = await self.bot.db_manager.get_all_whispers(interaction.guild_id)  # Get all whispers, not just active
+            whisper = next((w for w in whispers if str(w['thread_id']) == str(interaction.channel.id)), None)
+            
+            if not whisper:
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Error",
+                        "Unable to find whisper data for this thread"
+                    ),
+                    ephemeral=True
+                )
+                return False
+
+            return True
+
+        @discord.ui.button(label="Re-open Thread", style=discord.ButtonStyle.green, custom_id="reopen_whisper")
+        async def reopen(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if not await self.handle_control(button, interaction):
+                return
+
+            if not interaction.user.guild_permissions.manage_threads:
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Missing Permissions",
+                        "You need the Manage Threads permission to re-open whispers"
+                    ),
+                    ephemeral=True
+                )
+                return
+
             try:
-                if not interaction.user.guild_permissions.manage_threads:
-                    await interaction.response.send_message(
-                        embed=self.bot.ui_manager.error_embed(
-                            "Unauthorized",
-                            "You need manage threads permission to unlock whispers"
-                        ),
-                        ephemeral=True
-                    )
-                    return
-
-                await interaction.response.defer()
-
-                # Unarchive and unlock the thread
                 await interaction.channel.edit(archived=False, locked=False)
+                await self.bot.db_manager.reactivate_whisper(interaction.guild_id, str(interaction.channel.id))
                 
-                # Update database
-                await self.bot.db_manager.reopen_whisper(interaction.guild_id, str(interaction.channel.id))
-
-                # Send notification
-                await interaction.followup.send(
+                await interaction.response.send_message(
                     embed=self.bot.ui_manager.success_embed(
-                        "Thread Unlocked",
-                        f"Thread reopened by {interaction.user.mention}"
+                        "Thread Reopened",
+                        "This whisper thread has been reopened"
                     )
                 )
-
-                # Log if enabled
-                log_config = await self.bot.db_manager.get_logging_config(interaction.guild_id)
-                if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
-                    log_channel = interaction.guild.get_channel(int(log_config['log_channel']))
-                    if log_channel:
-                        embed = self.bot.ui_manager.log_embed(
-                            "Whisper Reopened",
-                            f"Whisper thread reopened by {interaction.user.mention}",
-                            interaction.user
-                        )
-                        embed.add_field(name="Thread", value=interaction.channel.mention)
-                        await log_channel.send(embed=embed)
-
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Error",
+                        "I don't have permission to reopen this thread"
+                    ),
+                    ephemeral=True
+                )
             except Exception as e:
-                await interaction.followup.send(
-                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Error",
+                        f"Failed to reopen thread: {str(e)}"
+                    ),
                     ephemeral=True
                 )
 
