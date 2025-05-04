@@ -37,6 +37,39 @@ class Bot(commands.Bot):
         self._session_valid = True
         self.start_time = datetime.utcnow()
 
+        # Define commands that will show in the bot's profile
+        self.commands_object = {
+            "info": {
+                "name": "info",
+                "description": "Get information about various aspects of the server and bot",
+                "options": [{
+                    "name": "type",
+                    "description": "The type of information to view",
+                    "type": 3,
+                    "required": True,
+                    "choices": [
+                        {"name": "Help Menu", "value": "help"},
+                        {"name": "User Info", "value": "user"},
+                        {"name": "Server Info", "value": "server"},
+                        {"name": "Bot Info", "value": "bot"},
+                        {"name": "Role Info", "value": "role"},
+                        {"name": "Uptime", "value": "uptime"}
+                    ]
+                }]
+            },
+            "whisper": {
+                "name": "whisper",
+                "description": "Create or manage whisper threads",
+                "dm_permission": False
+            },
+            "config": {
+                "name": "config",
+                "description": "Configure various bot settings and features",
+                "dm_permission": False,
+                "default_member_permissions": "32"  # Requires MANAGE_SERVER permission
+            }
+        }
+
     async def setup_hook(self):
         """This is called when the bot starts, sets up the database and loads cogs"""
         # Initialize database
@@ -64,8 +97,30 @@ class Bot(commands.Bot):
                     except Exception as e:
                         print(f"❌ Failed to load {filename}: {e}")
 
-            # Sync commands
+            # Register commands to show in bot's profile
+            print("Registering commands in bot's profile...")
             try:
+                for cmd in self.commands_object.values():
+                    command = discord.app_commands.Command(
+                        name=cmd["name"],
+                        description=cmd["description"],
+                        callback=lambda x: None,  # Placeholder callback
+                        dm_permission=cmd.get("dm_permission", True),
+                        default_member_permissions=discord.Permissions(permissions=int(cmd.get("default_member_permissions", "0"))) if "default_member_permissions" in cmd else None
+                    )
+                    
+                    # Add choices if they exist
+                    for option in cmd.get("options", []):
+                        if "choices" in option:
+                            choices = [
+                                discord.app_commands.Choice(name=choice["name"], value=choice["value"])
+                                for choice in option["choices"]
+                            ]
+                            command.add_choice(name=option["name"], choices=choices)
+                    
+                    self.tree.add_command(command)
+
+                # Sync commands
                 synced = await self.tree.sync()
                 print(f"✅ Synced {len(synced)} command(s)")
             except Exception as e:
