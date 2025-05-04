@@ -548,6 +548,93 @@ class DBManager:
             print(f"Error cleaning up old whispers: {e}")
             return False
 
+    async def get_next_whisper_id(self, guild_id: int) -> int:
+        """Get the next available whisper ID for a guild"""
+        try:
+            data = await self.get_section(guild_id, 'whisper_config')
+            current_id = data.get('last_whisper_id', 0)
+            next_id = current_id + 1
+            await self.update_whisper_config(guild_id, 'last_whisper_id', next_id)
+            return next_id
+        except Exception as e:
+            print(f"Error getting next whisper ID: {e}")
+            return 1  # Fallback to ID 1 if something goes wrong
+
+    async def reopen_whisper(self, guild_id: int, thread_id: str) -> bool:
+        """Mark a whisper as active again"""
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            if not whispers:
+                return False
+
+            if 'active_threads' not in whispers:
+                whispers['active_threads'] = []
+
+            # Find the whisper in closed threads and move it back to active
+            closed_whispers = whispers.get('closed_threads', [])
+            whisper = next((w for w in closed_whispers if w['thread_id'] == thread_id), None)
+            
+            if whisper:
+                whispers['closed_threads'].remove(whisper)
+                whisper['closed_at'] = None
+                whispers['active_threads'].append(whisper)
+                await self.set_section(guild_id, 'whispers', whispers)
+                return True
+
+            return False
+
+        except Exception as e:
+            print(f"Error reopening whisper: {e}")
+            return False
+
+    async def save_whisper_history(self, guild_id: int, thread_id: str, messages: list) -> bool:
+        """Save the history of a whisper thread"""
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            if not whispers:
+                return False
+
+            if 'saved_threads' not in whispers:
+                whispers['saved_threads'] = {}
+
+            whispers['saved_threads'][thread_id] = {
+                'messages': messages,
+                'saved_at': datetime.utcnow().isoformat()
+            }
+
+            await self.set_section(guild_id, 'whispers', whispers)
+            return True
+
+        except Exception as e:
+            print(f"Error saving whisper history: {e}")
+            return False
+
+    async def delete_whisper(self, guild_id: int, thread_id: str) -> bool:
+        """Completely remove a whisper from the database"""
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            if not whispers:
+                return False
+
+            # Remove from active threads
+            if 'active_threads' in whispers:
+                whispers['active_threads'] = [w for w in whispers['active_threads'] if w['thread_id'] != thread_id]
+
+            # Remove from closed threads
+            if 'closed_threads' in whispers:
+                whispers['closed_threads'] = [w for w in whispers['closed_threads'] if w['thread_id'] != thread_id]
+
+            # Remove saved history unless explicitly saved
+            if 'saved_threads' in whispers and thread_id in whispers['saved_threads']:
+                del whispers['saved_threads'][thread_id]
+
+            await self.set_section(guild_id, 'whispers', whispers)
+            return True
+
+        except Exception as e:
+            print(f"Error deleting whisper: {e}")
+            return False
+
     # Whisper System Methods
     async def update_whisper_config(self, guild_id: int, setting: str, value: Any) -> bool:
         """Update whisper system configuration"""

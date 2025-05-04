@@ -437,3 +437,253 @@ class UIManager:
                     await self.message.edit(view=None)
                 except:
                     pass
+
+    class WhisperControlsView(discord.ui.View):
+        def __init__(self, bot):
+            super().__init__(timeout=None)  # Persistent buttons
+            self.bot = bot
+
+        @discord.ui.button(label="Unlock Thread", style=discord.ButtonStyle.success, emoji="🔓")
+        async def unlock_thread(self, interaction: discord.Interaction, button: discord.ui.Button):
+            try:
+                if not interaction.user.guild_permissions.manage_threads:
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.error_embed(
+                            "Unauthorized",
+                            "You need manage threads permission to unlock whispers"
+                        ),
+                        ephemeral=True
+                    )
+                    return
+
+                await interaction.response.defer()
+
+                # Unarchive and unlock the thread
+                await interaction.channel.edit(archived=False, locked=False)
+                
+                # Update database
+                await self.bot.db_manager.reopen_whisper(interaction.guild_id, str(interaction.channel.id))
+
+                # Send notification
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.success_embed(
+                        "Thread Unlocked",
+                        f"Thread reopened by {interaction.user.mention}"
+                    )
+                )
+
+                # Log if enabled
+                log_config = await self.bot.db_manager.get_logging_config(interaction.guild_id)
+                if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
+                    log_channel = interaction.guild.get_channel(int(log_config['log_channel']))
+                    if log_channel:
+                        embed = self.bot.ui_manager.log_embed(
+                            "Whisper Reopened",
+                            f"Whisper thread reopened by {interaction.user.mention}",
+                            interaction.user
+                        )
+                        embed.add_field(name="Thread", value=interaction.channel.mention)
+                        await log_channel.send(embed=embed)
+
+            except Exception as e:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                    ephemeral=True
+                )
+
+        @discord.ui.button(label="Delete Thread", style=discord.ButtonStyle.danger, emoji="🗑️")
+        async def delete_thread(self, interaction: discord.Interaction, button: discord.ui.Button):
+            try:
+                if not interaction.user.guild_permissions.manage_threads:
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.error_embed(
+                            "Unauthorized",
+                            "You need manage threads permission to delete whispers"
+                        ),
+                        ephemeral=True
+                    )
+                    return
+
+                await interaction.response.defer()
+
+                # Log deletion first since we'll lose access to channel data
+                log_config = await self.bot.db_manager.get_logging_config(interaction.guild_id)
+                if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
+                    log_channel = interaction.guild.get_channel(int(log_config['log_channel']))
+                    if log_channel:
+                        embed = self.bot.ui_manager.log_embed(
+                            "Whisper Deleted",
+                            f"Whisper thread deleted by {interaction.user.mention}",
+                            interaction.user
+                        )
+                        embed.add_field(name="Thread", value=f"#{interaction.channel.name}")
+                        await log_channel.send(embed=embed)
+
+                # Delete from database and Discord
+                await self.bot.db_manager.delete_whisper(interaction.guild_id, str(interaction.channel.id))
+                await interaction.channel.delete()
+
+            except Exception as e:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                    ephemeral=True
+                )
+
+        @discord.ui.button(label="Save Thread", style=discord.ButtonStyle.primary, emoji="💾")
+        async def save_thread(self, interaction: discord.Interaction, button: discord.ui.Button):
+            try:
+                if not interaction.user.guild_permissions.manage_threads:
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.error_embed(
+                            "Unauthorized",
+                            "You need manage threads permission to save whispers"
+                        ),
+                        ephemeral=True
+                    )
+                    return
+
+                await interaction.response.defer()
+
+                # Save thread history
+                messages = []
+                async for message in interaction.channel.history(limit=None, oldest_first=True):
+                    messages.append({
+                        'author': str(message.author),
+                        'content': message.content,
+                        'timestamp': message.created_at.isoformat(),
+                        'attachments': [a.url for a in message.attachments]
+                    })
+
+                # Store in database
+                await self.bot.db_manager.save_whisper_history(
+                    interaction.guild_id,
+                    str(interaction.channel.id),
+                    messages
+                )
+
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.success_embed(
+                        "Thread Saved",
+                        f"Thread history has been saved and will be retained"
+                    ),
+                    ephemeral=True
+                )
+
+                # Log if enabled
+                log_config = await self.bot.db_manager.get_logging_config(interaction.guild_id)
+                if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
+                    log_channel = interaction.guild.get_channel(int(log_config['log_channel']))
+                    if log_channel:
+                        embed = self.bot.ui_manager.log_embed(
+                            "Whisper Saved",
+                            f"Whisper thread history saved by {interaction.user.mention}",
+                            interaction.user
+                        )
+                        embed.add_field(name="Thread", value=interaction.channel.mention)
+                        await log_channel.send(embed=embed)
+
+            except Exception as e:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                    ephemeral=True
+                )
+
+    class WhisperCloseView(discord.ui.View):
+        def __init__(self, bot):
+            super().__init__(timeout=None)  # Persistent button
+            self.bot = bot
+
+        @discord.ui.button(label="Close Whisper", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="close_whisper")
+        async def close_whisper(self, interaction: discord.Interaction, button: discord.ui.Button):
+            try:
+                # Verify this is a thread and the user can close it
+                if not isinstance(interaction.channel, discord.Thread):
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.error_embed(
+                            "Error",
+                            "This command can only be used in a whisper thread"
+                        ),
+                        ephemeral=True
+                    )
+                    return
+
+                # Get whisper data
+                whispers = await self.bot.db_manager.get_active_whispers(interaction.guild_id)
+                whisper = next((w for w in whispers if int(w['thread_id']) == interaction.channel.id), None)
+
+                if not whisper:
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.error_embed(
+                            "Error",
+                            "This is not an active whisper thread"
+                        ),
+                        ephemeral=True
+                    )
+                    return
+
+                # Check if user can close the thread
+                if str(interaction.user.id) != whisper['user_id'] and not interaction.user.guild_permissions.manage_threads:
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.error_embed(
+                            "Unauthorized",
+                            "You cannot close this whisper thread"
+                        ),
+                        ephemeral=True
+                    )
+                    return
+
+                # Show confirmation dialog
+                confirmed = await self.bot.ui_manager.confirm_action(
+                    interaction,
+                    "Close Whisper",
+                    "Are you sure you want to close this whisper thread?",
+                    confirm_label="Close",
+                    cancel_label="Cancel",
+                    ephemeral=True
+                )
+
+                if not confirmed:
+                    return
+
+                await interaction.channel.send(
+                    embed=self.bot.ui_manager.warning_embed(
+                        "Thread Closing",
+                        f"Thread manually closed by {interaction.user.mention}"
+                    )
+                )
+
+                # Archive and lock the thread
+                await interaction.channel.edit(archived=True, locked=True)
+
+                # Mark as closed in DB
+                await self.bot.db_manager.close_whisper(interaction.guild_id, str(interaction.channel.id))
+
+                # Send staff controls panel
+                embed = self.bot.ui_manager.info_embed(
+                    "Support Team Whisper Controls",
+                    "Use these controls to manage the closed whisper thread:"
+                )
+                controls_view = self.bot.ui_manager.WhisperControlsView(self.bot)
+                await interaction.channel.send(embed=embed, view=controls_view)
+
+                # Log whisper closure if logging is enabled
+                log_config = await self.bot.db_manager.get_logging_config(interaction.guild_id)
+                if log_config.get('logging_enabled', False) and log_config.get('log_channel'):
+                    log_channel = interaction.guild.get_channel(int(log_config['log_channel']))
+                    if log_channel:
+                        embed = self.bot.ui_manager.log_embed(
+                            "Whisper Closed",
+                            f"Whisper thread closed by {interaction.user.mention}",
+                            interaction.user
+                        )
+                        embed.add_field(name="Thread", value=interaction.channel.mention)
+                        await log_channel.send(embed=embed)
+
+            except Exception as e:
+                try:
+                    await interaction.followup.send(
+                        embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                        ephemeral=True
+                    )
+                except:
+                    pass
