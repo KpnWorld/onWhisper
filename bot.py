@@ -69,23 +69,30 @@ class Bot(commands.Bot):
             # Sync commands directly from cogs
             print("Registering commands in bot's profile...")
             try:
-                print("Syncing commands...")
-                await self.tree.sync()
-                print("✅ Commands registered and synced")
+                # First sync to guild for testing
+                try:
+                    guild_commands = await self.tree.sync(guild=discord.Object(id=int(os.getenv('TEST_GUILD_ID'))))
+                    print(f"✅ Synced {len(guild_commands)} commands to test guild")
+                except Exception as e:
+                    print(f"⚠️ Guild sync failed: {e}")
                 
+                # Then sync globally
+                print("Syncing commands globally...")
+                commands = await self.tree.sync()
+                print(f"✅ Synced {len(commands)} commands globally")
+
+                # Start background tasks
+                self.bg_tasks.append(self.loop.create_task(self._periodic_db_cleanup()))
+                self.bg_tasks.append(self.loop.create_task(self._periodic_db_optimize()))
+                self.bg_tasks.append(self.loop.create_task(self._periodic_db_health_check()))
+
             except Exception as e:
                 print(f"❌ Failed to sync commands: {e}")
                 raise
 
-            # Start background tasks
-            self.bg_tasks.append(self.loop.create_task(self._periodic_db_cleanup()))
-            self.bg_tasks.append(self.loop.create_task(self._periodic_db_optimize()))
-            self.bg_tasks.append(self.loop.create_task(self._periodic_db_health_check()))
-
         except Exception as e:
             print(f"❌ Critical setup error: {e}")
-            await self.close()
-            return
+            raise
 
     async def _periodic_db_health_check(self):
         """Periodically check database health"""

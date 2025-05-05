@@ -8,7 +8,7 @@ class RolesCog(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
-    
+
     async def _can_manage_role(self, guild: discord.Guild, role: discord.Role) -> bool:
         """Check if the bot can manage a role"""
         bot_member = guild.me
@@ -61,14 +61,14 @@ class RolesCog(commands.Cog):
         except discord.Forbidden:
             return False
 
-    # Role management command group
-    roles_group = app_commands.Group(
+    # Main roles group
+    roles = app_commands.Group(
         name="roles",
         description="Manage server roles",
         default_permissions=discord.Permissions(manage_roles=True)
     )
 
-    @roles_group.command(
+    @roles.command(
         name="color",
         description="Set or clear your color role"
     )
@@ -89,36 +89,35 @@ class RolesCog(commands.Cog):
         """Set or clear your color role"""
         try:
             if action == "set" and not role:
-                raise ValueError("Role is required when setting a color")
+                raise ValueError("Please specify a role when setting a color")
 
             # Get configured color roles
             color_roles = await self.bot.db_manager.get_color_roles(interaction.guild_id)
-
+            
             if action == "set":
                 if str(role.id) not in color_roles:
-                    raise ValueError(f"{role.mention} is not a configured color role")
-
-                success = await self._update_user_color_role(interaction.user, role)
+                    raise ValueError("That role is not configured as a color role")
+                    
+                # Update user's color role
+                success = await self._update_user_color_role(interaction.member, role)
                 if success:
                     await interaction.response.send_message(
                         embed=self.bot.ui_manager.success_embed(
                             "Color Role Set",
                             f"Your color has been set to {role.mention}"
-                        ),
-                        ephemeral=True
+                        )
                     )
                 else:
                     raise commands.CommandError("Failed to update color role")
 
             else:  # clear
-                success = await self._update_user_color_role(interaction.user)
+                success = await self._update_user_color_role(interaction.member)
                 if success:
                     await interaction.response.send_message(
                         embed=self.bot.ui_manager.success_embed(
-                            "Color Role Cleared",
+                            "Color Cleared",
                             "Your color role has been removed"
-                        ),
-                        ephemeral=True
+                        )
                     )
                 else:
                     raise commands.CommandError("Failed to clear color role")
@@ -139,16 +138,8 @@ class RolesCog(commands.Cog):
                 ),
                 ephemeral=True
             )
-        except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed(
-                    "Error",
-                    str(e)
-                ),
-                ephemeral=True
-            )
 
-    @roles_group.command(
+    @roles.command(
         name="manage",
         description="Manage server roles"
     )
@@ -185,37 +176,29 @@ class RolesCog(commands.Cog):
                 raise commands.MissingPermissions(["manage_roles"])
 
             if action in ["auto_set", "add", "remove", "react_bind"] and not role:
-                raise ValueError("Role is required for this action")
+                raise ValueError("Please specify a role for this action")
 
             if action in ["add", "remove"] and not users:
-                raise ValueError("Users parameter is required for adding/removing roles")
+                raise ValueError("Please specify users for this action")
 
             if action == "react_bind" and (not message_id or not emoji):
-                raise ValueError("Message ID and emoji are required for reaction role binding")
+                raise ValueError("Please specify both message ID and emoji for reaction roles")
 
             # Auto-role actions
             if action == "auto_set":
                 if not await self._can_manage_role(interaction.guild, role):
-                    raise commands.CommandError("I don't have permission to manage that role")
-
-                await self.bot.db_manager.update_guild_data(interaction.guild_id, 'autorole', {
-                    'role_id': str(role.id),
-                    'enabled': True
-                })
-                
+                    raise commands.CommandError("I cannot manage that role")
+                    
+                await self.bot.db_manager.update_auto_role(interaction.guild_id, role.id)
                 await interaction.response.send_message(
                     embed=self.bot.ui_manager.success_embed(
-                        "Auto-Role Configured",
+                        "Auto-Role Set",
                         f"New members will automatically receive the {role.mention} role"
                     )
                 )
 
             elif action == "auto_disable":
-                await self.bot.db_manager.update_guild_data(interaction.guild_id, 'autorole', {
-                    'role_id': None,
-                    'enabled': False
-                })
-                
+                await self.bot.db_manager.update_auto_role(interaction.guild_id, None)
                 await interaction.response.send_message(
                     embed=self.bot.ui_manager.success_embed(
                         "Auto-Role Disabled",
@@ -223,172 +206,163 @@ class RolesCog(commands.Cog):
                     )
                 )
 
-            # Bulk role management
             elif action in ["add", "remove"]:
-                if not await self._can_manage_role(interaction.guild, role):
-                    raise commands.CommandError("I don't have permission to manage that role")
-
                 # Parse user mentions/IDs
-                processed = []
+                user_ids = [uid.strip() for uid in users.split() if uid.strip()]
+                members = []
+                
+                for uid in user_ids:
+                    try:
+                        if uid.startswith('<@') and uid.endswith('>'):
+                            uid = uid[2:-1]
+                        if uid.startswith('!'):
+                            uid = uid[1:]
+                        member = interaction.guild.get_member(int(uid))
+                        if member:
+                            members.append(member)
+                    except ValueError:
+                        continue
+
+                if not members:
+                    raise ValueError("No valid members found")
+
+                if not await self._can_manage_role(interaction.guild, role):
+                    raise commands.CommandError("I cannot manage that role")
+
+                # Start bulk role update
+                success = []
                 failed = []
                 
-                for user_id in users.split():
-                    try:
-                        # Clean up mentions
-                        user_id = user_id.strip("<@!>")
-                        member = interaction.guild.get_member(int(user_id))
-                        
-                        if not member:
-                            failed.append(user_id)
-                            continue
-                            
-                        success = await self._handle_bulk_role_update(member, role, action)
-                        if success:
-                            processed.append(member.mention)
-                        else:
-                            failed.append(member.mention)
-                            
-                    except ValueError:
-                        failed.append(user_id)
+                for member in members:
+                    if await self._handle_bulk_role_update(member, role, action):
+                        success.append(member.mention)
+                    else:
+                        failed.append(member.mention)
 
-                # Build response message
-                embed = discord.Embed(
-                    title="Role Update Complete",
-                    color=discord.Color.green() if processed else discord.Color.red()
+                # Create result message
+                action_text = "added to" if action == "add" else "removed from"
+                embed = self.bot.ui_manager.info_embed(
+                    "Bulk Role Update",
+                    f"Role {role.mention} {action_text}:"
                 )
                 
-                if processed:
+                if success:
                     embed.add_field(
                         name="Success",
-                        value=f"{'Added' if action == 'add' else 'Removed'} {role.mention} {'to' if action == 'add' else 'from'}:\n" + "\n".join(processed[:10]) + ("..." if len(processed) > 10 else ""),
+                        value=", ".join(success[:10]) + ("..." if len(success) > 10 else ""),
                         inline=False
                     )
-                    
                 if failed:
                     embed.add_field(
                         name="Failed",
-                        value="Could not process:\n" + "\n".join(failed[:10]) + ("..." if len(failed) > 10 else ""),
+                        value=", ".join(failed[:10]) + ("..." if len(failed) > 10 else ""),
                         inline=False
                     )
-                
+
                 await interaction.response.send_message(embed=embed)
 
-            # Reaction role management
             elif action == "react_bind":
-                if not await self._can_manage_role(interaction.guild, role):
-                    raise commands.CommandError("I don't have permission to manage that role")
-
-                # Find the message
                 try:
-                    if channel:
-                        message = await channel.fetch_message(int(message_id))
-                    else:
-                        # Try all channels if none specified
-                        message = None
-                        for ch in interaction.guild.text_channels:
-                            try:
-                                message = await ch.fetch_message(int(message_id))
-                                if message:
-                                    break
-                            except:
-                                continue
+                    target_message = None
+                    for channel in interaction.guild.text_channels:
+                        try:
+                            target_message = await channel.fetch_message(int(message_id))
+                            if target_message:
+                                break
+                        except:
+                            continue
+                            
+                    if not target_message:
+                        raise ValueError("Could not find the specified message")
                         
-                        if not message:
-                            raise ValueError("Message not found")
-                except:
-                    raise ValueError("Message not found")
-
-                # Add reaction
-                try:
-                    await message.add_reaction(emoji)
-                except:
-                    raise ValueError("Invalid emoji")
-
-                # Store binding
-                reaction_roles = await self.bot.db_manager.get_section(interaction.guild_id, 'reaction_roles') or {}
-                if str(message.id) not in reaction_roles:
-                    reaction_roles[str(message.id)] = {}
-                reaction_roles[str(message.id)][emoji] = str(role.id)
-                
-                await self.bot.db_manager.update_guild_data(interaction.guild_id, 'reaction_roles', reaction_roles)
-                
-                await interaction.response.send_message(
-                    embed=self.bot.ui_manager.success_embed(
-                        "Reaction Role Bound",
-                        f"Users who react with {emoji} will receive the {role.mention} role"
-                    )
-                )
-
-            elif action == "react_unbind":
-                if not message_id:
-                    raise ValueError("Message ID is required")
-
-                reaction_roles = await self.bot.db_manager.get_section(interaction.guild_id, 'reaction_roles') or {}
-                
-                if str(message_id) in reaction_roles:
-                    # Try to remove reactions
+                    # Validate emoji
                     try:
-                        if channel:
-                            message = await channel.fetch_message(int(message_id))
-                        else:
-                            message = None
-                            for ch in interaction.guild.text_channels:
-                                try:
-                                    message = await ch.fetch_message(int(message_id))
-                                    if message:
-                                        break
-                                except:
-                                    continue
+                        await target_message.add_reaction(emoji)
+                    except discord.errors.HTTPException:
+                        raise ValueError("Invalid emoji")
                         
-                        if message:
-                            await message.clear_reactions()
-                    except:
-                        pass  # Message might be deleted
-
-                    del reaction_roles[str(message_id)]
-                    await self.bot.db_manager.update_guild_data(interaction.guild_id, 'reaction_roles', reaction_roles)
+                    if not await self._can_manage_role(interaction.guild, role):
+                        raise commands.CommandError("I cannot manage that role")
+                        
+                    await self.bot.db_manager.update_reaction_roles(
+                        interaction.guild_id,
+                        int(message_id),
+                        emoji,
+                        role.id
+                    )
                     
                     await interaction.response.send_message(
                         embed=self.bot.ui_manager.success_embed(
-                            "Reaction Roles Unbound",
-                            "All reaction roles have been removed from the message"
+                            "Reaction Role Created",
+                            f"Users who react with {emoji} will receive {role.mention}"
+                        )
+                    )
+                except ValueError as e:
+                    raise commands.CommandError(str(e))
+
+            elif action == "react_unbind":
+                if not message_id:
+                    # Remove all reaction roles
+                    await self.bot.db_manager.update_guild_data(interaction.guild_id, 'reaction_roles', {})
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.success_embed(
+                            "Reaction Roles Cleared",
+                            "All reaction roles have been removed"
                         )
                     )
                 else:
-                    raise ValueError("No reaction roles found for that message")
+                    # Remove specific message's reaction roles
+                    reaction_roles = await self.bot.db_manager.get_reaction_roles(interaction.guild_id)
+                    if message_id in reaction_roles:
+                        del reaction_roles[message_id]
+                        await self.bot.db_manager.update_guild_data(
+                            interaction.guild_id,
+                            'reaction_roles',
+                            reaction_roles
+                        )
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.success_embed(
+                            "Reaction Roles Removed",
+                            f"Removed all reaction roles from message {message_id}"
+                        )
+                    )
 
             elif action == "react_list":
-                reaction_roles = await self.bot.db_manager.get_section(interaction.guild_id, 'reaction_roles') or {}
-                
+                reaction_roles = await self.bot.db_manager.get_reaction_roles(interaction.guild_id)
                 if not reaction_roles:
                     await interaction.response.send_message(
                         embed=self.bot.ui_manager.info_embed(
                             "Reaction Roles",
-                            "No reaction roles have been configured"
+                            "No reaction roles are configured"
                         )
                     )
                     return
 
-                embed = discord.Embed(
-                    title="Reaction Roles",
-                    color=discord.Color.blue()
-                )
-                
+                # Create pages for each message's reaction roles
+                pages = []
                 for msg_id, bindings in reaction_roles.items():
-                    value = []
+                    desc = []
                     for emoji, role_id in bindings.items():
                         role = interaction.guild.get_role(int(role_id))
                         if role:
-                            value.append(f"{emoji} → {role.mention}")
-                    
-                    if value:
-                        embed.add_field(
-                            name=f"Message: {msg_id}",
-                            value="\n".join(value),
-                            inline=False
+                            desc.append(f"{emoji} → {role.mention}")
+                            
+                    if desc:
+                        embed = self.bot.ui_manager.info_embed(
+                            f"Reaction Roles - Message {msg_id}",
+                            "\n".join(desc)
                         )
-                
-                await interaction.response.send_message(embed=embed)
+                        pages.append(embed)
+
+                if pages:
+                    await self.bot.ui_manager.paginate(interaction, pages)
+                else:
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.info_embed(
+                            "Reaction Roles",
+                            "No active reaction roles found"
+                        )
+                    )
 
         except commands.MissingPermissions:
             await interaction.response.send_message(
@@ -406,14 +380,6 @@ class RolesCog(commands.Cog):
                 ),
                 ephemeral=True
             )
-        except commands.CommandError as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed(
-                    "Error",
-                    str(e)
-                ),
-                ephemeral=True
-            )
         except Exception as e:
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.error_embed(
@@ -427,18 +393,13 @@ class RolesCog(commands.Cog):
     async def on_member_join(self, member: discord.Member):
         """Handle giving auto-role to new members"""
         try:
-            config = await self.bot.db_manager.get_auto_role(member.guild.id)
-            if not config or not config[1]:  # Not configured or disabled
-                return
-
-            role = member.guild.get_role(config[0])
-            if not role:
-                return
-
-            await member.add_roles(role)
-
+            auto_role_id, enabled = await self.bot.db_manager.get_auto_role(member.guild.id)
+            if enabled and auto_role_id:
+                role = member.guild.get_role(auto_role_id)
+                if role:
+                    await member.add_roles(role)
         except Exception as e:
-            print(f"Error giving auto-role: {e}")
+            print(f"Error applying auto-role: {e}")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -447,50 +408,30 @@ class RolesCog(commands.Cog):
             return
 
         try:
-            reaction_roles = await self.bot.db_manager.get_section(payload.guild_id, 'reaction_roles') or {}
+            # Get reaction role bindings
+            reaction_roles = await self.bot.db_manager.get_reaction_roles(
+                payload.guild_id,
+                str(payload.message_id)
+            )
             
-            if str(payload.message_id) in reaction_roles:
-                bindings = reaction_roles[str(payload.message_id)]
-                emoji = str(payload.emoji)
+            if not reaction_roles:
+                return
                 
-                if emoji in bindings:
-                    guild = self.bot.get_guild(payload.guild_id)
-                    if not guild:
-                        return
-
-                    role = guild.get_role(int(bindings[emoji]))
-                    if not role:
-                        # Role was deleted - clean up the binding
-                        del bindings[emoji]
-                        if not bindings:
-                            del reaction_roles[str(payload.message_id)]
-                        await self.bot.db_manager.update_guild_data(payload.guild_id, 'reaction_roles', reaction_roles)
-                        return
-
-                    member = guild.get_member(payload.user_id)
-                    if not member:
-                        return
-
-                    # Check if we can manage this role
-                    if not await self._can_manage_role(guild, role):
-                        # Remove the reaction since we can't manage the role
-                        channel = guild.get_channel(payload.channel_id)
-                        if channel:
-                            message = await channel.fetch_message(payload.message_id)
-                            if message:
-                                await message.remove_reaction(payload.emoji, member)
-                        return
-
-                    try:
-                        await member.add_roles(role)
-                    except discord.Forbidden:
-                        # Remove the reaction if we don't have permission
-                        channel = guild.get_channel(payload.channel_id)
-                        if channel:
-                            message = await channel.fetch_message(payload.message_id)
-                            if message:
-                                await message.remove_reaction(payload.emoji, member)
-
+            # Check if this reaction has a role binding
+            role_id = reaction_roles.get(str(payload.emoji))
+            if not role_id:
+                return
+                
+            guild = self.bot.get_guild(payload.guild_id)
+            if not guild:
+                return
+                
+            role = guild.get_role(int(role_id))
+            member = guild.get_member(payload.user_id)
+            
+            if role and member:
+                await member.add_roles(role)
+                
         except Exception as e:
             print(f"Error handling reaction role: {e}")
 
@@ -501,39 +442,30 @@ class RolesCog(commands.Cog):
             return
 
         try:
-            reaction_roles = await self.bot.db_manager.get_section(payload.guild_id, 'reaction_roles') or {}
+            # Get reaction role bindings
+            reaction_roles = await self.bot.db_manager.get_reaction_roles(
+                payload.guild_id,
+                str(payload.message_id)
+            )
             
-            if str(payload.message_id) in reaction_roles:
-                bindings = reaction_roles[str(payload.message_id)]
-                emoji = str(payload.emoji)
+            if not reaction_roles:
+                return
                 
-                if emoji in bindings:
-                    guild = self.bot.get_guild(payload.guild_id)
-                    if not guild:
-                        return
-
-                    role = guild.get_role(int(bindings[emoji]))
-                    if not role:
-                        # Role was deleted - clean up the binding
-                        del bindings[emoji]
-                        if not bindings:
-                            del reaction_roles[str(payload.message_id)]
-                        await self.bot.db_manager.update_guild_data(payload.guild_id, 'reaction_roles', reaction_roles)
-                        return
-
-                    member = guild.get_member(payload.user_id)
-                    if not member:
-                        return
-
-                    # Check if we can manage this role before trying to remove it
-                    if not await self._can_manage_role(guild, role):
-                        return
-
-                    try:
-                        await member.remove_roles(role)
-                    except discord.Forbidden:
-                        pass  # We already checked permissions, but handle any race conditions
-
+            # Check if this reaction has a role binding
+            role_id = reaction_roles.get(str(payload.emoji))
+            if not role_id:
+                return
+                
+            guild = self.bot.get_guild(payload.guild_id)
+            if not guild:
+                return
+                
+            role = guild.get_role(int(role_id))
+            member = guild.get_member(payload.user_id)
+            
+            if role and member:
+                await member.remove_roles(role)
+                
         except Exception as e:
             print(f"Error handling reaction role removal: {e}")
 

@@ -8,17 +8,46 @@ class ConfigurationCog(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
-
-    # Configuration command groups
+    
+    # Main configuration group
     config = app_commands.Group(
         name="config",
         description="Configure server settings",
         default_permissions=discord.Permissions(administrator=True)
     )
 
+    # Logging subgroup
     logs = app_commands.Group(
         name="logs",
         description="Configure logging settings",
+        parent=config
+    )
+
+    # Whisper subgroup
+    whisper = app_commands.Group(
+        name="whisper",
+        description="Configure whisper system settings",
+        parent=config
+    )
+
+    # XP subgroup
+    xp = app_commands.Group(
+        name="xp",
+        description="Configure XP system settings",
+        parent=config
+    )
+
+    # Level rewards subgroup
+    level = app_commands.Group(
+        name="level",
+        description="Configure level-up rewards",
+        parent=config
+    )
+
+    # Color roles subgroup
+    colors = app_commands.Group(
+        name="colors",
+        description="Configure color roles",
         parent=config
     )
 
@@ -155,13 +184,6 @@ class ConfigurationCog(commands.Cog):
                 ),
                 ephemeral=True
             )
-
-    # Whisper configuration group
-    whisper = app_commands.Group(
-        name="whisper",
-        description="Configure whisper system settings",
-        parent=config
-    )
 
     @whisper.command(
         name="channel",
@@ -427,13 +449,6 @@ class ConfigurationCog(commands.Cog):
                 ephemeral=True
             )
 
-    # XP system configuration group
-    xp = app_commands.Group(
-        name="xp",
-        description="Configure XP system settings",
-        parent=config
-    )
-
     @xp.command(
         name="rate",
         description="Set the XP gain rate"
@@ -582,13 +597,6 @@ class ConfigurationCog(commands.Cog):
                 ),
                 ephemeral=True
             )
-
-    # Level rewards configuration group  
-    level = app_commands.Group(
-        name="level",
-        description="Configure level-up rewards",
-        parent=config
-    )
 
     @level.command(
         name="add",
@@ -747,13 +755,6 @@ class ConfigurationCog(commands.Cog):
                 ),
                 ephemeral=True
             )
-
-    # Color roles configuration group
-    colors = app_commands.Group(
-        name="colors",
-        description="Configure color roles",
-        parent=config
-    )
 
     @colors.command(
         name="add",
