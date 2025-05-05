@@ -452,12 +452,48 @@ class WhisperCog(commands.Cog):
                 ephemeral=True
             )
 
+    @app_commands.command(
+        name="support-controls",
+        description="Support team controls for managing whisper threads"
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def support_controls(self, interaction: discord.Interaction):
+        """Support team controls for managing whisper threads"""
+        if not isinstance(interaction.channel, discord.Thread):
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    "This command can only be used in a thread"
+                ),
+                ephemeral=True
+            )
+            return
+
+        whisper = await self.bot.db_manager.get_whisper(interaction.guild_id, str(interaction.channel.id))
+        if not whisper:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    "This is not a whisper thread"
+                ),
+                ephemeral=True
+            )
+            return
+
+        # Create support controls UI
+        embed = self.bot.ui_manager.info_embed(
+            "Support Team Controls",
+            "Use these controls to manage the whisper thread"
+        )
+        controls_view = self.bot.ui_manager.WhisperControlsView(self.bot)
+        await interaction.response.send_message(embed=embed, view=controls_view)
+
     @commands.hybrid_command(
-        name="whisper",
+        name="anonymous-whisper",
         description="Start an anonymous thread in the current channel"
     )
     @commands.guild_only()
-    async def whisper(
+    async def anonymous_whisper(
         self, 
         ctx: commands.Context, 
         *, 
@@ -542,34 +578,6 @@ class WhisperCog(commands.Cog):
             ephemeral=True,
             delete_after=10
         )
-
-    @discord.slash_command(name="support-controls")
-    @commands.has_permissions(administrator=True)
-    async def support_controls(self, ctx):
-        """Support team controls for managing whisper threads"""
-        if not isinstance(ctx.channel, discord.Thread):
-            await ctx.respond(
-                embed=self.bot.ui_manager.error_embed(
-                    "Error",
-                    "This command can only be used in a thread"
-                ),
-                ephemeral=True
-            )
-            return
-
-        whisper = await self.bot.db_manager.get_whisper(ctx.guild.id, str(ctx.channel.id))
-        if not whisper:
-            await ctx.respond(
-                embed=self.bot.ui_manager.error_embed(
-                    "Error",
-                    "This is not a whisper thread"
-                ),
-                ephemeral=True
-            )
-            return
-
-        # Create support controls UI
-        # ... rest of support controls implementation ...
 
     @commands.Cog.listener()
     async def on_message(self, message):
