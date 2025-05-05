@@ -39,39 +39,6 @@ class Bot(commands.Bot):
         self.start_time = datetime.utcnow()
         self.bg_tasks = []  # Track background tasks
 
-        # Define commands that will show in the bot's profile
-        self.commands_object = {
-            "info": {
-                "name": "info",
-                "description": "Get information about various aspects of the server and bot",
-                "options": [{
-                    "name": "type",
-                    "description": "The type of information to view",
-                    "type": 3,
-                    "required": True,
-                    "choices": [
-                        {"name": "Help Menu", "value": "help"},
-                        {"name": "User Info", "value": "user"},
-                        {"name": "Server Info", "value": "server"},
-                        {"name": "Bot Info", "value": "bot"},
-                        {"name": "Role Info", "value": "role"},
-                        {"name": "Uptime", "value": "uptime"}
-                    ]
-                }]
-            },
-            "whisper": {
-                "name": "whisper",
-                "description": "Create or manage whisper threads",
-                "dm_permission": False
-            },
-            "config": {
-                "name": "config",
-                "description": "Configure various bot settings and features",
-                "dm_permission": False,
-                "default_member_permissions": "32"  # Requires MANAGE_SERVER permission
-            }
-        }
-
     async def setup_hook(self):
         """This is called when the bot starts, sets up the database and loads cogs"""
         # Initialize database
@@ -99,55 +66,11 @@ class Bot(commands.Bot):
                     except Exception as e:
                         print(f"❌ Failed to load {filename}: {e}")
 
-            # Register commands to show in bot's profile
+            # Sync commands from cogs
             print("Registering commands in bot's profile...")
             try:
                 # Clear existing commands first
                 self.tree.clear_commands(guild=None)
-                
-                # Add global commands from commands_object
-                for cmd_name, cmd_data in self.commands_object.items():
-                    async def cmd_callback(interaction: discord.Interaction, **kwargs):
-                        # Commands are handled by their respective cogs
-                        pass
-                    
-                    cmd = app_commands.Command(
-                        name=cmd_data["name"],
-                        description=cmd_data["description"],
-                        callback=cmd_callback
-                    )
-                    
-                    # Set DM permission
-                    cmd.dm_permission = cmd_data.get("dm_permission", True)
-                    
-                    # Set default permissions if specified
-                    if "default_member_permissions" in cmd_data:
-                        cmd.default_permissions = discord.Permissions(
-                            permissions=int(cmd_data["default_member_permissions"])
-                        )
-                    
-                    # Add options/parameters
-                    if "options" in cmd_data:
-                        for opt in cmd_data["options"]:
-                            # Create parameter
-                            param = app_commands.Parameter(
-                                name=opt["name"],
-                                description=opt.get("description", "No description"),
-                                type=discord.AppCommandOptionType(opt["type"]),
-                                required=opt.get("required", False)
-                            )
-                            
-                            # Add choices if they exist
-                            if "choices" in opt:
-                                param.choices = [
-                                    app_commands.Choice(name=c["name"], value=c["value"])
-                                    for c in opt["choices"]
-                                ]
-                            
-                            # Add parameter to command
-                            cmd._params[param.name] = param
-                    
-                    self.tree.add_command(cmd)
                 
                 # Sync commands
                 print("Syncing commands...")
