@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 import os
 import random
@@ -36,6 +37,7 @@ class Bot(commands.Bot):
         self._rate_limit_retries = 0
         self._session_valid = True
         self.start_time = datetime.utcnow()
+        self.bg_tasks = []  # Track background tasks
 
         # Define commands that will show in the bot's profile
         self.commands_object = {
@@ -100,65 +102,71 @@ class Bot(commands.Bot):
             # Register commands to show in bot's profile
             print("Registering commands in bot's profile...")
             try:
+                # Clear existing commands first
+                self.tree.clear_commands(guild=None)
+                
+                # Add global commands from commands_object
                 for cmd_name, cmd_data in self.commands_object.items():
-                    @discord.app_commands.command(
-                        name=cmd_data["name"],
-                        description=cmd_data["description"]
-                    )
-                    async def cmd_callback(interaction: discord.Interaction):
-                        # This is just a placeholder - actual commands are handled by cogs
+                    async def cmd_callback(interaction: discord.Interaction, **kwargs):
+                        # Commands are handled by their respective cogs
                         pass
-
-                    command = discord.app_commands.Command(
+                    
+                    cmd = app_commands.Command(
                         name=cmd_data["name"],
                         description=cmd_data["description"],
-                        callback=cmd_callback,
+                        callback=cmd_callback
                     )
                     
-                    # Set permissions if specified
+                    # Set DM permission
+                    cmd.dm_permission = cmd_data.get("dm_permission", True)
+                    
+                    # Set default permissions if specified
                     if "default_member_permissions" in cmd_data:
-                        command.default_permissions = discord.Permissions(
+                        cmd.default_permissions = discord.Permissions(
                             permissions=int(cmd_data["default_member_permissions"])
                         )
                     
-                    # Set DM permission if specified
-                    if "dm_permission" in cmd_data:
-                        command.dm_permission = cmd_data["dm_permission"]
-                    
-                    # Add options if they exist
+                    # Add options/parameters
                     if "options" in cmd_data:
-                        for option in cmd_data["options"]:
-                            param = discord.app_commands.Parameter(
-                                name=option["name"],
-                                description=option["description"],
-                                type=discord.AppCommandOptionType(option["type"]),
-                                required=option.get("required", False)
+                        for opt in cmd_data["options"]:
+                            # Create parameter
+                            param = app_commands.Parameter(
+                                name=opt["name"],
+                                description=opt.get("description", "No description"),
+                                type=discord.AppCommandOptionType(opt["type"]),
+                                required=opt.get("required", False)
                             )
-                            if "choices" in option:
+                            
+                            # Add choices if they exist
+                            if "choices" in opt:
                                 param.choices = [
-                                    discord.app_commands.Choice(name=choice["name"], value=choice["value"])
-                                    for choice in option["choices"]
+                                    app_commands.Choice(name=c["name"], value=c["value"])
+                                    for c in opt["choices"]
                                 ]
-                            command._params[param.name] = param
+                            
+                            # Add parameter to command
+                            cmd._params[param.name] = param
                     
-                    self.tree.add_command(command)
-
+                    self.tree.add_command(cmd)
+                
                 # Sync commands
-                synced = await self.tree.sync()
-                print(f"✅ Synced {len(synced)} command(s)")
+                print("Syncing commands...")
+                await self.tree.sync()
+                print("✅ Commands registered and synced")
+                
             except Exception as e:
                 print(f"❌ Failed to sync commands: {e}")
-                raise  # Re-raise to see full error details
+                raise
+
+            # Start background tasks
+            self.bg_tasks.append(self.loop.create_task(self._periodic_db_cleanup()))
+            self.bg_tasks.append(self.loop.create_task(self._periodic_db_optimize()))
+            self.bg_tasks.append(self.loop.create_task(self._periodic_db_health_check()))
 
         except Exception as e:
             print(f"❌ Critical setup error: {e}")
             await self.close()
             return
-
-        # Start background tasks
-        self.bg_task = self.loop.create_task(self._periodic_db_cleanup())
-        self.bg_task = self.loop.create_task(self._periodic_db_optimize())
-        self.bg_task = self.loop.create_task(self._periodic_db_health_check())
 
     async def _periodic_db_health_check(self):
         """Periodically check database health"""
@@ -177,6 +185,12 @@ class Bot(commands.Bot):
             print(f"Health check error: {e}")
 
     async def close(self):
+        # Cancel all background tasks
+        for task in self.bg_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*self.bg_tasks, return_exceptions=True)
+        
         await self.db_manager.close()
         await super().close()
 

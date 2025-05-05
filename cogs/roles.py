@@ -61,14 +61,14 @@ class RolesCog(commands.Cog):
         except discord.Forbidden:
             return False
 
-    # User color command group
-    roles_color = app_commands.Group(
+    # Role management command group
+    roles_group = app_commands.Group(
         name="roles",
-        description="Manage your roles",
-        default_permissions=None
+        description="Manage server roles",
+        default_permissions=discord.Permissions(manage_roles=True)
     )
 
-    @roles_color.command(
+    @roles_group.command(
         name="color",
         description="Set or clear your color role"
     )
@@ -80,7 +80,7 @@ class RolesCog(commands.Cog):
         app_commands.Choice(name="Set color role", value="set"),
         app_commands.Choice(name="Clear color role", value="clear")
     ])
-    async def roles_color(
+    async def color_role(
         self,
         interaction: discord.Interaction,
         action: str,
@@ -148,8 +148,8 @@ class RolesCog(commands.Cog):
                 ephemeral=True
             )
 
-    @app_commands.command(
-        name="roles",
+    @roles_group.command(
+        name="manage",
         description="Manage server roles"
     )
     @app_commands.describe(
@@ -169,8 +169,7 @@ class RolesCog(commands.Cog):
         app_commands.Choice(name="Unbind reaction roles", value="react_unbind"),
         app_commands.Choice(name="List reaction roles", value="react_list")
     ])
-    @app_commands.default_permissions(manage_roles=True)
-    async def roles(
+    async def role_manage(
         self,
         interaction: discord.Interaction,
         action: str,
@@ -180,7 +179,7 @@ class RolesCog(commands.Cog):
         emoji: Optional[str] = None,
         channel: Optional[discord.TextChannel] = None
     ):
-        """Unified role management command"""
+        """Manage server roles"""
         try:
             if not interaction.user.guild_permissions.manage_roles:
                 raise commands.MissingPermissions(["manage_roles"])
