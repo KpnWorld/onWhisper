@@ -97,6 +97,8 @@ class DebugCog(commands.Cog):
         """Sync slash commands"""
         try:
             if target == "guild":
+                if not ctx.guild:
+                    raise ValueError("This command must be used in a guild to sync guild commands")
                 synced = await self.bot.tree.sync(guild=ctx.guild)
             else:
                 synced = await self.bot.tree.sync()
@@ -106,9 +108,15 @@ class DebugCog(commands.Cog):
                 f"Successfully synced {len(synced)} commands ({target})"
             )
             await ctx.send(embed=embed)
-        except Exception as e:
+        except ValueError as e:
             embed = self.bot.ui_manager.error_embed(
                 "Sync Error",
+                str(e)
+            )
+            await ctx.send(embed=embed)
+        except Exception as e:
+            embed = self.bot.ui_manager.error_embed(
+                "Sync Error", 
                 f"Error syncing commands: {str(e)}"
             )
             await ctx.send(embed=embed)
