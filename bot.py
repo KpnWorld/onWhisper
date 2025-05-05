@@ -100,27 +100,46 @@ class Bot(commands.Bot):
             # Register commands to show in bot's profile
             print("Registering commands in bot's profile...")
             try:
-                for cmd in self.commands_object.values():
+                for cmd_name, cmd_data in self.commands_object.items():
+                    @discord.app_commands.command(
+                        name=cmd_data["name"],
+                        description=cmd_data["description"]
+                    )
+                    async def cmd_callback(interaction: discord.Interaction):
+                        # This is just a placeholder - actual commands are handled by cogs
+                        pass
+
                     command = discord.app_commands.Command(
-                        name=cmd["name"],
-                        description=cmd["description"],
-                        callback=lambda i: None  # Placeholder callback
+                        name=cmd_data["name"],
+                        description=cmd_data["description"],
+                        callback=cmd_callback,
                     )
                     
                     # Set permissions if specified
-                    if "default_member_permissions" in cmd:
+                    if "default_member_permissions" in cmd_data:
                         command.default_permissions = discord.Permissions(
-                            permissions=int(cmd.get("default_member_permissions", "0"))
+                            permissions=int(cmd_data["default_member_permissions"])
                         )
                     
-                    # Add choices if they exist
-                    for option in cmd.get("options", []):
-                        if "choices" in option:
-                            choices = [
-                                discord.app_commands.Choice(name=choice["name"], value=choice["value"])
-                                for choice in option["choices"]
-                            ]
-                            command._params[option["name"]].choices = choices
+                    # Set DM permission if specified
+                    if "dm_permission" in cmd_data:
+                        command.dm_permission = cmd_data["dm_permission"]
+                    
+                    # Add options if they exist
+                    if "options" in cmd_data:
+                        for option in cmd_data["options"]:
+                            param = discord.app_commands.Parameter(
+                                name=option["name"],
+                                description=option["description"],
+                                type=discord.AppCommandOptionType(option["type"]),
+                                required=option.get("required", False)
+                            )
+                            if "choices" in option:
+                                param.choices = [
+                                    discord.app_commands.Choice(name=choice["name"], value=choice["value"])
+                                    for choice in option["choices"]
+                                ]
+                            command._params[param.name] = param
                     
                     self.tree.add_command(command)
 
@@ -129,6 +148,7 @@ class Bot(commands.Bot):
                 print(f"✅ Synced {len(synced)} command(s)")
             except Exception as e:
                 print(f"❌ Failed to sync commands: {e}")
+                raise  # Re-raise to see full error details
 
         except Exception as e:
             print(f"❌ Critical setup error: {e}")

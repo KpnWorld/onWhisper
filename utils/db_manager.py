@@ -312,6 +312,17 @@ class DBManager:
             print(f"Error getting section {section}: {e}")
             return {}
 
+    async def set_section(self, guild_id: int, section: str, data: Union[dict, list]) -> bool:
+        """Set a specific section of guild data"""
+        try:
+            guild_data = await self.get_guild_data(guild_id)
+            guild_data[section] = data
+            self.db[f"{self.prefix}guild:{guild_id}"] = json.dumps(guild_data)
+            return True
+        except Exception as e:
+            print(f"Error setting section {section}: {e}")
+            return False
+
     async def get_guild_config(self, guild_id: int, section: str = None) -> dict:
         """Get guild configuration, optionally for a specific section"""
         try:
@@ -609,6 +620,24 @@ class DBManager:
             return whispers.get('active_threads', [])
         except Exception as e:
             print(f"Error getting active whispers: {e}")
+            return []
+
+    async def get_all_whispers(self, guild_id: int) -> list:
+        """Get all whispers (both active and closed) for a guild"""
+        try:
+            whispers = await self.get_section(guild_id, 'whispers')
+            if not isinstance(whispers, dict):
+                return whispers if isinstance(whispers, list) else []
+            
+            # Combine active and closed threads
+            all_whispers = []
+            if 'active_threads' in whispers:
+                all_whispers.extend(whispers['active_threads'])
+            if 'closed_threads' in whispers:
+                all_whispers.extend(whispers['closed_threads'])
+            return all_whispers
+        except Exception as e:
+            print(f"Error getting all whispers: {e}")
             return []
 
     async def add_whisper(self, guild_id: int, thread_id: str, user_id: str, channel_id: str) -> bool:
