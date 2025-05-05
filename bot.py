@@ -66,13 +66,9 @@ class Bot(commands.Bot):
                     except Exception as e:
                         print(f"❌ Failed to load {filename}: {e}")
 
-            # Sync commands from cogs
+            # Sync commands directly from cogs
             print("Registering commands in bot's profile...")
             try:
-                # Clear existing commands first
-                self.tree.clear_commands(guild=None)
-                
-                # Sync commands
                 print("Syncing commands...")
                 await self.tree.sync()
                 print("✅ Commands registered and synced")
