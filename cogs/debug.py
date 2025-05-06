@@ -534,5 +534,131 @@ class DebugCog(commands.Cog):
         except Exception as e:
             await ctx.send(f"Error during optimization: {e}")
 
+    @app_commands.command(name="config")
+    async def debug_config(
+        self,
+        interaction: discord.Interaction,
+        section: Optional[str] = None
+    ):
+        """Debug configuration data"""
+        try:
+            if not await self.bot.is_owner(interaction.user):
+                raise commands.NotOwner()
+
+            await interaction.response.defer()
+
+            # Use safe operation to get config data
+            if section:
+                data = await self.bot.db_manager.safe_operation(
+                    'get_section',
+                    self.bot.db_manager.get_section,
+                    interaction.guild_id,
+                    section
+                )
+                if not data:
+                    raise ValueError(f"No configuration found for section: {section}")
+
+                # Format the data
+                formatted = json.dumps(data, indent=2)
+                if len(formatted) > 1900:  # Discord message limit
+                    # Split into multiple messages if needed
+                    parts = [formatted[i:i+1900] for i in range(0, len(formatted), 1900)]
+                    for i, part in enumerate(parts):
+                        embed = discord.Embed(
+                            title=f"Configuration: {section} (Part {i+1}/{len(parts)})",
+                            description=f"```json\n{part}\n```",
+                            color=discord.Color.blue()
+                        )
+                        if i == 0:
+                            await interaction.followup.send(embed=embed)
+                        else:
+                            await interaction.channel.send(embed=embed)
+                else:
+                    embed = discord.Embed(
+                        title=f"Configuration: {section}",
+                        description=f"```json\n{formatted}\n```",
+                        color=discord.Color.blue()
+                    )
+                    await interaction.followup.send(embed=embed)
+            else:
+                # Get all sections safely
+                sections = await self.bot.db_manager.safe_operation(
+                    'get_all_sections',
+                    self.bot.db_manager.get_all_sections,
+                    interaction.guild_id
+                )
+                
+                embed = discord.Embed(
+                    title="Available Configuration Sections",
+                    description="\n".join(f"• {section}" for section in sections),
+                    color=discord.Color.blue()
+                )
+                await interaction.followup.send(embed=embed)
+
+        except commands.NotOwner:
+            await interaction.response.send_message(
+                "You must be the bot owner to use this command.",
+                ephemeral=True
+            )
+        except ValueError as e:
+            await interaction.followup.send(
+                embed=self.bot.ui_manager.error_embed("Error", str(e))
+            )
+        except Exception as e:
+            await interaction.followup.send(
+                embed=self.bot.ui_manager.error_embed("Error", str(e))
+            )
+
+    @app_commands.command(name="reset")
+    async def debug_reset(
+        self,
+        interaction: discord.Interaction,
+        section: str
+    ):
+        """Reset a configuration section to defaults"""
+        try:
+            if not await self.bot.is_owner(interaction.user):
+                raise commands.NotOwner()
+
+            # Use transaction for atomic reset
+            async with await self.bot.db_manager.transaction(interaction.guild_id, 'config') as txn:
+                # Get default config
+                defaults = await self.bot.db_manager.get_defaults(section)
+                if not defaults:
+                    raise ValueError(f"No default configuration found for section: {section}")
+
+                # Reset section with safe operation
+                success = await self.bot.db_manager.safe_operation(
+                    'reset_section',
+                    self.bot.db_manager.set_section,
+                    interaction.guild_id,
+                    section,
+                    defaults
+                )
+
+                if not success:
+                    raise ValueError(f"Failed to reset section: {section}")
+
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.success_embed(
+                    "Configuration Reset",
+                    f"Successfully reset {section} configuration to defaults"
+                )
+            )
+
+        except commands.NotOwner:
+            await interaction.response.send_message(
+                "You must be the bot owner to use this command.",
+                ephemeral=True
+            )
+        except ValueError as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e))
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed("Error", str(e))
+            )
+
 async def setup(bot):
     await bot.add_cog(DebugCog(bot))

@@ -32,19 +32,33 @@ class RolesCog(commands.Cog):
     async def _update_user_color_role(self, member: discord.Member, new_role: Optional[discord.Role] = None) -> bool:
         """Update a user's color role, removing any existing ones"""
         try:
-            color_roles = await self.bot.db_manager.get_color_roles(member.guild.id)
-            
-            # Remove existing color roles
-            for role in member.roles:
-                if str(role.id) in color_roles:
-                    await member.remove_roles(role)
-            
-            # Add new color role if specified
-            if new_role:
-                await member.add_roles(new_role)
-            
-            return True
-        except:
+            async with await self.bot.db_manager.transaction(member.guild.id, 'color_roles') as txn:
+                # Get color roles with safe operation
+                color_roles = await self.bot.db_manager.safe_operation(
+                    'get_color_roles',
+                    self.bot.db_manager.get_color_roles,
+                    member.guild.id
+                )
+                
+                if not color_roles:
+                    return False
+                
+                # Remove existing color roles
+                roles_to_remove = []
+                for role in member.roles:
+                    if str(role.id) in color_roles:
+                        roles_to_remove.append(role)
+                
+                if roles_to_remove:
+                    await member.remove_roles(*roles_to_remove, reason="Updating color role")
+                
+                # Add new color role if specified
+                if new_role:
+                    await member.add_roles(new_role, reason="Setting new color role")
+                
+                return True
+        except Exception as e:
+            print(f"Error updating color roles: {e}")
             return False
 
     # Main roles group
@@ -613,3 +627,519 @@ class RolesCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(RolesCog(bot))
+
+class ColorRolesCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def _validate_color(self, color_str: str) -> bool:
+        """Validate hex color format"""
+        if not color_str.startswith('#'):
+            return False
+        try:
+            int(color_str[1:], 16)
+            return len(color_str) == 7
+        except ValueError:
+            return False
+
+    @app_commands.command(name="color")
+    @app_commands.describe(
+        action="The action to perform",
+        color="Hex color code (e.g., #FF5733)",
+        role="Role to add/remove from color roles"
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="Create new color role", value="create"),
+        app_commands.Choice(name="Add existing role", value="add"),
+        app_commands.Choice(name="Remove color role", value="remove"),
+        app_commands.Choice(name="List color roles", value="list")
+    ])
+    @app_commands.default_permissions(manage_roles=True)
+    async def color_roles(
+        self,
+        interaction: discord.Interaction,
+        action: str,
+        color: Optional[str] = None,
+        role: Optional[discord.Role] = None
+    ):
+        """Manage color roles"""
+        try:
+            if not interaction.user.guild_permissions.manage_roles:
+                raise commands.MissingPermissions(["manage_roles"])
+
+            color_config = await self.bot.db_manager.get_section(interaction.guild.id, 'color_roles')
+            
+            match action:
+                case "create":
+                    if not color:
+                        raise ValueError("You must provide a hex color code")
+                    if not await self._validate_color(color):
+                        raise ValueError("Invalid hex color format. Use #RRGGBB (e.g., #FF5733)")
+
+                    # Create new role
+                    role = await interaction.guild.create_role(
+                        name=f"Color-{color[1:]}",
+                        color=discord.Color.from_str(color),
+                        reason=f"Color role created by {interaction.user}"
+                    )
+
+                    # Add to database
+                    color_config['roles'].append({
+                        'color': color,
+                        'role_id': str(role.id)
+                    })
+                    await self.bot.db_manager.set_section(interaction.guild.id, 'color_roles', color_config)
+
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.success_embed(
+                            "Color Role Created",
+                            f"Created role {role.mention} with color {color}"
+                        )
+                    )
+
+                case "add":
+                    if not role:
+                        raise ValueError("You must specify a role to add")
+
+                    # Check if role already exists
+                    if any(r['role_id'] == str(role.id) for r in color_config['roles']):
+                        raise ValueError(f"{role.mention} is already a color role")
+
+                    # Add to database
+                    color_config['roles'].append({
+                        'color': f"#{role.color.value:06x}",
+                        'role_id': str(role.id)
+                    })
+                    await self.bot.db_manager.set_section(interaction.guild.id, 'color_roles', color_config)
+
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.success_embed(
+                            "Color Role Added",
+                            f"Added {role.mention} to color roles"
+                        )
+                    )
+
+                case "remove":
+                    if not role:
+                        raise ValueError("You must specify a role to remove")
+
+                    # Find and remove role
+                    color_config['roles'] = [
+                        r for r in color_config['roles']
+                        if r['role_id'] != str(role.id)
+                    ]
+                    await self.bot.db_manager.set_section(interaction.guild.id, 'color_roles', color_config)
+
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.success_embed(
+                            "Color Role Removed",
+                            f"Removed {role.mention} from color roles"
+                        )
+                    )
+
+                case "list":
+                    if not color_config['roles']:
+                        await interaction.response.send_message(
+                            embed=self.bot.ui_manager.info_embed(
+                                "Color Roles",
+                                "No color roles configured"
+                            )
+                        )
+                        return
+
+                    # Create pages of 10 roles each
+                    roles_per_page = 10
+                    pages = []
+                    
+                    for i in range(0, len(color_config['roles']), roles_per_page):
+                        page_roles = color_config['roles'][i:i + roles_per_page]
+                        embed = discord.Embed(
+                            title="Color Roles",
+                            color=discord.Color.blue()
+                        )
+                        
+                        for role_data in page_roles:
+                            role_id = int(role_data['role_id'])
+                            role = interaction.guild.get_role(role_id)
+                            if role:
+                                embed.add_field(
+                                    name=role.name,
+                                    value=f"Color: {role_data['color']}\nRole: {role.mention}",
+                                    inline=False
+                                )
+                        
+                        pages.append(embed)
+
+                    if len(pages) > 1:
+                        await self.bot.ui_manager.paginate(
+                            interaction=interaction,
+                            pages=pages
+                        )
+                    else:
+                        await interaction.response.send_message(embed=pages[0])
+
+        except commands.MissingPermissions:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Missing Permissions",
+                    "You need Manage Roles permission to configure color roles"
+                ),
+                ephemeral=True
+            )
+        except ValueError as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Invalid Input",
+                    str(e)
+                ),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    str(e)
+                ),
+                ephemeral=True
+            )
+
+    @app_commands.command(name="setcolor")
+    @app_commands.describe(
+        role="The color role to assign"
+    )
+    async def set_color(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role
+    ):
+        """Set your color role"""
+        try:
+            # Check if role is a color role
+            color_config = await self.bot.db_manager.get_section(interaction.guild.id, 'color_roles')
+            if not color_config['enabled']:
+                raise ValueError("Color roles are disabled on this server")
+
+            if not any(r['role_id'] == str(role.id) for r in color_config['roles']):
+                raise ValueError("That is not a valid color role")
+
+            # Remove other color roles
+            current_color_roles = [
+                interaction.guild.get_role(int(r['role_id']))
+                for r in color_config['roles']
+                if interaction.guild.get_role(int(r['role_id'])) in interaction.user.roles
+            ]
+
+            if current_color_roles:
+                await interaction.user.remove_roles(*current_color_roles)
+
+            # Add new color role
+            await interaction.user.add_roles(role)
+
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.success_embed(
+                    "Color Updated",
+                    f"Set your color to {role.mention}"
+                )
+            )
+
+        except ValueError as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Invalid Input",
+                    str(e)
+                ),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    str(e)
+                ),
+                ephemeral=True
+            )
+
+    @app_commands.command(name="colors")
+    async def list_colors(self, interaction: discord.Interaction):
+        """List available color roles"""
+        try:
+            color_config = await self.bot.db_manager.get_section(interaction.guild.id, 'color_roles')
+            if not color_config['enabled']:
+                raise ValueError("Color roles are disabled on this server")
+
+            if not color_config['roles']:
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.info_embed(
+                        "Color Roles",
+                        "No color roles available"
+                    )
+                )
+                return
+
+            # Create color role preview
+            embed = discord.Embed(
+                title="Available Colors",
+                description="Use `/setcolor` to choose a color",
+                color=discord.Color.blue()
+            )
+
+            for role_data in color_config['roles']:
+                role = interaction.guild.get_role(int(role_data['role_id']))
+                if role:
+                    embed.add_field(
+                        name=role.name,
+                        value=f"{role.mention}\nHex: {role_data['color']}",
+                        inline=True
+                    )
+
+            await interaction.response.send_message(embed=embed)
+
+        except ValueError as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    str(e)
+                ),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    str(e)
+                ),
+                ephemeral=True
+            )
+
+class ReactionRolesCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def _check_message(self, guild_id: int, channel_id: int, message_id: int) -> Optional[discord.Message]:
+        """Find and validate a message for reaction roles"""
+        try:
+            channel = self.bot.get_channel(channel_id)
+            if not channel:
+                return None
+            return await channel.fetch_message(message_id)
+        except:
+            return None
+
+    async def _update_reaction_role_message(self, message: discord.Message, emoji: str, action: str):
+        """Update reactions on a message"""
+        if action == "add":
+            await message.add_reaction(emoji)
+        else:
+            await message.clear_reaction(emoji)
+
+    @app_commands.command(name="reactionrole")
+    @app_commands.describe(
+        action="The action to perform",
+        message_id="The message ID to bind to",
+        emoji="The emoji to use",
+        role="The role to give",
+        channel="The channel containing the message"
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="Add reaction role", value="add"),
+        app_commands.Choice(name="Remove reaction role", value="remove"),
+        app_commands.Choice(name="List reaction roles", value="list")
+    ])
+    @app_commands.default_permissions(manage_roles=True)
+    async def reaction_role(
+        self,
+        interaction: discord.Interaction,
+        action: str,
+        message_id: Optional[str] = None,
+        emoji: Optional[str] = None,
+        role: Optional[discord.Role] = None,
+        channel: Optional[discord.TextChannel] = None
+    ):
+        """Manage reaction roles"""
+        try:
+            if not interaction.user.guild_permissions.manage_roles:
+                raise commands.MissingPermissions(["manage_roles"])
+
+            reaction_config = await self.bot.db_manager.get_section(interaction.guild.id, 'reaction_roles')
+            
+            match action:
+                case "add":
+                    if not all([message_id, emoji, role]):
+                        raise ValueError("Message ID, emoji, and role are required")
+
+                    # Validate message exists
+                    message = await self._check_message(
+                        interaction.guild.id,
+                        channel.id if channel else interaction.channel.id,
+                        int(message_id)
+                    )
+                    if not message:
+                        raise ValueError("Message not found")
+
+                    # Validate emoji
+                    try:
+                        await message.add_reaction(emoji)
+                    except:
+                        raise ValueError("Invalid emoji")
+
+                    # Add to database
+                    if message_id not in reaction_config:
+                        reaction_config[message_id] = {}
+                    reaction_config[message_id][emoji] = str(role.id)
+                    
+                    await self.bot.db_manager.set_section(
+                        interaction.guild.id,
+                        'reaction_roles',
+                        reaction_config
+                    )
+
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.success_embed(
+                            "Reaction Role Added",
+                            f"Added {role.mention} role for {emoji} reaction"
+                        )
+                    )
+
+                case "remove":
+                    if not message_id or not emoji:
+                        raise ValueError("Message ID and emoji are required")
+
+                    if (message_id not in reaction_config or 
+                        emoji not in reaction_config[message_id]):
+                        raise ValueError("No reaction role found for that message and emoji")
+
+                    # Remove reaction if possible
+                    message = await self._check_message(
+                        interaction.guild.id,
+                        channel.id if channel else interaction.channel.id,
+                        int(message_id)
+                    )
+                    if message:
+                        await self._update_reaction_role_message(message, emoji, "remove")
+
+                    # Remove from database
+                    del reaction_config[message_id][emoji]
+                    if not reaction_config[message_id]:
+                        del reaction_config[message_id]
+                    
+                    await self.bot.db_manager.set_section(
+                        interaction.guild.id,
+                        'reaction_roles',
+                        reaction_config
+                    )
+
+                    await interaction.response.send_message(
+                        embed=self.bot.ui_manager.success_embed(
+                            "Reaction Role Removed",
+                            f"Removed reaction role for {emoji}"
+                        )
+                    )
+
+                case "list":
+                    if not reaction_config:
+                        await interaction.response.send_message(
+                            embed=self.bot.ui_manager.info_embed(
+                                "Reaction Roles",
+                                "No reaction roles configured"
+                            )
+                        )
+                        return
+
+                    # Create pages for each message's reaction roles
+                    pages = []
+                    for msg_id, reactions in reaction_config.items():
+                        embed = discord.Embed(
+                            title="Reaction Roles",
+                            description=f"Message ID: {msg_id}",
+                            color=discord.Color.blue()
+                        )
+                        
+                        for emoji, role_id in reactions.items():
+                            role = interaction.guild.get_role(int(role_id))
+                            embed.add_field(
+                                name=emoji,
+                                value=role.mention if role else f"Unknown Role ({role_id})",
+                                inline=True
+                            )
+                        
+                        pages.append(embed)
+
+                    if len(pages) > 1:
+                        await self.bot.ui_manager.paginate(
+                            interaction=interaction,
+                            pages=pages
+                        )
+                    else:
+                        await interaction.response.send_message(embed=pages[0])
+
+        except commands.MissingPermissions:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Missing Permissions",
+                    "You need Manage Roles permission to configure reaction roles"
+                ),
+                ephemeral=True
+            )
+        except ValueError as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Invalid Input",
+                    str(e)
+                ),
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    str(e)
+                ),
+                ephemeral=True
+            )
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        """Handle reaction role assignments"""
+        if payload.member.bot:
+            return
+
+        try:
+            reaction_config = await self.bot.db_manager.get_section(payload.guild_id, 'reaction_roles')
+            msg_reactions = reaction_config.get(str(payload.message_id))
+            
+            if msg_reactions:
+                role_id = msg_reactions.get(str(payload.emoji))
+                if role_id:
+                    role = payload.member.guild.get_role(int(role_id))
+                    if role:
+                        await payload.member.add_roles(role)
+        except Exception as e:
+            print(f"Error in reaction role add: {e}")
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+        """Handle reaction role removals"""
+        try:
+            guild = self.bot.get_guild(payload.guild_id)
+            if not guild:
+                return
+
+            member = guild.get_member(payload.user_id)
+            if not member or member.bot:
+                return
+
+            reaction_config = await self.bot.db_manager.get_section(payload.guild_id, 'reaction_roles')
+            msg_reactions = reaction_config.get(str(payload.message_id))
+            
+            if msg_reactions:
+                role_id = msg_reactions.get(str(payload.emoji))
+                if role_id:
+                    role = guild.get_role(int(role_id))
+                    if role and role in member.roles:
+                        await member.remove_roles(role)
+        except Exception as e:
+            print(f"Error in reaction role remove: {e}")
+
+async def setup(bot):
+    await bot.add_cog(ColorRolesCog(bot))
+    await bot.add_cog(ReactionRolesCog(bot))

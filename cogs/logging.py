@@ -1,223 +1,345 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
+from typing import Optional, Union
 from datetime import datetime
-from typing import Optional
+import asyncio
 
 class LoggingCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._log_locks = {}  # Prevent race conditions in log channels
 
-    async def create_log_channel(self, guild: discord.Guild, channel_type: str = "mod") -> discord.TextChannel:
-        """Create a new logging channel"""
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        }
-        
-        channel_name = f"{channel_type}-logs"
-        return await guild.create_text_channel(
-            name=channel_name,
-            overwrites=overwrites,
-            reason="Automatic logging channel creation"
-        )
-
-    async def log_event(self, guild_id: int, event_type: str, embed: discord.Embed):
-        """Send a log entry to the logging channel"""
+    async def _get_log_channel(self, guild_id: int, log_type: str) -> Optional[discord.TextChannel]:
+        """Get the configured log channel with error handling"""
         try:
-            config = await self.bot.db_manager.get_logging_config(guild_id)
-            if not config:
-                return
-            
-            channel_id = config.get("log_channel")
-            enabled = config.get("logging_enabled", False)
-            
-            if enabled and channel_id and str(channel_id).isdigit():
-                channel = self.bot.get_channel(int(channel_id))
-                if channel:
-                    # Add event type to embed
-                    embed.add_field(name="Event Type", value=event_type.title(), inline=False)
-                    await channel.send(embed=embed)
+            config = await self.bot.db_manager.safe_operation(
+                'get_section',
+                self.bot.db_manager.get_section,
+                guild_id,
+                'logs_config'
+            )
+            if not config or not config.get('enabled'):
+                return None
+                
+            channel_id = config.get(f'{log_type}_channel')
+            if not channel_id:
+                return None
+                
+            return self.bot.get_channel(int(channel_id))
         except Exception as e:
-            print(f"Error sending log: {e}")
+            print(f"Error getting log channel: {e}")
+            return None
 
+    async def log_event(self, guild_id: int, log_type: str, content: Union[str, discord.Embed]) -> bool:
+        """Log an event to the appropriate channel with transaction support"""
+        try:
+            # Use transaction to ensure atomic logging
+            async with await self.bot.db_manager.transaction(guild_id, 'logs') as txn:
+                channel = await self._get_log_channel(guild_id, log_type)
+                if not channel:
+                    return False
+
+                # Acquire lock for this channel to prevent race conditions
+                lock_key = f"{guild_id}:{channel.id}"
+                if lock_key not in self._log_locks:
+                    self._log_locks[lock_key] = asyncio.Lock()
+
+                async with self._log_locks[lock_key]:
+                    if isinstance(content, discord.Embed):
+                        await channel.send(embed=content)
+                    else:
+                        await channel.send(content)
+
+                    # Log to database with safe operation
+                    await self.bot.db_manager.safe_operation(
+                        'add_log',
+                        self.bot.db_manager.add_log,
+                        guild_id,
+                        {
+                            'type': log_type,
+                            'content': str(content),
+                            'timestamp': datetime.utcnow().isoformat()
+                        }
+                    )
+                    return True
+
+        except Exception as e:
+            print(f"Error logging event: {e}")
+            return False
+
+    async def _should_log(self, guild_id: int, category: str, event_type: str) -> tuple[bool, Optional[discord.TextChannel]]:
+        """Check if event should be logged and get log channel"""
+        try:
+            logs = await self.bot.db_manager.get_section(guild_id, 'logs')
+            if not logs['enabled']:
+                return False, None
+
+            # Check if event type is enabled
+            log_types = logs.get('log_types', {})
+            if (category not in log_types or 
+                event_type not in log_types[category]):
+                return False, None
+
+            # Get log channel
+            channel_id = logs.get('log_channel')
+            if not channel_id:
+                return False, None
+
+            channel = self.bot.get_channel(int(channel_id))
+            return bool(channel), channel
+
+        except Exception as e:
+            print(f"Error checking logging status: {e}")
+            return False, None
+
+    # Member Events
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        """Log member join events"""
-        embed = self.bot.ui_manager.success_embed(
-            "Member Joined",
-            f"{member.mention} joined the server"
-        )
-        embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="Account Created", value=discord.utils.format_dt(member.created_at, style='R'), inline=True)
-        embed.set_footer(text=f"Member ID: {member.id}")
-        
-        await self.log_event(member.guild.id, "member", embed)
+        """Log member joins"""
+        should_log, channel = await self._should_log(member.guild.id, 'member', 'join')
+        if should_log and channel:
+            embed = self.bot.ui_manager.info_embed(
+                "Member Joined",
+                f"{member.mention} joined the server"
+            ).add_field(
+                name="Account Created",
+                value=discord.utils.format_dt(member.created_at, style='R')
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            await channel.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
-        """Log member leave events"""
-        embed = self.bot.ui_manager.error_embed(
-            "Member Left",
-            f"{member.mention} left the server"
-        )
-        embed.set_thumbnail(url=member.display_avatar.url)
-        if member.joined_at:
-            embed.add_field(name="Joined Server", value=discord.utils.format_dt(member.joined_at, style='R'), inline=True)
-        embed.add_field(name="Account Created", value=discord.utils.format_dt(member.created_at, style='R'), inline=True)
-        embed.set_footer(text=f"Member ID: {member.id}")
-        
-        await self.log_event(member.guild.id, "member", embed)
+        """Log member leaves"""
+        should_log, channel = await self._should_log(member.guild.id, 'member', 'leave')
+        if should_log and channel:
+            roles = [role.mention for role in member.roles if role != member.guild.default_role]
+            embed = self.bot.ui_manager.info_embed(
+                "Member Left",
+                f"{member.mention} left the server"
+            )
+            if roles:
+                embed.add_field(name="Roles", value=" ".join(roles))
+            embed.set_thumbnail(url=member.display_avatar.url)
+            await channel.send(embed=embed)
 
+    # Message Events
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
-        """Log deleted messages"""
-        if message.author.bot:
+        if not message.guild or message.author.bot:
             return
 
-        embed = self.bot.ui_manager.warning_embed(
-            "Message Deleted",
-            f"A message was deleted in {message.channel.mention}"
-        )
-        embed.add_field(name="Author", value=message.author.mention, inline=True)
-        if message.content:
-            embed.add_field(name="Content", value=message.content[:1024], inline=False)
-        if message.attachments:
-            embed.add_field(name="Attachments", value="\n".join(a.url for a in message.attachments)[:1024], inline=False)
-        embed.set_thumbnail(url=message.author.display_avatar.url)
-        embed.set_footer(text=f"Message ID: {message.id}")
-        
-        await self.log_event(message.guild.id, "message", embed)
+        try:
+            embed = discord.Embed(
+                title="Message Deleted",
+                description=message.content or "No content",
+                color=discord.Color.red(),
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="Channel", value=message.channel.mention)
+            embed.add_field(name="Author", value=message.author.mention)
+            
+            if message.attachments:
+                embed.add_field(
+                    name="Attachments",
+                    value="\n".join(a.url for a in message.attachments),
+                    inline=False
+                )
+
+            await self.log_event(message.guild.id, "message", embed)
+        except Exception as e:
+            print(f"Error logging deleted message: {e}")
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
-        """Log edited messages"""
-        if before.author.bot or before.content == after.content:
+        if not before.guild or before.author.bot or before.content == after.content:
             return
 
-        embed = self.bot.ui_manager.info_embed(
-            "Message Edited",
-            f"A message was edited in {before.channel.mention}"
-        )
-        embed.add_field(name="Author", value=before.author.mention, inline=True)
-        embed.add_field(name="Before", value=before.content[:1024] if before.content else "*Empty*", inline=False)
-        embed.add_field(name="After", value=after.content[:1024] if after.content else "*Empty*", inline=False)
-        embed.set_thumbnail(url=before.author.display_avatar.url)
-        embed.set_footer(text=f"Message ID: {before.id}")
-        
-        await self.log_event(before.guild.id, "message", embed)
+        try:
+            embed = discord.Embed(
+                title="Message Edited",
+                color=discord.Color.blue(),
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="Before", value=before.content, inline=False)
+            embed.add_field(name="After", value=after.content, inline=False)
+            embed.add_field(name="Channel", value=before.channel.mention)
+            embed.add_field(name="Author", value=before.author.mention)
+            embed.add_field(
+                name="Jump to Message",
+                value=f"[Click Here]({after.jump_url})"
+            )
 
+            await self.log_event(before.guild.id, "message", embed)
+        except Exception as e:
+            print(f"Error logging edited message: {e}")
+
+    # Channel Events
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
         """Log channel creation"""
-        embed = self.bot.ui_manager.success_embed(
-            "Channel Created",
-            f"Channel {channel.mention} was created"
-        )
-        embed.add_field(name="Type", value=str(channel.type).title(), inline=True)
-        embed.set_footer(text=f"Channel ID: {channel.id}")
-        
-        await self.log_event(channel.guild.id, "server", embed)
+        should_log, log_channel = await self._should_log(channel.guild.id, 'server', 'channel_create')
+        if should_log and log_channel:
+            embed = self.bot.ui_manager.mod_embed(
+                "Channel Created",
+                f"Channel {channel.mention} was created"
+            )
+            embed.add_field(name="Type", value=str(channel.type))
+            await log_channel.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         """Log channel deletion"""
-        embed = self.bot.ui_manager.error_embed(
-            "Channel Deleted",
-            f"Channel #{channel.name} was deleted"
-        )
-        embed.add_field(name="Type", value=str(channel.type).title(), inline=True)
-        embed.set_footer(text=f"Channel ID: {channel.id}")
-        
-        await self.log_event(channel.guild.id, "server", embed)
+        should_log, log_channel = await self._should_log(channel.guild.id, 'server', 'channel_delete')
+        if should_log and log_channel:
+            embed = self.bot.ui_manager.mod_embed(
+                "Channel Deleted",
+                f"Channel #{channel.name} was deleted"
+            )
+            embed.add_field(name="Type", value=str(channel.type))
+            await log_channel.send(embed=embed)
 
+    # Role Events
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
         """Log role creation"""
-        embed = self.bot.ui_manager.success_embed(
-            "Role Created",
-            f"Role {role.mention} was created"
-        )
-        embed.add_field(name="Color", value=str(role.color), inline=True)
-        embed.add_field(name="Hoisted", value=str(role.hoist), inline=True)
-        embed.add_field(name="Mentionable", value=str(role.mentionable), inline=True)
-        embed.set_footer(text=f"Role ID: {role.id}")
-        
-        await self.log_event(role.guild.id, "server", embed)
+        try:
+            # Use safe operation to check if we should log
+            should_log, channel = await self.bot.db_manager.safe_operation(
+                'check_should_log',
+                self._should_log,
+                role.guild.id,
+                'server',
+                'role_update'
+            )
+
+            if should_log and channel:
+                # Get role info with error handling
+                role_info = {
+                    'name': role.name,
+                    'color': str(role.color),
+                    'permissions': role.permissions.value,
+                    'position': role.position,
+                    'hoisted': role.hoist,
+                    'mentionable': role.mentionable
+                }
+
+                # Log event using transaction
+                async with await self.bot.db_manager.transaction(role.guild.id, 'logs') as txn:
+                    embed = self.bot.ui_manager.mod_embed(
+                        "Role Created",
+                        f"Role {role.mention} was created\n" +
+                        f"Color: {role_info['color']}\n" +
+                        f"Position: {role_info['position']}\n" +
+                        f"Hoisted: {role_info['hoisted']}\n" +
+                        f"Mentionable: {role_info['mentionable']}" 
+                    )
+                    await channel.send(embed=embed)
+
+                    # Log to database
+                    await self.bot.db_manager.log_event(
+                        role.guild.id,
+                        0,  # System event
+                        "role_create",
+                        role_info
+                    )
+
+        except Exception as e:
+            print(f"Error logging role creation: {e}")
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
         """Log role deletion"""
-        embed = self.bot.ui_manager.error_embed(
-            "Role Deleted",
-            f"Role @{role.name} was deleted"
-        )
-        embed.add_field(name="Color", value=str(role.color), inline=True)
-        embed.add_field(name="Position", value=str(role.position), inline=True)
-        embed.set_footer(text=f"Role ID: {role.id}")
-        
-        await self.log_event(role.guild.id, "server", embed)
-
-    @commands.Cog.listener()
-    async def on_member_update(self, before: discord.Member, after: discord.Member):
-        """Log member role changes"""
-        # Check if roles were changed
-        if before.roles != after.roles:
-            # Find added and removed roles
-            added_roles = [role for role in after.roles if role not in before.roles]
-            removed_roles = [role for role in before.roles if role not in after.roles]
-
-            if added_roles:
-                embed = self.bot.ui_manager.success_embed(
-                    "Roles Added",
-                    f"Roles were added to {after.mention}"
-                )
-                roles_str = ", ".join([role.mention for role in added_roles])
-                embed.add_field(name="Added Roles", value=roles_str, inline=False)
-                embed.set_thumbnail(url=after.display_avatar.url)
-                embed.set_footer(text=f"Member ID: {after.id}")
-                await self.log_event(after.guild.id, "role", embed)
-
-            if removed_roles:
-                embed = self.bot.ui_manager.warning_embed(
-                    "Roles Removed",
-                    f"Roles were removed from {after.mention}"
-                )
-                roles_str = ", ".join([role.mention for role in removed_roles])
-                embed.add_field(name="Removed Roles", value=roles_str, inline=False)
-                embed.set_thumbnail(url=after.display_avatar.url)
-                embed.set_footer(text=f"Member ID: {after.id}")
-                await self.log_event(after.guild.id, "role", embed)
+        should_log, channel = await self._should_log(role.guild.id, 'server', 'role_update')
+        if should_log and channel:
+            embed = self.bot.ui_manager.mod_embed(
+                "Role Deleted",
+                f"Role @{role.name} was deleted"
+            )
+            await channel.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
-        """Log role permission/configuration changes"""
-        changes = []
+        """Log role updates"""
+        should_log, channel = await self._should_log(before.guild.id, 'server', 'role_update')
+        if should_log and channel:
+            changes = []
+            if before.name != after.name:
+                changes.append(f"Name: {before.name} → {after.name}")
+            if before.color != after.color:
+                changes.append(f"Color: {before.color} → {after.color}")
+            if before.permissions != after.permissions:
+                changes.append("Permissions were updated")
 
-        if before.name != after.name:
-            changes.append(f"Name: {before.name} → {after.name}")
-        if before.color != after.color:
-            changes.append(f"Color: {before.color} → {after.color}")
-        if before.hoist != after.hoist:
-            changes.append(f"Hoisted: {before.hoist} → {after.hoist}")
-        if before.mentionable != after.mentionable:
-            changes.append(f"Mentionable: {before.mentionable} → {after.mentionable}")
-        if before.permissions != after.permissions:
-            # Find changed permissions
-            for perm, value in dict(after.permissions).items():
-                if dict(before.permissions).get(perm) != value:
-                    changes.append(f"Permission {perm}: {dict(before.permissions).get(perm)} → {value}")
+            if changes:
+                embed = self.bot.ui_manager.mod_embed(
+                    "Role Updated",
+                    f"Role {after.mention} was updated"
+                )
+                embed.add_field(name="Changes", value="\n".join(changes))
+                await channel.send(embed=embed)
 
-        if changes:
-            embed = self.bot.ui_manager.info_embed(
-                "Role Updated",
-                f"Role {after.mention} was updated"
+    # Moderation Event Methods
+    async def log_warn(self, guild_id: int, user: discord.Member, moderator: discord.Member, reason: str):
+        """Log warning"""
+        should_log, channel = await self._should_log(guild_id, 'moderation', 'warn')
+        if should_log and channel:
+            embed = self.bot.ui_manager.mod_embed(
+                "Member Warned",
+                f"{user.mention} was warned by {moderator.mention}",
+                moderator
             )
-            embed.add_field(name="Changes", value="\n".join(changes[:25]), inline=False)  # Limit to 25 changes
-            if len(changes) > 25:
-                embed.add_field(name="Note", value="Some changes were omitted due to length", inline=False)
-            embed.set_footer(text=f"Role ID: {after.id}")
-            await self.log_event(after.guild.id, "role", embed)
+            embed.add_field(name="Reason", value=reason)
+            await channel.send(embed=embed)
+
+    async def log_timeout(self, guild_id: int, user: discord.Member, moderator: discord.Member, duration: int, reason: str):
+        """Log timeout"""
+        should_log, channel = await self._should_log(guild_id, 'moderation', 'timeout')
+        if should_log and channel:
+            embed = self.bot.ui_manager.mod_embed(
+                "Member Timed Out",
+                f"{user.mention} was timed out by {moderator.mention}",
+                moderator
+            )
+            embed.add_field(name="Duration", value=f"{duration} minutes")
+            embed.add_field(name="Reason", value=reason)
+            await channel.send(embed=embed)
+
+    async def log_kick(self, guild_id: int, user: discord.Member, moderator: discord.Member, reason: str):
+        """Log kick"""
+        should_log, channel = await self._should_log(guild_id, 'moderation', 'kick')
+        if should_log and channel:
+            embed = self.bot.ui_manager.mod_embed(
+                "Member Kicked",
+                f"{user.mention} was kicked by {moderator.mention}",
+                moderator
+            )
+            embed.add_field(name="Reason", value=reason)
+            await channel.send(embed=embed)
+
+    async def log_ban(self, guild_id: int, user: discord.Member, moderator: discord.Member, reason: str):
+        """Log ban"""
+        should_log, channel = await self._should_log(guild_id, 'moderation', 'ban')
+        if should_log and channel:
+            embed = self.bot.ui_manager.mod_embed(
+                "Member Banned",
+                f"{user.mention} was banned by {moderator.mention}",
+                moderator
+            )
+            embed.add_field(name="Reason", value=reason)
+            await channel.send(embed=embed)
+
+    async def log_lockdown(self, guild_id: int, channel: discord.TextChannel, moderator: discord.Member, reason: str):
+        """Log channel lockdown"""
+        should_log, log_channel = await self._should_log(guild_id, 'moderation', 'lockdown')
+        if should_log and log_channel:
+            embed = self.bot.ui_manager.mod_embed(
+                "Channel Locked",
+                f"{channel.mention} was locked by {moderator.mention}",
+                moderator
+            )
+            embed.add_field(name="Reason", value=reason)
+            await log_channel.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(LoggingCog(bot))

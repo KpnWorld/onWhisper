@@ -27,21 +27,32 @@ ACTIVITIES = [
 
 class Bot(commands.Bot):
     def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        
         super().__init__(
             command_prefix="!",
-            intents=discord.Intents.all(),
-            help_command=None
+            intents=intents,
+            activity=discord.Game(name="with commands")
         )
-        self.db_manager = DBManager('bot')
-        self.ui_manager = UIManager(self)
-        self._rate_limit_retries = 0
-        self._session_valid = True
-        self.start_time = datetime.utcnow()
-        self.bg_tasks = []  # Track background tasks
+        
+        self.db_manager = DBManager()
+        self.ui_manager = UIManager()
+        self.bg_tasks = []
+
+    @property
+    def uptime(self):
+        """Calculate the bot's uptime"""
+        now = datetime.utcnow()
+        delta = now - self.start_time
+        hours, remainder = divmod(int(delta.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        days, hours = divmod(hours, 24)
+        return f"{days}d {hours}h {minutes}m {seconds}s"
 
     async def setup_hook(self):
         """This is called when the bot starts, sets up the database and loads cogs"""
-        # Initialize database
         print("Initializing database...")
         try:
             if not await self.db_manager.initialize():
@@ -49,15 +60,9 @@ class Bot(commands.Bot):
                 await self.close()
                 return
             print("✅ Database initialized")
-            
-            # Verify database connection
-            if not await self.db_manager.check_connection():
-                print("❌ Database connection check failed") 
-                await self.close()
-                return
-            print("✅ Database connection verified")
 
             # Load cogs
+            print("\nLoading cogs...")
             for filename in os.listdir('./cogs'):
                 if filename.endswith('.py'):
                     try:
@@ -66,49 +71,54 @@ class Bot(commands.Bot):
                     except Exception as e:
                         print(f"❌ Failed to load {filename}: {e}")
 
-            # Sync commands directly from cogs
-            print("Registering commands in bot's profile...")
+            # Sync guild data
+            print("\nSyncing guild data...")
+            sync_results = await self.db_manager.sync_guilds(self)
+            print(f"✅ Synced {sync_results['success']} guilds")
+            if sync_results['failed'] > 0:
+                print(f"⚠️ Failed to sync {sync_results['failed']} guilds")
+
+            # Sync commands globally
+            print("\nSyncing commands globally...")
             try:
-                # First sync to guild for testing
-                try:
-                    guild_commands = await self.tree.sync(guild=discord.Object(id=int(os.getenv('TEST_GUILD_ID'))))
-                    print(f"✅ Synced {len(guild_commands)} commands to test guild")
-                except Exception as e:
-                    print(f"⚠️ Guild sync failed: {e}")
-                
-                # Then sync globally
-                print("Syncing commands globally...")
                 commands = await self.tree.sync()
                 print(f"✅ Synced {len(commands)} commands globally")
-
-                # Start background tasks
-                self.bg_tasks.append(self.loop.create_task(self._periodic_db_cleanup()))
-                self.bg_tasks.append(self.loop.create_task(self._periodic_db_optimize()))
-                self.bg_tasks.append(self.loop.create_task(self._periodic_db_health_check()))
-
             except Exception as e:
                 print(f"❌ Failed to sync commands: {e}")
                 raise
+
+            # Start background tasks
+            print("\nStarting background tasks...")
+            self.bg_tasks.extend([
+                self.loop.create_task(self._periodic_cleanup()),
+                self.loop.create_task(self._periodic_maintenance())
+            ])
+            print("✅ Background tasks started")
 
         except Exception as e:
             print(f"❌ Critical setup error: {e}")
             raise
 
-    async def _periodic_db_health_check(self):
-        """Periodically check database health"""
-        try:
-            while not self.is_closed():
-                await asyncio.sleep(300)  # Check every 5 minutes
-                if not await self.db_manager.check_connection():
-                    print("⚠️ Database health check failed")
-                    if await self.db_manager.initialize():
-                        print("✅ Database connection restored")
-                    else:
-                        print("❌ Database recovery failed")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(f"Health check error: {e}")
+    async def _periodic_cleanup(self):
+        """Run periodic data cleanup"""
+        while not self.is_closed():
+            try:
+                await asyncio.sleep(86400)  # Run daily
+                await self.db_manager.cleanup_old_data()
+            except Exception as e:
+                print(f"Error in periodic cleanup: {e}")
+                await asyncio.sleep(300)  # Wait 5 minutes on error
+
+    async def _periodic_maintenance(self):
+        """Run periodic maintenance tasks"""
+        while not self.is_closed():
+            try:
+                await asyncio.sleep(3600)  # Run hourly
+                # Re-sync any guilds that might have gotten out of sync
+                await self.db_manager.sync_guilds(self)
+            except Exception as e:
+                print(f"Error in periodic maintenance: {e}")
+                await asyncio.sleep(300)  # Wait 5 minutes on error
 
     async def close(self):
         # Cancel all background tasks
@@ -375,39 +385,6 @@ class Bot(commands.Bot):
     class ReactionRoleError(Exception):
         """Base exception for reaction role errors"""
         pass
-
-    async def _periodic_db_cleanup(self):
-        """Periodically clean up old database entries"""
-        try:
-            while not self.is_closed():
-                await asyncio.sleep(86400)  # Run daily
-                print("Starting database cleanup")
-                try:
-                    await self.db_manager.cleanup_old_data(days=30)
-                    print("✅ Database cleanup completed")
-                except Exception as e:
-                    print(f"❌ Error during cleanup: {e}")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(f"Cleanup loop error: {e}")
-
-    async def _periodic_db_optimize(self):
-        try:
-            while not self.is_closed():
-                await asyncio.sleep(604800)
-                print("Starting database optimization")
-                try:
-                    await self.db_manager.optimize()
-                    stats = await self.db_manager.get_connection_stats()
-                    size = await self.db_manager.get_database_size()
-                    print(f"Optimized DB. Size: {size/1024/1024:.2f}MB | Stats: {stats}")
-                except Exception as e:
-                    print(f"Optimization error: {e}")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(f"Optimization loop error: {e}")
 
 @tasks.loop(minutes=10)
 async def change_activity(bot):

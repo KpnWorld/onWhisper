@@ -63,88 +63,201 @@ class ModerationCog(commands.Cog):
             'timestamp': after.edited_at or discord.utils.utcnow()
         }
 
-    @app_commands.command(
-        name="warn",
-        description="Warn a user"
-    )
-    @app_commands.describe(
-        user="The user to warn",
-        reason="The reason for warning the user"
-    )
-    @app_commands.default_permissions(moderate_members=True)
-    async def warn(
+    @commands.hybrid_command(name="warn")
+    @app_commands.describe(user="The user to warn", reason="Reason for the warning")
+    @commands.has_permissions(moderate_members=True)
+    async def warn_command(
         self,
-        interaction: discord.Interaction,
+        ctx: commands.Context,
         user: discord.Member,
-        reason: str = None
+        *,
+        reason: str
     ):
         """Warn a user"""
         try:
-            # Defer the response immediately to prevent timeout
-            await interaction.response.defer()
+            if user == ctx.author:
+                raise commands.BadArgument("You cannot warn yourself")
+            if user.guild_permissions.administrator:
+                raise commands.BadArgument("You cannot warn administrators")
 
-            if not interaction.user.guild_permissions.moderate_members:
-                raise commands.MissingPermissions(["moderate_members"])
-
-            # Check bot's role hierarchy
-            if user.top_role >= interaction.guild.me.top_role:
-                raise commands.CommandError("I cannot warn this user as their role is higher than or equal to my highest role")
-
-            # Check command user's role hierarchy
-            if user.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
-                raise commands.CommandError("You cannot warn someone with a higher or equal role")
-
-            if reason is None:
-                reason = "No reason provided"
-
-            # Try to DM the user first with a timeout
-            try:
-                await asyncio.wait_for(
-                    user.send(
-                        embed=self.bot.ui_manager.warning_embed(
-                            "Warning",
-                            f"You were warned in {interaction.guild.name}\n**Reason:** {reason}"
-                        )
-                    ),
-                    timeout=5.0
+            # Use transaction for atomic warning operation
+            async with await self.bot.db_manager.transaction(ctx.guild.id, 'moderation') as txn:
+                # Add warning with safe operation
+                warning_data = {
+                    'user_id': str(user.id),
+                    'moderator_id': str(ctx.author.id),
+                    'reason': reason,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                
+                await self.bot.db_manager.safe_operation(
+                    'add_warning',
+                    self.bot.db_manager.add_warning,
+                    ctx.guild.id,
+                    warning_data
                 )
-            except (discord.Forbidden, asyncio.TimeoutError):
-                pass
 
-            # Add warning to database with timeout
-            try:
-                async with asyncio.timeout(10.0):
-                    await self.bot.db_manager.add_warning(
-                        guild_id=interaction.guild.id,
-                        user_id=user.id,
-                        mod_id=interaction.user.id,  # Changed from moderator_id to mod_id
-                        reason=reason
-                    )
-            except asyncio.TimeoutError:
-                await interaction.followup.send(
-                    embed=self.bot.ui_manager.error_embed(
-                        "Error",
-                        "The warning operation timed out while updating the database. Please try again."
-                    ),
-                    ephemeral=True
+                # Log warning
+                await self.bot.get_cog('LoggingCog').log_warn(
+                    ctx.guild.id,
+                    user,
+                    ctx.author,
+                    reason
                 )
-                return
 
+            # Send confirmation
             embed = self.bot.ui_manager.mod_embed(
                 "User Warned",
-                f"**User:** {user}\n**Reason:** {reason}"
+                f"{user.mention} has been warned",
+                ctx.author
             )
-            embed.set_thumbnail(url=user.display_avatar.url)
+            embed.add_field(name="Reason", value=reason)
+            await ctx.send(embed=embed)
 
-            await interaction.followup.send(embed=embed)
+            # DM user if possible
+            try:
+                dm_embed = self.bot.ui_manager.warning_embed(
+                    "Warning Received",
+                    f"You were warned in {ctx.guild.name}"
+                )
+                dm_embed.add_field(name="Reason", value=reason)
+                await user.send(embed=dm_embed)
+            except:
+                pass  # User might have DMs disabled
 
+        except commands.MissingPermissions:
+            await ctx.send(
+                embed=self.bot.ui_manager.error_embed(
+                    "Missing Permissions",
+                    "You need Moderate Members permission to warn users"
+                )
+            )
+        except commands.BadArgument as e:
+            await ctx.send(
+                embed=self.bot.ui_manager.error_embed(
+                    "Invalid Input",
+                    str(e)
+                )
+            )
         except Exception as e:
-            await interaction.followup.send(
+            await ctx.send(
                 embed=self.bot.ui_manager.error_embed(
                     "Error",
                     str(e)
-                ),
-                ephemeral=True
+                )
+            )
+
+    @commands.hybrid_command(name="timeout")
+    @app_commands.describe(
+        user="The user to timeout",
+        duration="Duration in minutes",
+        reason="Reason for the timeout"
+    )
+    @commands.has_permissions(moderate_members=True)
+    async def timeout_command(
+        self,
+        ctx: commands.Context,
+        user: discord.Member,
+        duration: int,
+        *,
+        reason: str
+    ):
+        """Timeout a user"""
+        try:
+            if user == ctx.author:
+                raise commands.BadArgument("You cannot timeout yourself")
+            if user.guild_permissions.administrator:
+                raise commands.BadArgument("You cannot timeout administrators")
+            if duration < 1:
+                raise commands.BadArgument("Duration must be at least 1 minute")
+            if duration > 40320:  # 28 days
+                raise commands.BadArgument("Duration cannot exceed 28 days")
+
+            # Calculate end time
+            end_time = datetime.utcnow() + timedelta(minutes=duration)
+
+            # Use transaction for atomic timeout operation
+            async with await self.bot.db_manager.transaction(ctx.guild.id, 'moderation') as txn:
+                # Apply timeout
+                await user.timeout(
+                    end_time,
+                    reason=f"Timeout by {ctx.author}: {reason}"
+                )
+
+                # Log timeout with safe operation
+                timeout_data = {
+                    'user_id': str(user.id),
+                    'moderator_id': str(ctx.author.id),
+                    'duration': duration,
+                    'reason': reason,
+                    'end_time': end_time.isoformat()
+                }
+                
+                await self.bot.db_manager.safe_operation(
+                    'add_timeout',
+                    self.bot.db_manager.add_timeout,
+                    ctx.guild.id,
+                    timeout_data
+                )
+
+                # Log to logging system
+                await self.bot.get_cog('LoggingCog').log_timeout(
+                    ctx.guild.id,
+                    user,
+                    ctx.author,
+                    duration,
+                    reason
+                )
+
+            # Send confirmation
+            embed = self.bot.ui_manager.mod_embed(
+                "User Timed Out",
+                f"{user.mention} has been timed out for {duration} minutes",
+                ctx.author
+            )
+            embed.add_field(name="Reason", value=reason)
+            embed.add_field(
+                name="Expires",
+                value=discord.utils.format_dt(end_time, style='R')
+            )
+            await ctx.send(embed=embed)
+
+            # DM user if possible
+            try:
+                dm_embed = self.bot.ui_manager.warning_embed(
+                    "Timeout Received",
+                    f"You were timed out in {ctx.guild.name}"
+                )
+                dm_embed.add_field(name="Duration", value=f"{duration} minutes")
+                dm_embed.add_field(name="Reason", value=reason)
+                dm_embed.add_field(
+                    name="Expires",
+                    value=discord.utils.format_dt(end_time, style='R')
+                )
+                await user.send(embed=dm_embed)
+            except:
+                pass  # User might have DMs disabled
+
+        except commands.MissingPermissions:
+            await ctx.send(
+                embed=self.bot.ui_manager.error_embed(
+                    "Missing Permissions",
+                    "You need Moderate Members permission to timeout users"
+                )
+            )
+        except commands.BadArgument as e:
+            await ctx.send(
+                embed=self.bot.ui_manager.error_embed(
+                    "Invalid Input",
+                    str(e)
+                )
+            )
+        except Exception as e:
+            await ctx.send(
+                embed=self.bot.ui_manager.error_embed(
+                    "Error",
+                    str(e)
+                )
             )
 
     @app_commands.command(
@@ -165,7 +278,15 @@ class ModerationCog(commands.Cog):
             if not interaction.user.guild_permissions.moderate_members:
                 raise commands.MissingPermissions(["moderate_members"])
 
-            warnings = await self.bot.db_manager.get_user_warnings(interaction.guild_id, user.id)
+            # Get warnings using safe operation
+            moderation_data = await self.bot.db_manager.safe_operation(
+                'get_section',
+                self.bot.db_manager.get_section,
+                interaction.guild.id,
+                'moderation'
+            )
+            
+            warnings = [w for w in moderation_data['warnings'] if w['user_id'] == str(user.id)]
 
             if not warnings:
                 embed = self.bot.ui_manager.info_embed(
@@ -321,7 +442,6 @@ class ModerationCog(commands.Cog):
     ):
         """Ban a user from the server"""
         try:
-            # Defer the response immediately to prevent timeout
             await interaction.response.defer()
 
             if not interaction.user.guild_permissions.ban_members:
@@ -333,7 +453,6 @@ class ModerationCog(commands.Cog):
             if delete_days < 0 or delete_days > 7:
                 raise ValueError("Delete days must be between 0 and 7")
 
-            # Ask for confirmation
             confirmed = await self.bot.ui_manager.confirm_action(
                 interaction,
                 "Confirm Ban",
@@ -345,31 +464,39 @@ class ModerationCog(commands.Cog):
             if not confirmed:
                 return
 
-            # Try to DM the user
-            try:
-                await user.send(
-                    embed=self.bot.ui_manager.warning_embed(
-                        "Banned",
-                        f"You were banned from {interaction.guild.name}\n**Reason:** {reason}"
+            # Use transaction for ban operation
+            async with await self.bot.db_manager.transaction(interaction.guild.id, 'moderation') as txn:
+                try:
+                    # Try to DM the user
+                    await user.send(
+                        embed=self.bot.ui_manager.warning_embed(
+                            "Banned",
+                            f"You were banned from {interaction.guild.name}\n**Reason:** {reason}"
+                        )
                     )
+                except:
+                    pass
+
+                # Ban the user
+                await user.ban(
+                    reason=f"Banned by {interaction.user}: {reason}",
+                    delete_message_days=delete_days
                 )
-            except:
-                pass
 
-            # Ban the user
-            await user.ban(
-                reason=f"Banned by {interaction.user}: {reason}",
-                delete_message_days=delete_days
-            )
-
-            # Log the action to both DB and logging channel
-            await self.bot.db_manager.add_mod_action(
-                interaction.guild_id,
-                "ban",
-                user.id,
-                f"Banned by {interaction.user}: {reason}"
-            )
-            await self.log_mod_action(interaction.guild_id, "banned", user, interaction.user, reason)
+                # Log the action using safe operation
+                await self.bot.db_manager.safe_operation(
+                    'log_event',
+                    self.bot.db_manager.log_event,
+                    interaction.guild.id,
+                    "moderation",
+                    {
+                        "action": "ban",
+                        "user_id": str(user.id),
+                        "mod_id": str(interaction.user.id),
+                        "reason": reason,
+                        "delete_days": delete_days
+                    }
+                )
 
             embed = self.bot.ui_manager.mod_embed(
                 "User Banned",
@@ -379,21 +506,8 @@ class ModerationCog(commands.Cog):
 
             await interaction.followup.send(embed=embed)
 
-        except commands.MissingPermissions as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed(
-                    "Missing Permissions",
-                    "You need the Ban Members permission to use this command."
-                ),
-                ephemeral=True
-            )
-        except ValueError as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Invalid Value", str(e)),
-                ephemeral=True
-            )
         except Exception as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),
                 ephemeral=True
             )
@@ -733,78 +847,6 @@ class ModerationCog(commands.Cog):
             )
         except Exception as e:
             await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
-
-    @app_commands.command(
-        name="timeout",
-        description="Timeout a user for a specified duration"
-    )
-    @app_commands.describe(
-        user="The user to timeout",
-        duration="Duration in minutes",
-        reason="Reason for the timeout"
-    )
-    @app_commands.default_permissions(moderate_members=True)
-    async def timeout(
-        self,
-        interaction: discord.Interaction,
-        user: discord.Member,
-        duration: int,
-        reason: str = "No reason provided"
-    ):
-        """Timeout a user"""
-        try:
-            # Defer the response immediately to prevent timeout
-            await interaction.response.defer()
-
-            if not interaction.user.guild_permissions.moderate_members:
-                raise commands.MissingPermissions(["moderate_members"])
-
-            if duration < 1:
-                raise ValueError("Duration must be at least 1 minute")
-
-            if user.top_role >= interaction.user.top_role:
-                raise commands.CommandError("You cannot timeout someone with a higher or equal role")
-
-            # Apply timeout using aware datetime
-            until = datetime.now(datetime.timezone.utc) + timedelta(minutes=duration)
-            await user.timeout(until, reason=f"Timeout by {interaction.user}: {reason}")
-
-            # Log the action to both DB and logging channel
-            await self.bot.db_manager.add_mod_action(
-                interaction.guild_id,
-                "timeout",
-                user.id,
-                f"Timed out by {interaction.user} for {duration} minutes: {reason}",
-                until
-            )
-            await self.log_mod_action(interaction.guild_id, "timed out", user, interaction.user, f"{duration} minutes - {reason}")
-
-            embed = self.bot.ui_manager.mod_embed(
-                "User Timed Out",
-                f"**User:** {user.mention}\n**Duration:** {duration} minutes\n**Reason:** {reason}"
-            )
-            embed.set_thumbnail(url=user.display_avatar.url)
-
-            await interaction.followup.send(embed=embed)
-
-        except commands.MissingPermissions as e:
-            await interaction.followup.send(
-                embed=self.bot.ui_manager.error_embed(
-                    "Missing Permissions",
-                    "You need the Moderate Members permission to use this command."
-                ),
-                ephemeral=True
-            )
-        except ValueError as e:
-            await interaction.followup.send(
-                embed=self.bot.ui_manager.error_embed("Invalid Value", str(e)),
-                ephemeral=True
-            )
-        except Exception as e:
-            await interaction.followup.send(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),
                 ephemeral=True
             )
