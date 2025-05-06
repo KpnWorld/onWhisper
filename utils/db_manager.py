@@ -728,23 +728,34 @@ class DBManager:
         """Delete whispers that have been closed for more than the specified number of days"""
         try:
             whispers = await self.get_section(guild_id, 'whispers')
+            if not isinstance(whispers, dict):
+                return False
+
             current_time = datetime.utcnow()
+            modified = False
             
-            # Filter out whispers that are closed and older than the specified days
-            active_whispers = []
-            for whisper in whispers:
-                if not whisper.get('closed_at'):
-                    active_whispers.append(whisper)
-                    continue
-                    
-                closed_at = datetime.fromisoformat(whisper['closed_at'])
-                if (current_time - closed_at).days < days:
-                    active_whispers.append(whisper)
+            # Process closed threads
+            if 'closed_threads' in whispers:
+                retained_threads = []
+                for whisper in whispers['closed_threads']:
+                    if not whisper.get('closed_at'):
+                        continue
+                        
+                    closed_at = datetime.fromisoformat(whisper['closed_at'])
+                    if (current_time - closed_at).days < days:
+                        retained_threads.append(whisper)
+                    else:
+                        # If thread has saved history, remove it
+                        if 'saved_threads' in whispers and whisper['thread_id'] in whispers['saved_threads']:
+                            del whispers['saved_threads'][whisper['thread_id']]
+                        modified = True
+                
+                if len(retained_threads) != len(whispers['closed_threads']):
+                    whispers['closed_threads'] = retained_threads
+                    await self.set_section(guild_id, 'whispers', whispers)
             
-            if len(active_whispers) < len(whispers):
-                await self.update_guild_data(guild_id, 'whispers', active_whispers)
-                return True
-            return False
+            return modified
+
         except Exception as e:
             print(f"Error cleaning up old whispers: {e}")
             return False
