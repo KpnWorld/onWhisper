@@ -226,3 +226,6 @@ class DatabaseManager:
                 'status': 'error',
                 'error': str(e)
             }
+
+# Alias for backward compatibility
+DBManager = DatabaseManager
