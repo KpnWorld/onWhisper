@@ -36,6 +36,65 @@ class DatabaseManager:
         self._locks = {}
         self._operation_locks = {}
         self._write_lock = asyncio.Lock()
+        self._initialized = False
+
+    async def initialize(self) -> bool:
+        """Initialize database connection and create required directories/files"""
+        try:
+            if self._initialized:
+                return True
+
+            # Create data directory if it doesn't exist
+            import os
+            os.makedirs('data', exist_ok=True)
+
+            # Initialize guilds file if it doesn't exist
+            guilds_data = await self._read_data('guilds')
+            if guilds_data is None:
+                await self._write_data('guilds', [])
+
+            # Verify we can read and write to the database
+            test_key = "db_test"
+            test_data = {"test": True, "timestamp": datetime.utcnow().isoformat()}
+            
+            # Test write
+            if not await self._write_data(test_key, test_data):
+                print("Failed to write test data")
+                return False
+
+            # Test read
+            read_data = await self._read_data(test_key)
+            if not read_data or read_data.get('test') is not True:
+                print("Failed to verify test data")
+                return False
+
+            # Clean up test data
+            try:
+                import os
+                os.remove(f'data/{test_key}.json')
+            except:
+                pass
+
+            self._initialized = True
+            return True
+
+        except Exception as e:
+            print(f"Database initialization error: {e}")
+            return False
+
+    async def check_connection(self) -> bool:
+        """Check if database connection is working"""
+        try:
+            if not self._initialized:
+                return False
+
+            # Try to read guilds file as connection test
+            guilds = await self._read_data('guilds')
+            return guilds is not None
+
+        except Exception as e:
+            print(f"Database connection check failed: {e}")
+            return False
 
     async def transaction(self, guild_id: int, namespace: str) -> DatabaseTransaction:
         """Create a new transaction for atomic operations"""
