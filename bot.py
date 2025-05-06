@@ -37,7 +37,7 @@ class Bot(commands.Bot):
             activity=discord.Game(name="with commands")
         )
         
-        self.db_manager = DBManager()
+        self.db_manager = DBManager(self)  # Pass self (bot instance) to DatabaseManager
         self.ui_manager = UIManager()
         self.bg_tasks = []
 
