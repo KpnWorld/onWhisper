@@ -26,11 +26,13 @@ class LoggingCog(commands.Cog):
         """Send a log entry to the logging channel"""
         try:
             config = await self.bot.db_manager.get_logging_config(guild_id)
+            if not config:
+                return
             
             channel_id = config.get("log_channel")
             enabled = config.get("logging_enabled", False)
             
-            if enabled and channel_id:
+            if enabled and channel_id and str(channel_id).isdigit():
                 channel = self.bot.get_channel(int(channel_id))
                 if channel:
                     # Add event type to embed
