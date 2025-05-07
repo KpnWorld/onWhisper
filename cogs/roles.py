@@ -33,30 +33,29 @@ class RolesCog(commands.Cog):
         """Update a user's color role, removing any existing ones"""
         try:
             async with await self.bot.db_manager.transaction(member.guild.id, 'color_roles') as txn:
-                # Get color roles with safe operation
-                color_roles = await self.bot.db_manager.safe_operation(
-                    'get_color_roles',
-                    self.bot.db_manager.get_color_roles,
-                    member.guild.id
-                )
-                
-                if not color_roles:
+                # Get color roles configuration
+                color_config = await self.bot.db_manager.get_section(member.guild.id, 'color_roles')
+                if not color_config or not color_config.get('enabled', False):
                     return False
+                
+                # Get list of color role IDs
+                color_role_ids = [r['role_id'] for r in color_config.get('roles', [])]
                 
                 # Remove existing color roles
                 roles_to_remove = []
                 for role in member.roles:
-                    if str(role.id) in color_roles:
+                    if str(role.id) in color_role_ids:
                         roles_to_remove.append(role)
                 
                 if roles_to_remove:
                     await member.remove_roles(*roles_to_remove, reason="Updating color role")
                 
                 # Add new color role if specified
-                if new_role:
+                if new_role and str(new_role.id) in color_role_ids:
                     await member.add_roles(new_role, reason="Setting new color role")
                 
                 return True
+                
         except Exception as e:
             print(f"Error updating color roles: {e}")
             return False
@@ -149,9 +148,11 @@ class RolesCog(commands.Cog):
     async def color_set(self, interaction: discord.Interaction, role: discord.Role):
         """Set your color role"""
         try:
-            color_roles = await self.bot.db_manager.get_color_roles(interaction.guild_id)
+            color_config = await self.bot.db_manager.get_section(interaction.guild_id, 'color_roles')
+            if not color_config or not color_config.get('enabled', False):
+                raise ValueError("Color roles are not enabled on this server")
             
-            if str(role.id) not in color_roles:
+            if not any(r['role_id'] == str(role.id) for r in color_config.get('roles', [])):
                 raise ValueError("That role is not configured as a color role")
                 
             success = await self._update_user_color_role(interaction.member, role)

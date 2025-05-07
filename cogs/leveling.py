@@ -21,10 +21,14 @@ class LevelingCog(commands.Cog):
                 guild_id,
                 user_id
             )
-            return data or {'xp': 0, 'last_xp': 0}
+            if not data:
+                data = {'xp': 0, 'level': 0, 'last_xp': None}
+            elif 'level' not in data:
+                data['level'] = await self._calculate_level(data['xp'])
+            return data
         except Exception as e:
             print(f"Error getting user XP data: {e}")
-            return {'xp': 0, 'last_xp': 0}
+            return {'xp': 0, 'level': 0, 'last_xp': None}
 
     async def _calculate_level(self, xp: int) -> int:
         """Calculate level from XP amount"""

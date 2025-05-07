@@ -215,14 +215,16 @@ class Bot(commands.Bot):
     async def on_ready(self):
         """Called when the bot is ready to start"""
         try:
-            # Count both application commands and text commands
-            total_commands = len(set([cmd.qualified_name for cmd in self.walk_commands()]))
+            # Count both regular commands and application commands
+            text_commands = set(cmd.qualified_name for cmd in self.walk_commands())
+            app_commands = set(cmd.qualified_name for cmd in self.tree.walk_commands())
+            total_commands = len(text_commands.union(app_commands))
             formatted_count = f"{total_commands:,}"
 
             print("\n───────────────")
             print(f"🔌 Connected as {self.user}")
             print(f"🌎 Serving {len(self.guilds)} servers")
-            print(f"🎯 Commands loaded ({formatted_count} commands)")
+            print(f"🎯 Commands loaded ({formatted_count} total commands)")
             print("───────────────\n")
 
             change_activity.start(self)

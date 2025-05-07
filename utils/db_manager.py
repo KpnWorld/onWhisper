@@ -409,7 +409,14 @@ class DatabaseManager:
     async def increment_stat(self, bot_id: int, stat_name: str) -> bool:
         """Increment a bot statistic"""
         try:
-            stats = await self._read_data(f"bot_stats:{bot_id}") or {}
+            stats_data = await self._read_data(f"bot_stats:{bot_id}")
+            stats = {}
+            if stats_data:
+                try:
+                    stats = json.loads(stats_data) if isinstance(stats_data, str) else stats_data
+                except json.JSONDecodeError:
+                    stats = {}
+            
             stats[stat_name] = stats.get(stat_name, 0) + 1
             return await self._write_data(f"bot_stats:{bot_id}", stats)
         except Exception as e:

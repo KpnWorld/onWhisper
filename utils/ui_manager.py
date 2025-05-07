@@ -206,11 +206,12 @@ class UIManager:
     ):
         """Create a help menu"""
         view = HelpMenuView(bot, self)
-        await interaction.response.send_message(
+        message = await interaction.response.send_message(
             embed=self.info_embed("Help Menu", "Select a category to view commands."),
             view=view,
             ephemeral=True
         )
+        view.message = message
 
 class PaginationView(discord.ui.View):
     def __init__(self, pages: List[discord.Embed], timeout: int):
