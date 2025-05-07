@@ -183,7 +183,11 @@ class WhisperCog(commands.Cog):
         for guild in self.bot.guilds:
             try:
                 config = await self.bot.db_manager.get_section(guild.id, 'whisper_config')
-                if not config['enabled'] or not config.get('channel_id'):
+                if not config or not isinstance(config, dict):
+                    continue
+                    
+                # Check if system is enabled and properly configured
+                if not config.get('enabled', False) or not config.get('channel_id') or not config.get('auto_close_minutes', 0):
                     continue
 
                 channel = guild.get_channel(int(config['channel_id']))
