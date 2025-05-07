@@ -534,13 +534,13 @@ class DebugCog(commands.Cog):
         except Exception as e:
             await ctx.send(f"Error during optimization: {e}")
 
-    @app_commands.command(name="config")
+    @app_commands.command(name="view_config")
     async def debug_config(
         self,
         interaction: discord.Interaction,
         section: Optional[str] = None
     ):
-        """Debug configuration data"""
+        """View configuration data for debugging"""
         try:
             if not await self.bot.is_owner(interaction.user):
                 raise commands.NotOwner()
