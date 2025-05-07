@@ -1,5 +1,4 @@
 import discord
-from discord import app_commands
 from discord.ext import commands, tasks
 import os
 import random
@@ -61,11 +60,6 @@ class Bot(commands.Bot):
             # Check intents
             if not all([self.intents.message_content, self.intents.members]):
                 print("❌ Required intents are not enabled")
-                return False
-
-            # Verify data directory exists
-            if not os.path.exists('data'):
-                print("❌ Data directory not found")
                 return False
 
             # Check database connection
@@ -242,14 +236,15 @@ class Bot(commands.Bot):
             await self.db_manager.increment_stat(self.user.id, 'messages_seen')
         await super().on_message(message)
 
-    async def on_app_command_completion(self, interaction: discord.Interaction, command: discord.app_commands.Command):
+    async def on_app_command_completion(self, interaction: discord.Interaction, command: commands.Command):
+        """Command completion handler"""
         await self.db_manager.increment_stat(self.user.id, 'commands_used')
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
         """Enhanced error handler for slash commands"""
         try:
             # Rate limit/cooldown errors
-            if isinstance(error, discord.app_commands.CommandOnCooldown):
+            if isinstance(error, commands.CommandOnCooldown):
                 await interaction.response.send_message(
                     embed=self.ui_manager.error_embed(
                         "Slow Down!",
@@ -260,7 +255,7 @@ class Bot(commands.Bot):
                 return
 
             # Permission errors
-            if isinstance(error, discord.app_commands.MissingPermissions):
+            if isinstance(error, commands.MissingPermissions):
                 perms = ", ".join(error.missing_permissions)
                 await interaction.response.send_message(
                     embed=self.ui_manager.error_embed(
@@ -271,7 +266,7 @@ class Bot(commands.Bot):
                 )
                 return
 
-            if isinstance(error, discord.app_commands.BotMissingPermissions):
+            if isinstance(error, commands.BotMissingPermissions):
                 perms = ", ".join(error.missing_permissions)
                 await interaction.response.send_message(
                     embed=self.ui_manager.error_embed(
@@ -283,7 +278,7 @@ class Bot(commands.Bot):
                 return
 
             # Check errors
-            if isinstance(error, discord.app_commands.CheckFailure):
+            if isinstance(error, commands.CheckFailure):
                 await interaction.response.send_message(
                     embed=self.ui_manager.error_embed(
                         "Check Failed",
