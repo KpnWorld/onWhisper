@@ -37,22 +37,75 @@ class Bot(commands.Bot):
             activity=discord.Game(name="with commands")
         )
         
-        self.db_manager = DBManager(self)  # Pass self (bot instance) to DatabaseManager
+        # Core attributes
+        self.db_manager = DBManager(self)
         self.ui_manager = UIManager()
         self.bg_tasks = []
+        self._rate_limit_retries = 0
+        self.start_time = None
+        self._maintenance_mode = False
+        self._ready = asyncio.Event()
 
-    @property
-    def uptime(self):
-        """Calculate the bot's uptime"""
-        now = datetime.utcnow()
-        delta = now - self.start_time
-        hours, remainder = divmod(int(delta.total_seconds()), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        days, hours = divmod(hours, 24)
-        return f"{days}d {hours}h {minutes}m {seconds}s"
+        # Version info
+        try:
+            with open('version.txt', 'r') as f:
+                self.version = f.read().strip()
+        except:
+            self.version = "0.0.1"
+            with open('version.txt', 'w') as f:
+                f.write(self.version)
+
+    async def _validate_startup(self) -> bool:
+        """Validate critical components and permissions"""
+        try:
+            # Check intents
+            if not all([self.intents.message_content, self.intents.members]):
+                print("❌ Required intents are not enabled")
+                return False
+
+            # Verify data directory exists
+            if not os.path.exists('data'):
+                print("❌ Data directory not found")
+                return False
+
+            # Check database connection
+            if not await self.db_manager.check_connection():
+                print("❌ Database connection failed")
+                return False
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Startup validation failed: {e}")
+            return False
+
+    async def start(self, token: str) -> None:
+        """Override start to add error handling"""
+        try:
+            self.start_time = datetime.utcnow()
+            await super().start(token)
+        except discord.LoginFailure:
+            print("❌ Failed to login. Please check your token.")
+            return
+        except discord.PrivilegedIntentsRequired:
+            print("❌ Privileged intents are required. Enable them in the Discord Developer Portal.")
+            return
+        except Exception as e:
+            print(f"❌ Failed to start bot: {e}")
+            return
 
     async def setup_hook(self):
         """This is called when the bot starts, sets up the database and loads cogs"""
+        print(f"\nStarting Bot v{self.version}")
+        print("Running startup validation...")
+
+        if not await self._validate_startup():
+            print("❌ Startup validation failed")
+            await self.close()
+            return
+
+        print("✅ Startup validation passed\n")
+
         print("Initializing database...")
         try:
             if not await self.db_manager.initialize():
@@ -63,26 +116,40 @@ class Bot(commands.Bot):
 
             # Load cogs
             print("\nLoading cogs...")
+            cog_load_errors = []
             for filename in os.listdir('./cogs'):
                 if filename.endswith('.py'):
                     try:
                         await self.load_extension(f'cogs.{filename[:-3]}')
                         print(f"✅ Loaded {filename[:-3]}")
                     except Exception as e:
+                        cog_load_errors.append((filename, str(e)))
                         print(f"❌ Failed to load {filename}: {e}")
+
+            if cog_load_errors:
+                print("\n⚠️ Some cogs failed to load:")
+                for cog, error in cog_load_errors:
+                    print(f"  - {cog}: {error}")
 
             # Sync guild data
             print("\nSyncing guild data...")
-            sync_results = await self.db_manager.sync_guilds(self)
-            print(f"✅ Synced {sync_results['success']} guilds")
-            if sync_results['failed'] > 0:
-                print(f"⚠️ Failed to sync {sync_results['failed']} guilds")
+            try:
+                sync_results = await self.db_manager.sync_guilds(self)
+                print(f"✅ Synced {sync_results['success']} guilds")
+                if sync_results['failed'] > 0:
+                    print(f"⚠️ Failed to sync {sync_results['failed']} guilds")
+            except Exception as e:
+                print(f"❌ Failed to sync guilds: {e}")
+                raise
 
             # Sync commands globally
             print("\nSyncing commands globally...")
             try:
                 commands = await self.tree.sync()
                 print(f"✅ Synced {len(commands)} commands globally")
+            except discord.Forbidden:
+                print("❌ Failed to sync commands: Missing applications.commands scope")
+                raise
             except Exception as e:
                 print(f"❌ Failed to sync commands: {e}")
                 raise
@@ -95,9 +162,23 @@ class Bot(commands.Bot):
             ])
             print("✅ Background tasks started")
 
+            # Set ready flag
+            self._ready.set()
+
         except Exception as e:
             print(f"❌ Critical setup error: {e}")
+            await self.close()
             raise
+
+    @property
+    def uptime(self):
+        """Calculate the bot's uptime"""
+        now = datetime.utcnow()
+        delta = now - self.start_time
+        hours, remainder = divmod(int(delta.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        days, hours = divmod(hours, 24)
+        return f"{days}d {hours}h {minutes}m {seconds}s"
 
     async def _periodic_cleanup(self):
         """Run periodic data cleanup"""
@@ -121,6 +202,7 @@ class Bot(commands.Bot):
                 await asyncio.sleep(300)  # Wait 5 minutes on error
 
     async def close(self):
+        """Close bot and cleanup"""
         # Cancel all background tasks
         for task in self.bg_tasks:
             if not task.done():
@@ -131,6 +213,7 @@ class Bot(commands.Bot):
         await super().close()
 
     async def on_ready(self):
+        """Called when the bot is ready to start"""
         try:
             # Count both application commands and text commands
             total_commands = len(set([cmd.qualified_name for cmd in self.walk_commands()]))
@@ -391,19 +474,61 @@ async def change_activity(bot):
     await bot.change_presence(activity=random.choice(ACTIVITIES))
 
 def run_bot():
-    while True:  # Keep trying to reconnect
+    """Run the bot with proper error handling and reconnection"""
+    bot = None
+    max_retries = 5
+    retry_count = 0
+    retry_delay = 30  # Initial delay in seconds
+
+    while True:
         try:
-            bot = Bot()
+            if retry_count >= max_retries:
+                print(f"❌ Failed to start after {max_retries} attempts. Please check logs and configuration.")
+                return
+
+            if bot is None:
+                bot = Bot()
+
+            print("\n=== Starting Bot ===")
+            if retry_count > 0:
+                print(f"Retry attempt {retry_count}/{max_retries}")
+
+            # Run the bot
             asyncio.run(bot.start(TOKEN))
+
+        except discord.LoginFailure:
+            print("❌ Login failed - Invalid token. Please check your .env file.")
+            return  # Don't retry on authentication failures
+        except discord.PrivilegedIntentsRequired:
+            print("❌ Required privileged intents are not enabled. Please enable them in the Discord Developer Portal.")
+            return  # Don't retry on intent issues
+        except KeyboardInterrupt:
+            print("\n⚠️ Shutdown requested...")
+            if bot and not bot.is_closed():
+                asyncio.run(bot.close())
+            return
         except Exception as e:
-            print(f"Error: {e}")
+            retry_count += 1
+            print(f"\n❌ Error: {str(e)}")
+            
+            # Cleanup
             try:
-                if not bot.is_closed():
+                if bot and not bot.is_closed():
+                    print("Cleaning up...")
                     asyncio.run(bot.close())
-            except:
-                pass
-            print("Restarting bot in 30 seconds...")
-            time.sleep(30)
+            except Exception as cleanup_error:
+                print(f"Error during cleanup: {cleanup_error}")
+            
+            # Reset bot instance
+            bot = None
+            
+            if retry_count < max_retries:
+                wait_time = retry_delay * (2 ** (retry_count - 1))  # Exponential backoff
+                print(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                print("Maximum retry attempts reached. Shutting down.")
+                return
 
 if __name__ == "__main__":
     run_bot()

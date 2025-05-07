@@ -199,6 +199,19 @@ class UIManager:
         await view.wait()
         return view.value
 
+    async def create_help_menu(
+        self,
+        interaction: discord.Interaction,
+        bot: commands.Bot
+    ):
+        """Create a help menu"""
+        view = HelpMenuView(bot, self)
+        await interaction.response.send_message(
+            embed=self.info_embed("Help Menu", "Select a category to view commands."),
+            view=view,
+            ephemeral=True
+        )
+
 class PaginationView(discord.ui.View):
     def __init__(self, pages: List[discord.Embed], timeout: int):
         super().__init__(timeout=timeout)
@@ -254,3 +267,100 @@ class ConfirmView(discord.ui.View):
         self.stop()
         for child in self.children:
             child.disabled = True
+
+class HelpMenuView(discord.ui.View):
+    def __init__(self, bot, ui_manager):
+        super().__init__(timeout=60)
+        self.bot = bot
+        self.ui_manager = ui_manager
+        self.message = None
+        
+        # Create select menu with command categories
+        select = discord.ui.Select(
+            placeholder="Select a category",
+            options=[
+                discord.SelectOption(
+                    label="Whisper",
+                    description="Anonymous messaging system",
+                    emoji="📝",
+                    value="whisper"
+                ),
+                discord.SelectOption(
+                    label="Leveling",
+                    description="XP and level management",
+                    emoji="⭐",
+                    value="leveling"
+                ),
+                discord.SelectOption(
+                    label="Moderation",
+                    description="Server moderation commands",
+                    emoji="🛡️",
+                    value="moderation"
+                ),
+                discord.SelectOption(
+                    label="Configuration",
+                    description="Bot settings and setup",
+                    emoji="⚙️",
+                    value="config"
+                ),
+                discord.SelectOption(
+                    label="Roles",
+                    description="Role management commands",
+                    emoji="👑",
+                    value="roles"
+                ),
+                discord.SelectOption(
+                    label="Information",
+                    description="Server and user info",
+                    emoji="ℹ️",
+                    value="info"
+                )
+            ]
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        """Handle category selection"""
+        category = interaction.data['values'][0]
+        
+        # Get commands for selected category
+        commands = [cmd for cmd in self.bot.tree.get_commands() 
+                   if cmd.extras.get('category', '').lower() == category]
+        
+        if not commands:
+            await interaction.response.send_message(
+                embed=self.ui_manager.error_embed(
+                    "No Commands",
+                    "No commands found in this category."
+                ),
+                ephemeral=True
+            )
+            return
+
+        # Create embed with command list
+        embed = discord.Embed(
+            title=f"{category.title()} Commands",
+            color=discord.Color.blue()
+        )
+
+        for cmd in sorted(commands, key=lambda x: x.name):
+            value = cmd.description or "No description available"
+            if cmd.parameters:
+                params = [f"[{p.name}]" if p.required else f"({p.name})" 
+                         for p in cmd.parameters]
+                value = f"Usage: /{cmd.name} {' '.join(params)}\n{value}"
+            embed.add_field(
+                name=f"/{cmd.name}",
+                value=value,
+                inline=False
+            )
+
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def on_timeout(self):
+        """Handle timeout by disabling the select menu"""
+        if self.message:
+            for item in self.children:
+                item.disabled = True
+            await self.message.edit(view=self)

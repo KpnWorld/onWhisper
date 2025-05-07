@@ -37,21 +37,43 @@ class DatabaseManager:
         self._operation_locks = {}
         self._write_lock = asyncio.Lock()
         self._initialized = False
+        self.db = db  # Replit database instance
+
+    async def _read_data(self, key: str) -> Optional[Any]:
+        """Read data from Replit database with caching"""
+        if key in self._cache:
+            return self._cache[key]
+
+        try:
+            if key in self.db:
+                data = self.db[key]
+                self._cache[key] = data
+                return data
+            return None
+        except Exception as e:
+            print(f"Error reading data: {e}")
+            return None
+
+    async def _write_data(self, key: str, data: Any) -> bool:
+        """Write data to Replit database with proper locking"""
+        try:
+            async with self._write_lock:
+                self.db[key] = data
+                self._cache[key] = data
+                return True
+        except Exception as e:
+            print(f"Error writing data: {e}")
+            return False
 
     async def initialize(self) -> bool:
-        """Initialize database connection and create required directories/files"""
+        """Initialize database connection and create required structures"""
         try:
             if self._initialized:
                 return True
 
-            # Create data directory if it doesn't exist
-            import os
-            os.makedirs('data', exist_ok=True)
-
-            # Initialize guilds file if it doesn't exist
-            guilds_data = await self._read_data('guilds')
-            if guilds_data is None:
-                await self._write_data('guilds', [])
+            # Initialize guilds list if it doesn't exist
+            if 'guilds' not in self.db:
+                self.db['guilds'] = []
 
             # Verify we can read and write to the database
             test_key = "db_test"
@@ -70,8 +92,7 @@ class DatabaseManager:
 
             # Clean up test data
             try:
-                import os
-                os.remove(f'data/{test_key}.json')
+                del self.db[test_key]
             except:
                 pass
 
@@ -88,7 +109,7 @@ class DatabaseManager:
             if not self._initialized:
                 return False
 
-            # Try to read guilds file as connection test
+            # Try to read guilds list as connection test
             guilds = await self._read_data('guilds')
             return guilds is not None
 
@@ -112,34 +133,6 @@ class DatabaseManager:
             except Exception as e:
                 print(f"Error in database operation {operation_name}: {e}")
                 return None
-
-    async def _write_data(self, key: str, data: Any) -> bool:
-        """Write data to storage with proper locking"""
-        try:
-            async with self._write_lock:
-                async with aiofiles.open(f'data/{key}.json', 'w') as f:
-                    await f.write(json.dumps(data, indent=2))
-                self._cache[key] = data
-                return True
-        except Exception as e:
-            print(f"Error writing data: {e}")
-            return False
-
-    async def _read_data(self, key: str) -> Optional[Any]:
-        """Read data from storage with caching"""
-        if key in self._cache:
-            return self._cache[key]
-
-        try:
-            async with aiofiles.open(f'data/{key}.json', 'r') as f:
-                data = json.loads(await f.read())
-                self._cache[key] = data
-                return data
-        except FileNotFoundError:
-            return None
-        except Exception as e:
-            print(f"Error reading data: {e}")
-            return None
 
     async def get_guild_data(self, guild_id: int) -> dict:
         """Get all data for a guild"""
@@ -285,6 +278,140 @@ class DatabaseManager:
                 'status': 'error',
                 'error': str(e)
             }
+
+    async def sync_guilds(self, bot) -> dict:
+        """Synchronize guild data with current bot guilds"""
+        try:
+            success = 0
+            failed = 0
+            guilds = []
+
+            # Get current guilds list
+            for guild in bot.guilds:
+                try:
+                    # Ensure guild data exists
+                    guild_data = await self.get_guild_data(guild.id)
+                    if not guild_data:
+                        # Initialize new guild
+                        guild_data = {
+                            'id': str(guild.id),
+                            'name': guild.name,
+                            'joined_at': datetime.utcnow().isoformat(),
+                            'whisper_config': {'enabled': False},
+                            'logs': {'enabled': False},
+                            'xp_settings': {'enabled': True, 'rate': 15, 'cooldown': 60},
+                            'roles': {'color_roles': [], 'level_roles': {}}
+                        }
+                        await self._write_data(f"guild:{guild.id}", guild_data)
+                    
+                    guilds.append(str(guild.id))
+                    success += 1
+                except Exception as e:
+                    print(f"Failed to sync guild {guild.name}: {e}")
+                    failed += 1
+
+            # Save updated guilds list
+            await self._write_data('guilds', guilds)
+            
+            return {
+                'success': success,
+                'failed': failed
+            }
+
+        except Exception as e:
+            print(f"Error syncing guilds: {e}")
+            return {
+                'success': 0,
+                'failed': len(bot.guilds)
+            }
+
+    async def get_defaults(self, section: str) -> Optional[dict]:
+        """Get default configuration for a section"""
+        defaults = {
+            'whisper_config': {
+                'enabled': False,
+                'channel_id': None,
+                'staff_role': None,
+                'anonymous_allowed': True
+            },
+            'logs': {
+                'enabled': False,
+                'log_channel': None,
+                'log_types': {
+                    'member': ['join', 'leave'],
+                    'server': ['message_delete', 'message_edit'],
+                    'mod': ['warn', 'kick', 'ban', 'timeout']
+                }
+            },
+            'xp_settings': {
+                'enabled': True,
+                'rate': 15,
+                'cooldown': 60,
+                'level_roles': {}
+            },
+            'roles': {
+                'color_roles': [],
+                'level_roles': {},
+                'staff_role': None,
+                'muted_role': None
+            }
+        }
+        return defaults.get(section)
+
+    async def ensure_guild_exists(self, guild_id: int, guild_name: str) -> bool:
+        """Ensure guild data exists, initialize if not"""
+        try:
+            guilds = await self._read_data('guilds') or []
+            guild_data = await self.get_guild_data(guild_id)
+
+            if not guild_data:
+                # Initialize new guild
+                guild_data = {
+                    'id': str(guild_id),
+                    'name': guild_name,
+                    'joined_at': datetime.utcnow().isoformat(),
+                    'whisper_config': {'enabled': False},
+                    'logs': {'enabled': False},
+                    'xp_settings': {'enabled': True, 'rate': 15, 'cooldown': 60},
+                    'roles': {'color_roles': [], 'level_roles': {}}
+                }
+                await self._write_data(f"guild:{guild_id}", guild_data)
+
+            if str(guild_id) not in guilds:
+                guilds.append(str(guild_id))
+                await self._write_data('guilds', guilds)
+
+            return True
+
+        except Exception as e:
+            print(f"Error ensuring guild exists: {e}")
+            return False
+
+    async def increment_stat(self, bot_id: int, stat_name: str) -> bool:
+        """Increment a bot statistic"""
+        try:
+            stats = await self._read_data(f"bot_stats:{bot_id}") or {}
+            stats[stat_name] = stats.get(stat_name, 0) + 1
+            return await self._write_data(f"bot_stats:{bot_id}", stats)
+        except Exception as e:
+            print(f"Error incrementing stat: {e}")
+            return False
+
+    async def get_bot_stats(self, bot_id: int) -> Optional[dict]:
+        """Get bot statistics"""
+        try:
+            return await self._read_data(f"bot_stats:{bot_id}")
+        except Exception as e:
+            print(f"Error getting bot stats: {e}")
+            return None
+
+    async def close(self) -> None:
+        """Close database connections"""
+        try:
+            self._cache.clear()
+            self._initialized = False
+        except Exception as e:
+            print(f"Error closing database: {e}")
 
 # Alias for backward compatibility
 DBManager = DatabaseManager
