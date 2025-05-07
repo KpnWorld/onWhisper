@@ -3,11 +3,10 @@ from discord.ext import commands
 import json
 from datetime import datetime, timedelta, timezone
 import asyncio
-import aiohttp
-import os
 from typing import Optional, Dict, Any, List, Union, Callable
 import random
-import urllib.parse
+from replit import db
+import os
 
 class DatabaseTransaction:
     def __init__(self, db_manager, guild_id: int, namespace: str):
@@ -38,21 +37,6 @@ class DatabaseManager:
         self._operation_locks = {}
         self._write_lock = asyncio.Lock()
         self._initialized = False
-        self._session = None
-        self.db_url = os.getenv('REPLIT_DB_URL')
-        if not self.db_url:
-            raise ValueError("REPLIT_DB_URL environment variable not set")
-
-    async def _ensure_session(self):
-        """Ensure aiohttp session is created"""
-        try:
-            if self._session is None or self._session.closed:
-                self._session = aiohttp.ClientSession(trust_env=True)
-            return self._session
-        except Exception as e:
-            print(f"Error creating session: {e}")
-            self._session = None
-            raise
 
     async def _read_data(self, key: str) -> Optional[Any]:
         """Read data from Replit database with caching"""
@@ -60,24 +44,17 @@ class DatabaseManager:
             return self._cache[key]
 
         try:
-            session = await self._ensure_session()
-            encoded_key = urllib.parse.quote(key)
-            async with session.get(f"{self.db_url}/{encoded_key}") as response:
-                if response.status == 404:
-                    return None
-                elif response.status == 200:
-                    data = await response.text()
+            if key in db:
+                data = db[key]
+                # Convert string data to JSON if needed
+                if isinstance(data, str):
                     try:
                         data = json.loads(data)
-                        self._cache[key] = data
-                        return data
                     except json.JSONDecodeError:
-                        # Handle non-JSON data
-                        self._cache[key] = data
-                        return data
-                else:
-                    print(f"Error reading key {key}: {response.status}")
-                    return None
+                        pass
+                self._cache[key] = data
+                return data
+            return None
         except Exception as e:
             print(f"Error reading data: {e}")
             return None
@@ -85,22 +62,14 @@ class DatabaseManager:
     async def _write_data(self, key: str, data: Any) -> bool:
         """Write data to Replit database with proper locking"""
         try:
-            session = await self._ensure_session()
             async with self._write_lock:
                 # Convert data to JSON string if it's not already a string
                 if not isinstance(data, str):
                     data = json.dumps(data)
                 
-                encoded_key = urllib.parse.quote(key)
-                payload = f"{encoded_key}={urllib.parse.quote(data)}"
-                
-                async with session.post(self.db_url, data=payload) as response:
-                    if response.status == 200:
-                        self._cache[key] = data
-                        return True
-                    else:
-                        print(f"Error writing key {key}: {response.status}")
-                        return False
+                db[key] = data
+                self._cache[key] = data
+                return True
         except Exception as e:
             print(f"Error writing data: {e}")
             return False
@@ -108,15 +77,11 @@ class DatabaseManager:
     async def _delete_data(self, key: str) -> bool:
         """Delete data from Replit database"""
         try:
-            session = await self._ensure_session()
-            encoded_key = urllib.parse.quote(key)
-            async with session.delete(f"{self.db_url}/{encoded_key}") as response:
-                if response.status == 200:
-                    self._cache.pop(key, None)
-                    return True
-                else:
-                    print(f"Error deleting key {key}: {response.status}")
-                    return False
+            if key in db:
+                del db[key]
+                self._cache.pop(key, None)
+                return True
+            return False
         except Exception as e:
             print(f"Error deleting data: {e}")
             return False
@@ -124,70 +89,49 @@ class DatabaseManager:
     async def _list_keys(self, prefix: str = "") -> List[str]:
         """List all keys with given prefix"""
         try:
-            session = await self._ensure_session()
-            encoded_prefix = urllib.parse.quote(prefix)
-            async with session.get(f"{self.db_url}?prefix={encoded_prefix}") as response:
-                if response.status == 200:
-                    text = await response.text()
-                    return text.split('\n') if text else []
-                else:
-                    print(f"Error listing keys: {response.status}")
-                    return []
+            if prefix:
+                return list(db.prefix(prefix))
+            return list(db.keys())
         except Exception as e:
             print(f"Error listing keys: {e}")
             return []
 
     async def initialize(self) -> bool:
-        """Initialize database connection and create required structures"""
+        """Initialize database connection"""
         try:
-            if self._initialized:
+            # Test database connection by writing and reading a test key
+            test_key = "_test_connection"
+            test_value = str(datetime.utcnow())
+            
+            db[test_key] = test_value
+            read_value = db[test_key]
+            del db[test_key]
+            
+            if read_value == test_value:
+                self._initialized = True
                 return True
-
-            # Verify we can connect to the database
-            if not self.db_url:
-                print("REPLIT_DB_URL not set")
-                return False
-
-            # Initialize guilds list if it doesn't exist
-            guilds = await self._read_data('guilds')
-            if guilds is None:
-                if not await self._write_data('guilds', []):
-                    print("Failed to initialize guilds list")
-                    return False
-
-            # Verify basic read operation works
-            guilds = await self._read_data('guilds')
-            if guilds is None:
-                print("Failed to verify database connection")
-                return False
-
-            self._initialized = True
-            return True
-
+                
+            return False
         except Exception as e:
-            print(f"Database initialization error: {e}")
+            print(f"Database initialization failed: {e}")
             return False
 
     async def close(self) -> None:
-        """Close database connections"""
-        try:
-            if self._session and not self._session.closed:
-                await self._session.close()
-            self._cache.clear()
-            self._initialized = False
-        except Exception as e:
-            print(f"Error closing database: {e}")
+        """Close database connection"""
+        # No need to close anything with the official client
+        self._initialized = False
 
     async def check_connection(self) -> bool:
         """Check if database connection is working"""
         try:
-            if not self._initialized:
-                return False
-
-            # Try to read guilds list as connection test
-            guilds = await self._read_data('guilds')
-            return guilds is not None
-
+            test_key = "_test_connection"
+            test_value = str(datetime.utcnow())
+            
+            db[test_key] = test_value
+            read_value = db[test_key]
+            del db[test_key]
+            
+            return read_value == test_value
         except Exception as e:
             print(f"Database connection check failed: {e}")
             return False
