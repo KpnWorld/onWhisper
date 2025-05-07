@@ -1,4 +1,4 @@
-import discord
+import discllord
 from discord.ext import commands
 import json
 from datetime import datetime, timedelta, timezone
@@ -45,9 +45,14 @@ class DatabaseManager:
 
     async def _ensure_session(self):
         """Ensure aiohttp session is created"""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
+        try:
+            if self._session is None or self._session.closed:
+                self._session = aiohttp.ClientSession(trust_env=True)
+            return self._session
+        except Exception as e:
+            print(f"Error creating session: {e}")
+            self._session = None
+            raise
 
     async def _read_data(self, key: str) -> Optional[Any]:
         """Read data from Replit database with caching"""

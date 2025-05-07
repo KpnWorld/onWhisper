@@ -37,7 +37,7 @@ class Bot(commands.Bot):
         )
         
         # Core attributes
-        self.db_manager = DBManager(self)
+        self.db_manager = None  # Will be initialized in setup_hook
         self.ui_manager = UIManager()
         self.bg_tasks = []
         self._rate_limit_retries = 0
@@ -92,6 +92,18 @@ class Bot(commands.Bot):
         """This is called when the bot starts, sets up the database and loads cogs"""
         print(f"\nStarting Bot v{self.version}")
         print("Running startup validation...")
+        
+        # Initialize database manager
+        try:
+            self.db_manager = DBManager(self)
+            if not await self.db_manager.initialize():
+                print("❌ Failed to initialize database")
+                await self.close()
+                return
+        except Exception as e:
+            print(f"❌ Database initialization failed: {e}")
+            await self.close()
+            return
 
         if not await self._validate_startup():
             print("❌ Startup validation failed")
@@ -102,12 +114,6 @@ class Bot(commands.Bot):
 
         print("Initializing database...")
         try:
-            if not await self.db_manager.initialize():
-                print("❌ Failed to initialize database")
-                await self.close()
-                return
-            print("✅ Database initialized")
-
             # Load cogs
             print("\nLoading cogs...")
             cog_load_errors = []
