@@ -29,7 +29,6 @@ class Bot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents, activity=random.choice(ACTIVITIES))
 
         self.db_manager = None
-        self.ui_manager = UIManager(self)
         self.bg_tasks = []
         self.start_time = None
         self.activity_task = None
