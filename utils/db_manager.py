@@ -330,6 +330,88 @@ class DBManager:
             logging.error(f"Error creating whisper for user {user_id} in guild {guild_id}: {str(e)}")
             raise DatabaseError(f"Failed to create whisper: {str(e)}")
 
+    @db_transaction()
+    async def get_guild_config(self, guild_id: int) -> Optional[Dict[str, Any]]:
+        """Get guild configuration"""
+        cache_key = f"guild_config_{guild_id}"
+        
+        try:
+            # Check cache first
+            cached_data = self.cache.get(cache_key)
+            if cached_data:
+                return cached_data
+
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT * FROM guild_config 
+                    WHERE guild_id = ?
+                """, (guild_id,))
+                
+                result = await cursor.fetchone()
+                if result:
+                    # Convert to dict
+                    columns = [description[0] for description in cursor.description]
+                    config = dict(zip(columns, result))
+                    
+                    # Cache the result
+                    self.cache.set(cache_key, config)
+                    return config
+                    
+                # If no config exists, create default config
+                await cursor.execute("""
+                    INSERT OR IGNORE INTO guild_config (guild_id)
+                    VALUES (?)
+                """, (guild_id,))
+                
+                # Get the default config
+                await cursor.execute("""
+                    SELECT * FROM guild_config 
+                    WHERE guild_id = ?
+                """, (guild_id,))
+                
+                result = await cursor.fetchone()
+                if result:
+                    columns = [description[0] for description in cursor.description]
+                    config = dict(zip(columns, result))
+                    self.cache.set(cache_key, config)
+                    return config
+                
+                return None
+
+        except Exception as e:
+            logging.error(f"Error getting guild config for guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get guild config: {str(e)}")
+
+    @db_transaction()
+    async def update_guild_config(self, guild_id: int, config_updates: Dict[str, Any]) -> bool:
+        """Update guild configuration"""
+        cache_key = f"guild_config_{guild_id}"
+        
+        try:
+            # Prepare the update query
+            update_fields = []
+            params = []
+            for key, value in config_updates.items():
+                update_fields.append(f"{key} = ?")
+                params.append(value)
+            params.append(guild_id)
+
+            async with self.db.cursor() as cursor:
+                await cursor.execute(f"""
+                    UPDATE guild_config 
+                    SET {', '.join(update_fields)},
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE guild_id = ?
+                """, params)
+                
+                # Invalidate cache
+                self.cache.invalidate(cache_key)
+                return True
+
+        except Exception as e:
+            logging.error(f"Error updating guild config for guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to update guild config: {str(e)}")
+
     async def cleanup_old_data(self):
         """Clean up expired or old data"""
         try:
