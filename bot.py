@@ -1,5 +1,4 @@
 import discord
-from discord.commands import slash_command, Option
 from discord.ext import commands, tasks
 import os
 import random
@@ -84,7 +83,7 @@ class Bot(commands.Bot):
             print(f"[ERROR] ❌ Guild sync failed: {e}")
 
         try:
-            await self.sync_commands(force=True)
+            await self.tree.sync()
             print(f"[INFO] ✅ Synced commands globally")
         except discord.Forbidden:
             print("[ERROR] ❌ Missing 'applications.commands' scope.")
@@ -170,7 +169,7 @@ class Bot(commands.Bot):
         await super().close()
         print("[INFO] Bot shutdown complete.")
 
-    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
+    async def on_command_error(self, ctx, error):
         """Global error handler for prefix commands"""
         if isinstance(error, commands.CommandNotFound):
             return
@@ -220,10 +219,10 @@ class Bot(commands.Bot):
             )
         )
 
-    async def on_slash_command_error(self, ctx: discord.ApplicationContext, error: Exception):
+    async def on_application_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
         """Global error handler for slash commands"""
         if isinstance(error, commands.CommandOnCooldown):
-            await ctx.respond(
+            await interaction.response.send_message(
                 embed=self.ui_manager.error_embed(
                     "Cooldown",
                     f"Please wait {error.retry_after:.1f}s before using this command again."
@@ -233,7 +232,7 @@ class Bot(commands.Bot):
             return
 
         if isinstance(error, commands.MissingPermissions):
-            await ctx.respond(
+            await interaction.response.send_message(
                 embed=self.ui_manager.error_embed(
                     "Missing Permissions",
                     "You don't have the required permissions to use this command."
@@ -243,7 +242,7 @@ class Bot(commands.Bot):
             return
 
         if isinstance(error, commands.BotMissingPermissions):
-            await ctx.respond(
+            await interaction.response.send_message(
                 embed=self.ui_manager.error_embed(
                     "Bot Missing Permissions",
                     "I don't have the required permissions to execute this command."
@@ -253,10 +252,10 @@ class Bot(commands.Bot):
             return
 
         # Log unexpected errors
-        print(f"[ERROR] Slash command error in {ctx.command}: {str(error)}")
+        print(f"[ERROR] Slash command error in {interaction.command}: {str(error)}")
         
         try:
-            await ctx.respond(
+            await interaction.response.send_message(
                 embed=self.ui_manager.error_embed(
                     "Error",
                     "An unexpected error occurred. This has been logged."
