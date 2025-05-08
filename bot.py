@@ -28,8 +28,7 @@ class Bot(commands.Bot):
 
         super().__init__(
             command_prefix="!",
-            intents=intents,
-            activity=random.choice(ACTIVITIES)
+            intents=intents
         )
 
         self.db_manager = None
@@ -94,9 +93,13 @@ class Bot(commands.Bot):
             asyncio.create_task(self._periodic_cleanup()),
             asyncio.create_task(self._periodic_maintenance())
         ])
-        self.activity_task = asyncio.create_task(self._change_activity())
-
         self._ready.set()
+
+    async def on_ready(self):
+        """Called when the bot is ready and connected to Discord"""
+        print(f"[INFO] Bot {self.user.name} is ready!")
+        self.start_time = datetime.utcnow()
+        self.activity_task = asyncio.create_task(self._change_activity())
 
     async def _validate_startup(self):
         try:
@@ -130,6 +133,7 @@ class Bot(commands.Bot):
                 await asyncio.sleep(300)
 
     async def _change_activity(self):
+        """Change bot's activity periodically"""
         while not self.is_closed():
             try:
                 await self.change_presence(activity=random.choice(ACTIVITIES))

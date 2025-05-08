@@ -49,8 +49,9 @@ class LevelingCog(commands.Cog):
                 )
 
                 if not xp_data:
+                    message = "You haven't earned any XP yet!" if target == interaction.user else f"{target.display_name} hasn't earned any XP yet!"
                     return await interaction.response.send_message(
-                        f"{'You haven\'t' if target == interaction.user else f'{target.display_name} hasn\'t'} earned any XP yet!",
+                        message,
                         ephemeral=True
                     )
 

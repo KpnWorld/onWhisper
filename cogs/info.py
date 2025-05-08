@@ -326,7 +326,7 @@ class InfoCog(commands.Cog):
                 ephemeral=True
             )
 
-    @commands.hybrid_command()
+    @commands.hybrid_command(name="help")
     async def help(self, ctx: commands.Context, command: Optional[str] = None):
         """Show help about commands"""
         if command:
