@@ -1,5 +1,5 @@
 import discord
-from discord import app_commands
+from discord.commands import slash_command, Option
 from discord.ext import commands, tasks
 import os
 import random
@@ -8,6 +8,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import signal
 from utils.db_manager import DBManager
+from utils.ui_manager import UIManager
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -26,9 +27,14 @@ class Bot(commands.Bot):
         intents.message_content = True
         intents.members = True
 
-        super().__init__(command_prefix="!", intents=intents, activity=random.choice(ACTIVITIES))
+        super().__init__(
+            command_prefix="!",
+            intents=intents,
+            activity=random.choice(ACTIVITIES)
+        )
 
         self.db_manager = None
+        self.ui_manager = UIManager()
         self.bg_tasks = []
         self.start_time = None
         self.activity_task = None
@@ -78,8 +84,8 @@ class Bot(commands.Bot):
             print(f"[ERROR] ❌ Guild sync failed: {e}")
 
         try:
-            commands_synced = await self.tree.sync()
-            print(f"[INFO] ✅ Synced {len(commands_synced)} commands globally")
+            await self.sync_commands(force=True)
+            print(f"[INFO] ✅ Synced commands globally")
         except discord.Forbidden:
             print("[ERROR] ❌ Missing 'applications.commands' scope.")
         except Exception as e:
@@ -214,10 +220,10 @@ class Bot(commands.Bot):
             )
         )
 
-    async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        """Global error handler for application (/) commands"""
-        if isinstance(error, app_commands.CommandOnCooldown):
-            await interaction.response.send_message(
+    async def on_slash_command_error(self, ctx: discord.ApplicationContext, error: Exception):
+        """Global error handler for slash commands"""
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.respond(
                 embed=self.ui_manager.error_embed(
                     "Cooldown",
                     f"Please wait {error.retry_after:.1f}s before using this command again."
@@ -226,8 +232,8 @@ class Bot(commands.Bot):
             )
             return
 
-        if isinstance(error, app_commands.MissingPermissions):
-            await interaction.response.send_message(
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.respond(
                 embed=self.ui_manager.error_embed(
                     "Missing Permissions",
                     "You don't have the required permissions to use this command."
@@ -236,8 +242,8 @@ class Bot(commands.Bot):
             )
             return
 
-        if isinstance(error, app_commands.BotMissingPermissions):
-            await interaction.response.send_message(
+        if isinstance(error, commands.BotMissingPermissions):
+            await ctx.respond(
                 embed=self.ui_manager.error_embed(
                     "Bot Missing Permissions",
                     "I don't have the required permissions to execute this command."
@@ -246,29 +252,17 @@ class Bot(commands.Bot):
             )
             return
 
-        if isinstance(error, app_commands.CommandNotFound):
-            return
-
         # Log unexpected errors
-        print(f"[ERROR] App command error in {interaction.command}: {str(error)}")
+        print(f"[ERROR] Slash command error in {ctx.command}: {str(error)}")
         
         try:
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    embed=self.ui_manager.error_embed(
-                        "Error",
-                        "An unexpected error occurred. This has been logged."
-                    ),
-                    ephemeral=True
-                )
-            else:
-                await interaction.followup.send(
-                    embed=self.ui_manager.error_embed(
-                        "Error",
-                        "An unexpected error occurred. This has been logged."
-                    ),
-                    ephemeral=True
-                )
+            await ctx.respond(
+                embed=self.ui_manager.error_embed(
+                    "Error",
+                    "An unexpected error occurred. This has been logged."
+                ),
+                ephemeral=True
+            )
         except Exception as e:
             print(f"[ERROR] Failed to send error message: {e}")
 
@@ -283,7 +277,7 @@ def run_bot():
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    asyncio.run(bot.start(TOKEN))
+    bot.run(TOKEN)
 
 if __name__ == "__main__":
     run_bot()
