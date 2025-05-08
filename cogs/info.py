@@ -326,41 +326,42 @@ class InfoCog(commands.Cog):
                 ephemeral=True
             )
 
-    @commands.hybrid_command(name="help")
-    async def help(self, ctx: commands.Context, command: Optional[str] = None):
+    @app_commands.command(name="help")
+    @app_commands.describe(command="The command to get help for")
+    async def help_command(self, interaction: discord.Interaction, command: Optional[str] = None):
         """Show help about commands"""
         if command:
             # Show detailed help for a specific command
-            cmd = self.bot.get_command(command)
+            cmd = self.bot.get_command(command) or self.bot.tree.get_command(command)
             if not cmd:
-                return await ctx.send(
+                return await interaction.response.send_message(
                     f"❌ Command '{command}' not found.",
                     ephemeral=True
                 )
 
             embed = discord.Embed(
-                title=f"Help - {cmd.qualified_name}",
-                description=cmd.help or "No description available.",
+                title=f"Help - {cmd.name}",
+                description=cmd.description or cmd.help or "No description available.",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
 
-            if cmd.aliases:
+            if isinstance(cmd, commands.Command) and cmd.aliases:
                 embed.add_field(
                     name="Aliases",
                     value=", ".join(cmd.aliases),
                     inline=False
                 )
 
-            usage = f"/{cmd.qualified_name}"
-            if cmd.signature:
+            usage = f"/{cmd.name}"
+            if isinstance(cmd, commands.Command) and cmd.signature:
                 usage += f" {cmd.signature}"
             embed.add_field(name="Usage", value=f"```{usage}```", inline=False)
 
             if isinstance(cmd, commands.Group):
                 subcommands = []
                 for subcmd in cmd.commands:
-                    subcommands.append(f"`{subcmd.name}` - {subcmd.help or 'No description'}")
+                    subcommands.append(f"`{subcmd.name}` - {subcmd.description or subcmd.help or 'No description'}")
                 if subcommands:
                     embed.add_field(
                         name="Subcommands",
@@ -380,10 +381,11 @@ class InfoCog(commands.Cog):
             # Group commands by cog
             for cog_name, cog in self.bot.cogs.items():
                 commands_list = []
-                for cmd in cog.get_commands():
-                    if not cmd.hidden:
+                # Add slash commands
+                for cmd in cog.get_app_commands():
+                    if not getattr(cmd, 'hidden', False):
                         commands_list.append(
-                            f"`{cmd.name}` - {cmd.help or 'No description'}"
+                            f"`/{cmd.name}` - {cmd.description or 'No description'}"
                         )
                 
                 if commands_list:
@@ -395,7 +397,7 @@ class InfoCog(commands.Cog):
 
             embed.set_footer(text="Use /help <command> for detailed information about a command.")
 
-        await ctx.send(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(InfoCog(bot))
