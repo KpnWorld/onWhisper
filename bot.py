@@ -7,21 +7,10 @@ import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
 import signal
-import logging
-
 from utils.db_manager import DBManager
-from utils.ui_manager import UIManager
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)8s | %(name)15s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger('bot')
-logger.addHandler(logging.FileHandler('bot.log'))
 
 ACTIVITIES = [
     discord.Game("with commands"),
@@ -64,38 +53,38 @@ class Bot(commands.Bot):
         return f"{delta.days}d {delta.seconds//3600}h {(delta.seconds//60)%60}m {delta.seconds%60}s"
 
     async def setup_hook(self):
-        logger.info(f"Starting Bot v{self.version}")
+        print(f"[INFO] Starting Bot v{self.version}")
         self.db_manager = DBManager(self)
 
         if not await self.db_manager.initialize():
-            logger.error("Failed to initialize database.")
+            print("[ERROR] Failed to initialize database.")
             return await self.close()
 
         if not await self._validate_startup():
-            logger.error("Startup validation failed.")
+            print("[ERROR] Startup validation failed.")
             return await self.close()
 
         for file in os.listdir("./cogs"):
             if file.endswith(".py"):
                 try:
                     await self.load_extension(f"cogs.{file[:-3]}")
-                    logger.info(f"✅ Loaded cog {file}")
+                    print(f"[INFO] ✅ Loaded cog {file}")
                 except Exception as e:
-                    logger.error(f"❌ Failed to load cog {file}: {e}")
+                    print(f"[ERROR] ❌ Failed to load cog {file}: {e}")
 
         try:
             sync_result = await self.db_manager.sync_guilds(self)
-            logger.info(f"✅ Synced {sync_result['success']} guilds")
+            print(f"[INFO] ✅ Synced {sync_result['success']} guilds")
         except Exception as e:
-            logger.error(f"❌ Guild sync failed: {e}")
+            print(f"[ERROR] ❌ Guild sync failed: {e}")
 
         try:
             commands_synced = await self.tree.sync()
-            logger.info(f"✅ Synced {len(commands_synced)} commands globally")
+            print(f"[INFO] ✅ Synced {len(commands_synced)} commands globally")
         except discord.Forbidden:
-            logger.error("❌ Missing 'applications.commands' scope.")
+            print("[ERROR] ❌ Missing 'applications.commands' scope.")
         except Exception as e:
-            logger.error(f"❌ Command sync failed: {e}")
+            print(f"[ERROR] ❌ Command sync failed: {e}")
 
         self.bg_tasks.extend([
             asyncio.create_task(self._periodic_cleanup()),
@@ -111,7 +100,7 @@ class Bot(commands.Bot):
                 return False
             return True
         except Exception as e:
-            logger.error(f"Startup validation failed: {e}")
+            print(f"[ERROR] Startup validation failed: {e}")
             return False
 
     async def _periodic_cleanup(self):
@@ -122,7 +111,7 @@ class Bot(commands.Bot):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Cleanup error: {e}")
+                print(f"[ERROR] Cleanup error: {e}")
                 await asyncio.sleep(300)
 
     async def _periodic_maintenance(self):
@@ -133,7 +122,7 @@ class Bot(commands.Bot):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Maintenance error: {e}")
+                print(f"[ERROR] Maintenance error: {e}")
                 await asyncio.sleep(300)
 
     async def _change_activity(self):
@@ -144,37 +133,37 @@ class Bot(commands.Bot):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Activity error: {e}")
+                print(f"[ERROR] Activity error: {e}")
                 await asyncio.sleep(60)
 
     async def close(self):
         if self._closing.is_set():
             return
         self._closing.set()
-        logger.info("Shutting down...")
+        print("[INFO] Shutting down...")
 
         if self.activity_task:
             self.activity_task.cancel()
             try:
                 await asyncio.wait_for(self.activity_task, timeout=5)
             except (asyncio.TimeoutError, asyncio.CancelledError):
-                logger.warning("Activity task shutdown timed out")
+                print("[WARNING] Activity task shutdown timed out")
 
         for task in self.bg_tasks:
             task.cancel()
         try:
             await asyncio.wait_for(asyncio.gather(*self.bg_tasks, return_exceptions=True), timeout=self._shutdown_timeout)
         except asyncio.TimeoutError:
-            logger.warning("Some tasks did not shut down in time")
+            print("[WARNING] Some tasks did not shut down in time")
 
         if self.db_manager:
             try:
                 await asyncio.wait_for(self.db_manager.close(), timeout=5)
             except Exception as e:
-                logger.error(f"DB close error: {e}")
+                print(f"[ERROR] DB close error: {e}")
 
         await super().close()
-        logger.info("Bot shutdown complete.")
+        print("[INFO] Bot shutdown complete.")
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         """Global error handler for prefix commands"""
@@ -218,7 +207,7 @@ class Bot(commands.Bot):
             return
 
         # Log unexpected errors
-        logger.error(f"Command error in {ctx.command}: {str(error)}")
+        print(f"[ERROR] Command error in {ctx.command}: {str(error)}")
         await ctx.send(
             embed=self.ui_manager.error_embed(
                 "Error",
@@ -262,7 +251,7 @@ class Bot(commands.Bot):
             return
 
         # Log unexpected errors
-        logger.error(f"App command error in {interaction.command}: {str(error)}")
+        print(f"[ERROR] App command error in {interaction.command}: {str(error)}")
         
         try:
             if not interaction.response.is_done():
@@ -282,14 +271,14 @@ class Bot(commands.Bot):
                     ephemeral=True
                 )
         except Exception as e:
-            logger.error(f"Failed to send error message: {e}")
+            print(f"[ERROR] Failed to send error message: {e}")
 
 def run_bot():
     bot = Bot()
 
     def handle_signal(signum, frame):
         signal_name = signal.Signals(signum).name
-        logger.info(f"Received signal: {signal_name}")
+        print(f"[INFO] Received signal: {signal_name}")
         asyncio.create_task(bot.close())
 
     signal.signal(signal.SIGINT, handle_signal)
