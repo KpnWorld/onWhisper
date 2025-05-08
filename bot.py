@@ -20,9 +20,15 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s | %(levelname)8s | %(name)15s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger('bot')
+
+# Add a file handler to keep logs
+file_handler = logging.FileHandler('bot.log')
+file_handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)8s | %(name)15s | %(message)s'))
+logger.addHandler(file_handler)
 
 # List of activities for the bot to cycle through
 ACTIVITIES = [
@@ -53,8 +59,10 @@ class Bot(commands.Bot):
         self.start_time = None
         self._maintenance_mode = False
         self._ready = asyncio.Event()
-        self._closing = asyncio.Event()  # New flag to track shutdown state
-        self.activity_task = None  # Track the activity task
+        self._closing = asyncio.Event()
+        self.activity_task = None
+        self._shutdown_timeout = 10  # Shutdown timeout in seconds
+        self._tasks_pending = set()  # Track pending tasks
 
         # Version info
         try:
@@ -64,6 +72,28 @@ class Bot(commands.Bot):
             self.version = "0.0.1"
             with open('version.txt', 'w') as f:
                 f.write(self.version)
+
+    @property
+    def uptime(self) -> str:
+        """Calculate and format the bot's uptime"""
+        if not self.start_time:
+            return "Bot not started"
+            
+        delta = datetime.utcnow() - self.start_time
+        days = delta.days
+        hours, remainder = divmod(delta.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        parts = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        parts.append(f"{seconds}s")
+        
+        return " ".join(parts)
 
     async def _validate_startup(self) -> bool:
         """Validate critical components and permissions"""
@@ -238,34 +268,58 @@ class Bot(commands.Bot):
             if self.activity_task and not self.activity_task.done():
                 self.activity_task.cancel()
                 try:
-                    await self.activity_task
-                except asyncio.CancelledError:
-                    pass
+                    async with asyncio.timeout(5):
+                        await self.activity_task
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    logger.warning("Activity task cancellation timed out")
             
-            # Cancel all background tasks
+            # Cancel all background tasks with tracking
             logger.info("Cancelling background tasks...")
+            pending_tasks = []
             for task in self.bg_tasks:
                 if not task.done():
                     task.cancel()
+                    pending_tasks.append(task)
             
-            # Wait for tasks to complete with timeout
-            try:
-                await asyncio.wait(self.bg_tasks, timeout=5)
-            except asyncio.TimeoutError:
-                logger.warning("Some tasks didn't complete in time")
+            if pending_tasks:
+                try:
+                    async with asyncio.timeout(self._shutdown_timeout):
+                        done, pending = await asyncio.wait(pending_tasks, return_when=asyncio.ALL_COMPLETED)
+                        if pending:
+                            logger.warning(f"{len(pending)} tasks didn't complete gracefully")
+                        for task in done:
+                            try:
+                                await task
+                            except asyncio.CancelledError:
+                                pass
+                            except Exception as e:
+                                logger.error(f"Task error during shutdown: {e}")
+                except asyncio.TimeoutError:
+                    logger.error(f"Shutdown timed out after {self._shutdown_timeout} seconds")
             
-            # Close database connection
-            logger.info("Closing database connection...")
+            # Close database connection with timeout
             if self.db_manager:
-                await self.db_manager.close()
-            
+                logger.info("Closing database connection...")
+                try:
+                    async with asyncio.timeout(5):
+                        await self.db_manager.close()
+                except asyncio.TimeoutError:
+                    logger.error("Database connection close timed out")
+                except Exception as e:
+                    logger.error(f"Error closing database: {e}")
+
             # Close Discord connection
             logger.info("Closing Discord connection...")
-            await super().close()
+            try:
+                async with asyncio.timeout(5):
+                    await super().close()
+            except asyncio.TimeoutError:
+                logger.error("Discord connection close timed out")
             
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
         finally:
+            self._closing.clear()
             logger.info("Shutdown complete")
 
 def run_bot():
@@ -274,19 +328,54 @@ def run_bot():
     max_retries = 5
     retry_count = 0
     retry_delay = 30  # Initial delay in seconds
+    shutdown_requested = False
+
+    async def reload_config():
+        """Reload bot configuration"""
+        try:
+            logger.info("Reloading configuration...")
+            load_dotenv(override=True)  # Reload environment variables
+            if bot and bot.db_manager:
+                await bot.db_manager.reload_config()
+            logger.info("Configuration reloaded successfully")
+        except Exception as e:
+            logger.error(f"Error reloading configuration: {e}")
 
     def signal_handler(signum, frame):
-        logger.info(f"\nReceived signal {signum}")
+        nonlocal shutdown_requested
+        signal_name = signal.Signals(signum).name
+        logger.info(f"\nReceived signal {signal_name} ({signum})")
+
+        if signum == signal.SIGHUP:
+            # Handle SIGHUP for config reload
+            if bot and not bot.is_closed():
+                asyncio.run(reload_config())
+            return
+
+        if shutdown_requested:
+            logger.warning("Forced shutdown requested. Exiting immediately...")
+            sys.exit(1)
+
+        shutdown_requested = True
         if bot and not bot.is_closed():
             logger.info("Initiating graceful shutdown...")
-            asyncio.run(bot.close())
-            sys.exit(0)
+            try:
+                asyncio.run(bot.close())
+            except Exception as e:
+                logger.error(f"Error during graceful shutdown: {e}")
+                sys.exit(1)
+        sys.exit(0)
 
-    # Register signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # Register signal handlers with error handling
+    try:
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        if hasattr(signal, 'SIGHUP'):  # Check if SIGHUP is available (Unix-like systems)
+            signal.signal(signal.SIGHUP, signal_handler)
+    except Exception as e:
+        logger.error(f"Failed to register signal handlers: {e}")
 
-    while True:
+    while not shutdown_requested:
         try:
             if retry_count >= max_retries:
                 logger.error(f"Failed to start after {max_retries} attempts. Please check logs and configuration.")
@@ -310,6 +399,7 @@ def run_bot():
             return  # Don't retry on intent issues
         except KeyboardInterrupt:
             logger.info("\nShutdown requested...")
+            shutdown_requested = True
             if bot and not bot.is_closed():
                 asyncio.run(bot.close())
             return
@@ -328,12 +418,16 @@ def run_bot():
             # Reset bot instance
             bot = None
             
-            if retry_count < max_retries:
+            if retry_count < max_retries and not shutdown_requested:
                 wait_time = retry_delay * (2 ** (retry_count - 1))  # Exponential backoff
                 logger.info(f"Retrying in {wait_time} seconds...")
-                time.sleep(wait_time)
+                try:
+                    time.sleep(wait_time)
+                except KeyboardInterrupt:
+                    shutdown_requested = True
+                    return
             else:
-                logger.info("Maximum retry attempts reached. Shutting down.")
+                logger.info("Maximum retry attempts reached or shutdown requested. Exiting...")
                 return
 
 if __name__ == "__main__":

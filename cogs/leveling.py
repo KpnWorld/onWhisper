@@ -6,10 +6,14 @@ import asyncio
 from typing import Optional
 
 class LevelingCog(commands.Cog):
-    """Handles user XP and leveling system"""
+    """Handles leveling functionality"""
     
     def __init__(self, bot):
         self.bot = bot
+        self._xp_cooldowns = {}
+        # Set all commands in this cog to "Leveling" category
+        for cmd in self.__cog_app_commands__:
+            cmd.extras["category"] = "leveling"
 
     async def _get_user_data(self, guild_id: int, user_id: str) -> dict:
         """Get user XP data with safe defaults"""
@@ -20,121 +24,92 @@ class LevelingCog(commands.Cog):
         if 'xp' not in user_data:
             user_data['xp'] = 0
         if 'level' not in user_data:
-            user_data['level'] = self._calculate_level(user_data['xp'])
-        if 'last_xp' not in user_data:
-            user_data['last_xp'] = None
+            user_data['level'] = 0
             
         return user_data
 
     async def _update_user_data(self, guild_id: int, user_id: str, xp_data: dict) -> bool:
         """Update user XP data"""
         try:
-            # Get current XP data
             data = await self.bot.db_manager.get_section(guild_id, 'xp_users') or {}
-            
-            # Update user data
             data[str(user_id)] = xp_data
-            
-            # Save back to database
-            return await self.bot.db_manager.update_section(guild_id, 'xp_users', data)
+            await self.bot.db_manager.update_section(guild_id, 'xp_users', data)
+            return True
         except Exception as e:
             print(f"Error updating XP data: {e}")
             return False
 
     async def _calculate_level(self, xp: int) -> int:
-        """Calculate level from XP amount"""
+        """Calculate level from XP"""
         return int((xp / 100) ** 0.5)
 
     async def _get_xp_settings(self, guild_id: int) -> dict:
-        """Safely get XP settings"""
-        try:
-            settings = await self.bot.db_manager.safe_operation(
-                'get_section',
-                self.bot.db_manager.get_section,
-                guild_id,
-                'xp_settings'
-            )
-            return settings or {'rate': 15, 'cooldown': 60, 'enabled': True}
-        except Exception as e:
-            print(f"Error getting XP settings: {e}")
-            return {'rate': 15, 'cooldown': 60, 'enabled': True}
+        """Get XP settings with defaults"""
+        settings = await self.bot.db_manager.get_section(guild_id, 'xp_settings') or {}
+        return {
+            'enabled': settings.get('enabled', True),
+            'rate': settings.get('rate', 15),
+            'cooldown': settings.get('cooldown', 60)
+        }
 
     @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
+    async def on_message(self, message):
         """Handle XP gain from messages"""
         if message.author.bot or not message.guild:
             return
-
-        try:
-            # Get XP settings
-            settings = await self.bot.db_manager.get_section(message.guild.id, 'xp_settings') or {}
-            if not settings.get('enabled', True):
-                return
-
-            rate = settings.get('rate', 15)
-            cooldown = settings.get('cooldown', 60)
-
-            # Get user data
-            user_data = await self._get_user_data(message.guild.id, str(message.author.id))
             
-            # Check cooldown
-            if user_data['last_xp']:
-                last_xp = datetime.fromisoformat(user_data['last_xp'])
-                if (datetime.utcnow() - last_xp).total_seconds() < cooldown:
-                    return
-
-            # Add XP
-            old_level = user_data['level']
-            user_data['xp'] += rate
-            user_data['level'] = self._calculate_level(user_data['xp'])
-            user_data['last_xp'] = datetime.utcnow().isoformat()
-
-            # Save updated data
-            if await self._update_user_data(message.guild.id, str(message.author.id), user_data):
-                # Check for level up
-                if user_data['level'] > old_level:
-                    await self._handle_level_up(message.author, user_data['level'])
-
-        except Exception as e:
-            print(f"Error processing XP: {e}")
+        settings = await self._get_xp_settings(message.guild.id)
+        if not settings['enabled']:
+            return
+            
+        # Check cooldown
+        now = datetime.now().timestamp()
+        user_id = str(message.author.id)
+        last_xp = self._xp_cooldowns.get(user_id, 0)
+        
+        if now - last_xp < settings['cooldown']:
+            return
+            
+        self._xp_cooldowns[user_id] = now
+        
+        # Get current data
+        user_data = await self._get_user_data(message.guild.id, user_id)
+        current_level = user_data['level']
+        
+        # Add XP
+        user_data['xp'] += settings['rate']
+        user_data['last_xp'] = now
+        
+        # Calculate new level
+        new_level = await self._calculate_level(user_data['xp'])
+        user_data['level'] = new_level
+        
+        # Update data
+        await self._update_user_data(message.guild.id, user_id, user_data)
+        
+        # Handle level up
+        if new_level > current_level:
+            await self._handle_level_up(message.author, new_level)
 
     async def _handle_level_up(self, member: discord.Member, new_level: int):
-        """Handle level up events with safe role assignments"""
+        """Handle level up events"""
         try:
-            # Get level roles with safe operation
-            roles_data = await self.bot.db_manager.safe_operation(
-                'get_section',
-                self.bot.db_manager.get_section,
-                member.guild.id,
-                'level_roles'
+            # Send level up message
+            embed = self.bot.ui_manager.success_embed(
+                "Level Up!",
+                f"🎉 {member.mention} has reached level {new_level}!"
             )
-
-            if not roles_data:
-                return
-
-            # Find roles to award
-            role_id = roles_data.get(str(new_level))
-            if not role_id:
-                return
-
-            role = member.guild.get_role(int(role_id))
-            if not role:
-                return
-
-            # Award role and send notification
-            try:
-                await member.add_roles(role, reason=f"Reached level {new_level}")
-                embed = self.bot.ui_manager.success_embed(
-                    "Level Up!",
-                    f"🎉 Congratulations {member.mention}!\n"
-                    f"You reached level {new_level} and earned the {role.mention} role!"
-                )
-                await member.send(embed=embed)
-            except discord.Forbidden:
-                print(f"Missing permissions to assign role in {member.guild.id}")
-            except Exception as e:
-                print(f"Error assigning level role: {e}")
-
+            await member.guild.system_channel.send(embed=embed)
+            
+            # Check for level roles
+            config = await self.bot.db_manager.get_section(member.guild.id, 'level_roles') or {}
+            role_id = config.get(str(new_level))
+            
+            if role_id:
+                role = member.guild.get_role(int(role_id))
+                if role:
+                    await member.add_roles(role)
+                    
         except Exception as e:
             print(f"Error handling level up: {e}")
 
@@ -142,52 +117,47 @@ class LevelingCog(commands.Cog):
         name="rank",
         description="View your or another user's rank"
     )
+    @app_commands.describe(user="The user to check rank for")
     async def rank(
         self,
         interaction: discord.Interaction,
         user: Optional[discord.Member] = None
     ):
-        """Show rank card for a user"""
-        await interaction.response.defer()
-        target = user or interaction.user
-
+        """Show a user's rank information"""
         try:
-            user_data = await self._get_user_data(interaction.guild.id, str(target.id))
+            target = user or interaction.user
+            user_data = await self._get_user_data(interaction.guild_id, str(target.id))
             
-            # Calculate progress to next level
-            current_xp = user_data['xp']
-            current_level = user_data['level']
-            next_level_xp = (current_level + 1) ** 2 * 100
-            progress = (current_xp - (current_level ** 2 * 100)) / (next_level_xp - (current_level ** 2 * 100))
-
             embed = discord.Embed(
-                title=f"{target.display_name}'s Rank",
+                title=f"Rank - {target.display_name}",
                 color=target.color
             )
-            embed.set_thumbnail(url=target.display_avatar.url)
+            
             embed.add_field(
                 name="Level",
-                value=str(current_level),
+                value=str(user_data['level']),
                 inline=True
             )
             embed.add_field(
                 name="XP",
-                value=f"{current_xp:,}/{next_level_xp:,}",
+                value=f"{user_data['xp']:,}",
                 inline=True
             )
-
-            # Add progress bar
-            progress_bar = self.bot.ui_manager.create_progress_bar(progress)
+            
+            # Calculate XP to next level
+            next_level_xp = ((user_data['level'] + 1) ** 2) * 100
             embed.add_field(
-                name="Progress to Next Level",
-                value=progress_bar,
-                inline=False
+                name="Next Level",
+                value=f"{next_level_xp - user_data['xp']:,} XP needed",
+                inline=True
             )
-
-            await interaction.followup.send(embed=embed)
+            
+            embed.set_thumbnail(url=target.display_avatar.url)
+            
+            await interaction.response.send_message(embed=embed)
 
         except Exception as e:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),
                 ephemeral=True
             )
@@ -198,52 +168,43 @@ class LevelingCog(commands.Cog):
     )
     async def leaderboard(self, interaction: discord.Interaction):
         """Show server XP leaderboard"""
-        await interaction.response.defer()
-
         try:
-            # Get all user XP data with safe operation
-            xp_data = await self.bot.db_manager.safe_operation(
-                'get_all_xp',
-                self.bot.db_manager.get_all_xp,
-                interaction.guild.id
-            )
-
-            if not xp_data:
-                await interaction.followup.send(
+            data = await self.bot.db_manager.get_section(interaction.guild_id, 'xp_users') or {}
+            
+            if not data:
+                await interaction.response.send_message(
                     embed=self.bot.ui_manager.info_embed(
-                        "Leaderboard Empty",
-                        "No XP data found for this server."
+                        "Leaderboard",
+                        "No XP data available"
                     )
                 )
                 return
-
+                
             # Sort users by XP
             sorted_users = sorted(
-                xp_data.items(),
+                data.items(),
                 key=lambda x: x[1]['xp'],
                 reverse=True
             )[:10]  # Top 10
-
-            embed = discord.Embed(
-                title=f"🏆 {interaction.guild.name} Leaderboard",
-                color=discord.Color.gold()
-            )
-
-            for i, (user_id, data) in enumerate(sorted_users, 1):
+            
+            description = []
+            for i, (user_id, user_data) in enumerate(sorted_users, 1):
                 member = interaction.guild.get_member(int(user_id))
-                if not member:
-                    continue
-
-                embed.add_field(
-                    name=f"{i}. {member.display_name}",
-                    value=f"Level {data['level']} • {data['xp']:,} XP",
-                    inline=False
-                )
-
-            await interaction.followup.send(embed=embed)
+                if member:
+                    description.append(
+                        f"{i}. {member.mention} - Level {user_data['level']} ({user_data['xp']:,} XP)"
+                    )
+            
+            embed = discord.Embed(
+                title="XP Leaderboard",
+                description="\n".join(description),
+                color=discord.Color.blue()
+            )
+            
+            await interaction.response.send_message(embed=embed)
 
         except Exception as e:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 embed=self.bot.ui_manager.error_embed("Error", str(e)),
                 ephemeral=True
             )

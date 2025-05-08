@@ -5,9 +5,14 @@ from datetime import datetime
 import asyncio
 
 class LoggingCog(commands.Cog):
+    """Handles logging functionality"""
+    
     def __init__(self, bot):
         self.bot = bot
         self._log_locks = {}  # Prevent race conditions in log channels
+        # Set all commands in this cog to "Logging" category
+        for cmd in self.__cog_app_commands__:
+            cmd.extras["category"] = "logging"
 
     async def _get_log_channel(self, guild_id: int, log_type: str) -> Optional[discord.TextChannel]:
         """Get the configured log channel with error handling"""

@@ -4,10 +4,13 @@ from discord.ext import commands
 from typing import Optional, List
 
 class RolesCog(commands.Cog):
-    """Handles role management commands"""
+    """Handles role-related commands"""
     
     def __init__(self, bot):
         self.bot = bot
+        # Set all commands in this cog to "Roles" category
+        for cmd in self.__cog_app_commands__:
+            cmd.extras["category"] = "roles"
 
     async def _can_manage_role(self, guild: discord.Guild, role: discord.Role) -> bool:
         """Check if the bot can manage a role"""

@@ -9,8 +9,13 @@ import json
 from typing import Optional, Literal
 
 class DebugCog(commands.Cog):
+    """Handles debugging commands"""
+    
     def __init__(self, bot):
         self.bot = bot
+        # Set all commands in this cog to "Debug" category
+        for cmd in self.__cog_app_commands__:
+            cmd.extras["category"] = "debug"
 
     async def cog_check(self, ctx: commands.Context) -> bool:
         """Only allow bot owner to use these commands"""

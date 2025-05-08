@@ -4,8 +4,13 @@ from discord.ext import commands
 from typing import Optional
 
 class ConfigCog(commands.Cog):
+    """Handles server configuration commands"""
+    
     def __init__(self, bot):
         self.bot = bot
+        # Set all commands in this cog to "Configuration" category
+        for cmd in self.__cog_app_commands__:
+            cmd.extras["category"] = "configuration"
 
     config = app_commands.Group(
         name="config",

@@ -6,12 +6,17 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 class ModerationCog(commands.Cog):
+    """Handles moderation commands"""
+    
     def __init__(self, bot):
         self.bot = bot
         self.last_deleted = {}  # Channel ID -> Last deleted message
         # Store last deleted/edited messages per channel
         self.deleted_messages = {}
         self.edited_messages = {}
+        # Set all commands in this cog to "Moderation" category
+        for cmd in self.__cog_app_commands__:
+            cmd.extras["category"] = "moderation"
 
     # Helper method to log moderation events
     async def log_mod_action(self, guild_id: int, action: str, user: discord.Member, mod: discord.Member, reason: str = None):

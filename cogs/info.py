@@ -5,10 +5,13 @@ from datetime import datetime
 from typing import Optional
 
 class InfoCog(commands.Cog):
-    """Information commands"""
+    """Handles information commands"""
     
     def __init__(self, bot):
         self.bot = bot
+        # Set all commands in this cog to "Info" category
+        for cmd in self.__cog_app_commands__:
+            cmd.extras["category"] = "info"
 
     @app_commands.command(name="info", description="Get information about various aspects of the server and bot")
     @app_commands.describe(
@@ -34,6 +37,14 @@ class InfoCog(commands.Cog):
     ):
         """Get information about various aspects of the server and bot"""
         try:
+            # For help category, handle separately since it uses a different response method
+            if category == "help":
+                await self.bot.ui_manager.create_help_menu(interaction, self.bot)
+                return
+
+            # Defer the response immediately for other categories
+            await interaction.response.defer()
+            
             if category == "bot":
                 stats = await self.bot.db_manager.get_bot_stats(self.bot.user.id) or {}
                 description = [
@@ -333,22 +344,39 @@ class InfoCog(commands.Cog):
                     "\n".join(description)
                 )
 
-            elif category == "help":
-                await self.bot.ui_manager.create_help_menu(interaction, self.bot)
-                return
-
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
         except ValueError as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
+            # For user input errors, send ephemeral error message
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed("Error", str(e)),
+                    ephemeral=True
+                )
         except Exception as e:
-            await interaction.response.send_message(
-                embed=self.bot.ui_manager.error_embed("Error", str(e)),
-                ephemeral=True
-            )
+            # For unexpected errors, log and send ephemeral error message
+            print(f"Error in info command: {str(e)}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Error",
+                        "An unexpected error occurred. This has been logged."
+                    ),
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Error",
+                        "An unexpected error occurred. This has been logged."
+                    ),
+                    ephemeral=True
+                )
 
 async def setup(bot):
     await bot.add_cog(InfoCog(bot))

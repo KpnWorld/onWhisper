@@ -5,8 +5,13 @@ from datetime import datetime, timezone
 from typing import Optional
 
 class WhisperCog(commands.Cog):
+    """Handles whisper functionality"""
+    
     def __init__(self, bot):
         self.bot = bot
+        # Set all commands in this cog to "Whisper" category
+        for cmd in self.__cog_app_commands__:
+            cmd.extras["category"] = "whisper"
         self.auto_close_check.start()
 
     def cog_unload(self):
@@ -206,7 +211,7 @@ class WhisperCog(commands.Cog):
                 "This whisper thread has been closed and archived"
             )
         )
-    
+
     @tasks.loop(minutes=5.0)
     async def auto_close_check(self):
         """Check for inactive whisper threads"""
