@@ -41,6 +41,7 @@ class UIManager:
             'info': 0x5865F2,     # Blue
             'mod': 0xEB459E       # Pink
         }
+        self.HelpMenuView = HelpMenuView  # Add HelpMenuView as class attribute
 
     def success_embed(self, title: str, description: str) -> discord.Embed:
         """Create a success embed"""
@@ -205,13 +206,17 @@ class UIManager:
         bot: commands.Bot
     ):
         """Create a help menu"""
-        view = HelpMenuView(bot, self)
-        message = await interaction.response.send_message(
-            embed=self.info_embed("Help Menu", "Select a category to view commands."),
+        view = self.HelpMenuView(bot, self)
+        embed = self.info_embed(
+            "Help Menu",
+            "Select a category to view commands."
+        )
+        await interaction.response.send_message(
+            embed=embed,
             view=view,
             ephemeral=True
         )
-        view.message = message
+        view.message = await interaction.original_response()
 
 class PaginationView(discord.ui.View):
     def __init__(self, pages: List[discord.Embed], timeout: int):

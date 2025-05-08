@@ -35,7 +35,7 @@ class InfoCog(commands.Cog):
         """Get information about various aspects of the server and bot"""
         try:
             if category == "bot":
-                stats = await self.bot.db_manager.get_bot_stats(self.bot.user.id)
+                stats = await self.bot.db_manager.get_bot_stats(self.bot.user.id) or {}
                 description = [
                     "```yml",
                     "Bot Statistics:",
@@ -129,7 +129,14 @@ class InfoCog(commands.Cog):
                         "```"
                     ])
 
-                xp_data = await self.bot.db_manager.get_user_level_data(interaction.guild_id, member.id)
+                # Get XP data with proper error handling
+                xp_data = await self.bot.db_manager.safe_operation(
+                    'get_user_xp',
+                    self.bot.db_manager.get_user_xp,
+                    interaction.guild_id,
+                    str(member.id)
+                ) or {}
+
                 if xp_data:
                     description.extend([
                         "```cs",
@@ -184,11 +191,23 @@ class InfoCog(commands.Cog):
 
                 # Special role types
                 special_types = []
-                color_roles = await self.bot.db_manager.get_color_roles(interaction.guild_id)
-                level_roles = await self.bot.db_manager.get_section(interaction.guild_id, 'level_roles')
+                color_roles = await self.bot.db_manager.safe_operation(
+                    'get_color_roles',
+                    self.bot.db_manager.get_section,
+                    interaction.guild_id,
+                    'color_roles'
+                ) or {'roles': []}
+
+                level_roles = await self.bot.db_manager.safe_operation(
+                    'get_level_roles',
+                    self.bot.db_manager.get_section,
+                    interaction.guild_id,
+                    'level_roles'
+                ) or {}
                 
-                if str(role.id) in color_roles:
+                if str(role.id) in color_roles.get('roles', []):
                     special_types.append("Color Role")
+
                 if level_roles and str(role.id) in level_roles.values():
                     level = next(k for k, v in level_roles.items() if v == str(role.id))
                     special_types.append(f"Level {level} Reward")
@@ -217,7 +236,8 @@ class InfoCog(commands.Cog):
                         self.bot.db_manager.get_section,
                         interaction.guild_id,
                         'whisper_config'
-                    )
+                    ) or {}
+                    
                     description.extend([
                         "```yml",
                         "Whisper System:",
@@ -234,20 +254,20 @@ class InfoCog(commands.Cog):
                         self.bot.db_manager.get_section,
                         interaction.guild_id,
                         'logs'
-                    )
-                    if logs_config:
-                        description.extend([
-                            "```diff",
-                            "Logging System:",
-                            f"- Status: {'✅ Enabled' if logs_config.get('enabled') else '❌ Disabled'}",
-                            f"- Channel: {interaction.guild.get_channel(int(logs_config.get('log_channel', 0))).mention if logs_config.get('log_channel') else '❌ Not Set'}",
-                            "",
-                            "Logged Events:"
-                        ])
-                        if logs_config.get('log_types'):
-                            for category, events in logs_config['log_types'].items():
-                                description.append(f"+ {category.title()}: {', '.join(events)}")
-                        description.append("```")
+                    ) or {}
+                    
+                    description.extend([
+                        "```diff",
+                        "Logging System:",
+                        f"- Status: {'✅ Enabled' if logs_config.get('enabled') else '❌ Disabled'}",
+                        f"- Channel: {interaction.guild.get_channel(int(logs_config.get('log_channel', 0))).mention if logs_config.get('log_channel') else '❌ Not Set'}",
+                        "",
+                        "Logged Events:"
+                    ])
+                    if logs_config.get('log_types'):
+                        for category, events in logs_config['log_types'].items():
+                            description.append(f"+ {category.title()}: {', '.join(events)}")
+                    description.append("```")
 
                     # XP System
                     xp_config = await self.bot.db_manager.safe_operation(
@@ -255,16 +275,16 @@ class InfoCog(commands.Cog):
                         self.bot.db_manager.get_section,
                         interaction.guild_id,
                         'xp_settings'
-                    )
-                    if xp_config:
-                        description.extend([
-                            "```cs",
-                            "# Leveling System",
-                            f"Status: {'✅ Enabled' if xp_config.get('enabled') else '❌ Disabled'}",
-                            f"XP Rate: {xp_config.get('rate', 'Default')} per message",
-                            f"Cooldown: {xp_config.get('cooldown', 'Default')} seconds",
-                            "```"
-                        ])
+                    ) or {}
+                    
+                    description.extend([
+                        "```cs",
+                        "# Leveling System",
+                        f"Status: {'✅ Enabled' if xp_config.get('enabled') else '❌ Disabled'}",
+                        f"XP Rate: {xp_config.get('rate', 'Default')} per message",
+                        f"Cooldown: {xp_config.get('cooldown', 'Default')} seconds",
+                        "```"
+                    ])
 
                     # Roles Configuration
                     roles_config = await self.bot.db_manager.safe_operation(
@@ -272,27 +292,27 @@ class InfoCog(commands.Cog):
                         self.bot.db_manager.get_section,
                         interaction.guild_id,
                         'roles'
-                    )
-                    if roles_config:
-                        description.extend([
-                            "```ini",
-                            "[Roles Configuration]",
-                            "Color Roles:"
-                        ])
-                        color_roles = [interaction.guild.get_role(int(r)) for r in roles_config.get('color_roles', [])]
-                        color_roles = [r.name for r in color_roles if r]
-                        description.extend([f"  {role}" for role in color_roles] if color_roles else ["  None configured"])
-                        
-                        description.append("\nLevel Roles:")
-                        level_roles = roles_config.get('level_roles', {})
-                        if level_roles:
-                            for level, role_id in sorted(level_roles.items(), key=lambda x: int(x[0])):
-                                role = interaction.guild.get_role(int(role_id))
-                                if role:
-                                    description.append(f"  Level {level}: {role.name}")
-                        else:
-                            description.append("  None configured")
-                        description.append("```")
+                    ) or {}
+                    
+                    description.extend([
+                        "```ini",
+                        "[Roles Configuration]",
+                        "Color Roles:"
+                    ])
+                    color_roles = [interaction.guild.get_role(int(r)) for r in roles_config.get('color_roles', [])]
+                    color_roles = [r.name for r in color_roles if r]
+                    description.extend([f"  {role}" for role in color_roles] if color_roles else ["  None configured"])
+                    
+                    description.append("\nLevel Roles:")
+                    level_roles = roles_config.get('level_roles', {})
+                    if level_roles:
+                        for level, role_id in sorted(level_roles.items(), key=lambda x: int(x[0])):
+                            role = interaction.guild.get_role(int(role_id))
+                            if role:
+                                description.append(f"  Level {level}: {role.name}")
+                    else:
+                        description.append("  None configured")
+                    description.append("```")
 
                 embed = self.bot.ui_manager.info_embed(
                     f"Setup Information for {interaction.guild.name}",
@@ -314,19 +334,7 @@ class InfoCog(commands.Cog):
                 )
 
             elif category == "help":
-                view = self.bot.ui_manager.HelpMenuView(self.bot, self.bot.ui_manager)
-                description = [
-                    "```md",
-                    "# Command Categories",
-                    "Select a category below to view available commands:",
-                    "```"
-                ]
-                embed = self.bot.ui_manager.info_embed(
-                    "Help Menu",
-                    "\n".join(description)
-                )
-                await interaction.response.send_message(embed=embed, view=view)
-                view.message = await interaction.original_response()
+                await self.bot.ui_manager.create_help_menu(interaction, self.bot)
                 return
 
             await interaction.response.send_message(embed=embed)
