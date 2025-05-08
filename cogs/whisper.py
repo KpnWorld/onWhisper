@@ -15,10 +15,48 @@ class WhisperCog(commands.Cog):
     async def is_staff(self, member: discord.Member) -> bool:
         """Check if member is whisper staff"""
         config = await self.bot.db_manager.get_section(member.guild.id, 'whisper_config')
+        if not config:
+            return member.guild_permissions.administrator
         staff_role_id = config.get('staff_role')
         if not staff_role_id:
             return member.guild_permissions.administrator
         return str(staff_role_id) in [str(role.id) for role in member.roles] or member.guild_permissions.administrator
+
+    async def _get_next_whisper_id(self, guild_id: int) -> int:
+        """Get next whisper ID for a guild"""
+        try:
+            config = await self.bot.db_manager.get_section(guild_id, 'whisper_config')
+            if not config:
+                config = {'next_whisper_id': 1}
+            next_id = config.get('next_whisper_id', 1)
+            config['next_whisper_id'] = next_id + 1
+            await self.bot.db_manager.update_section(guild_id, 'whisper_config', config)
+            return next_id
+        except Exception as e:
+            print(f"Error getting next whisper ID: {e}")
+            return 1
+
+    async def _log_whisper(self, guild_id: int, action: str, data: dict) -> bool:
+        """Log a whisper action"""
+        try:
+            whispers = await self.bot.db_manager.get_section(guild_id, 'whispers') or {}
+            if 'logs' not in whispers:
+                whispers['logs'] = []
+            
+            whispers['logs'].append({
+                **data,
+                'action': action,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+
+            # Keep only last 1000 logs
+            if len(whispers['logs']) > 1000:
+                whispers['logs'] = whispers['logs'][-1000:]
+
+            return await self.bot.db_manager.update_section(guild_id, 'whispers', whispers)
+        except Exception as e:
+            print(f"Error logging whisper: {e}")
+            return False
 
     @app_commands.command(name="whisper")
     @app_commands.describe(
@@ -41,14 +79,16 @@ class WhisperCog(commands.Cog):
         try:
             # Check if system is enabled
             config = await self.bot.db_manager.get_section(interaction.guild_id, 'whisper_config')
-            if not config['enabled']:
+            if not config or not config.get('enabled', False):
                 raise commands.DisabledCommand("The whisper system is currently disabled")
 
             # Handle different actions
             if action == "create":
                 if not message:
                     raise ValueError("You must provide a message for your whisper")
-                await self._create_whisper(interaction, message, anonymous and config['anonymous_allowed'])
+                if anonymous and not config.get('anonymous_allowed', True):
+                    raise ValueError("Anonymous whispers are not allowed on this server")
+                await self._create_whisper(interaction, message, anonymous and config.get('anonymous_allowed', True))
             elif action == "close":
                 await self._close_whisper(interaction)
 
@@ -71,15 +111,9 @@ class WhisperCog(commands.Cog):
     async def _create_whisper(self, interaction: discord.Interaction, message: str, anonymous: bool):
         """Create a new whisper thread"""
         try:
-            # Get whisper channel with safe operation
-            config = await self.bot.db_manager.safe_operation(
-                'get_whisper_config',
-                self.bot.db_manager.get_section,
-                interaction.guild_id,
-                'whisper_config'
-            )
-            if not config:
-                raise ValueError("Whisper system is not configured")
+            config = await self.bot.db_manager.get_section(interaction.guild_id, 'whisper_config')
+            if not config or not config.get('enabled', False):
+                raise ValueError("Whisper system is not configured or disabled")
 
             channel_id = config.get('channel_id')
             if not channel_id:
@@ -90,9 +124,9 @@ class WhisperCog(commands.Cog):
                 raise ValueError("Could not find the whisper channel")
 
             # Use transaction for atomic thread creation and logging
-            async with await self.bot.db_manager.transaction(interaction.guild_id, 'whisper') as txn:
+            async with await self.bot.db_manager.transaction(interaction.guild_id, 'whispers') as txn:
                 # Create thread
-                whisper_id = await self.bot.db_manager.get_next_whisper_id(interaction.guild_id)
+                whisper_id = await self._get_next_whisper_id(interaction.guild_id)
                 thread = await channel.create_thread(
                     name=f"whisper-{whisper_id}",
                     type=discord.ChannelType.private_thread,
@@ -118,14 +152,14 @@ class WhisperCog(commands.Cog):
                 # Add user to thread
                 await thread.add_user(interaction.user)
 
-                # Log whisper creation in transaction
-                log_data = {
+                # Log whisper creation
+                await self._log_whisper(interaction.guild_id, "create", {
                     "thread_id": str(thread.id),
                     "user_id": str(interaction.user.id),
                     "anonymous": anonymous
-                }
-                await self.bot.db_manager.log_whisper(interaction.guild_id, "create", log_data)
+                })
 
+            # Send success message
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.success_embed(
                     "Whisper Created",
@@ -161,14 +195,10 @@ class WhisperCog(commands.Cog):
         await interaction.channel.edit(archived=True, locked=True)
 
         # Log whisper closure
-        await self.bot.db_manager.log_whisper(
-            interaction.guild_id,
-            "close",
-            {
-                "thread_id": str(interaction.channel.id),
-                "closed_by": str(interaction.user.id)
-            }
-        )
+        await self._log_whisper(interaction.guild_id, "close", {
+            "thread_id": str(interaction.channel.id),
+            "closed_by": str(interaction.user.id)
+        })
 
         await interaction.response.send_message(
             embed=self.bot.ui_manager.success_embed(
@@ -176,7 +206,7 @@ class WhisperCog(commands.Cog):
                 "This whisper thread has been closed and archived"
             )
         )
-
+    
     @tasks.loop(minutes=5.0)
     async def auto_close_check(self):
         """Check for inactive whisper threads"""
@@ -219,14 +249,10 @@ class WhisperCog(commands.Cog):
                                 pass
 
                             # Log auto-closure
-                            await self.bot.db_manager.log_whisper(
-                                guild.id,
-                                "auto_close",
-                                {
-                                    "thread_id": str(thread.id),
-                                    "inactive_minutes": config['auto_close_minutes']
-                                }
-                            )
+                            await self._log_whisper(guild.id, "auto_close", {
+                                "thread_id": str(thread.id),
+                                "inactive_minutes": config['auto_close_minutes']
+                            })
 
             except Exception as e:
                 print(f"Error in auto-close check for guild {guild.id}: {e}")

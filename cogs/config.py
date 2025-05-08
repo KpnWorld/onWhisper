@@ -238,9 +238,21 @@ class ConfigCog(commands.Cog):
                 self.bot.db_manager.get_section,
                 interaction.guild_id,
                 'logs'
-            )
+            ) or {}
+
+            # Ensure default structure exists
+            if 'log_types' not in config:
+                config['log_types'] = {
+                    'member': ['join', 'leave'],
+                    'server': ['message_delete', 'message_edit', 'channel_create', 'channel_delete', 'role_update'],
+                    'moderation': ['warn', 'kick', 'ban', 'timeout', 'lockdown']
+                }
+            if 'enabled' not in config:
+                config['enabled'] = False
+            
             changes = []
 
+            # Use transaction for atomic updates
             async with await self.bot.db_manager.transaction(interaction.guild_id, 'config') as txn:
                 if channel is not None:
                     config['log_channel'] = str(channel.id)
@@ -255,40 +267,36 @@ class ConfigCog(commands.Cog):
 
                 if event_type:
                     # Create options for event types
-                    options = []
                     match event_type:
                         case "member":
                             options = [
-                                discord.SelectOption(label="Join", value="join"),
-                                discord.SelectOption(label="Leave", value="leave")
+                                {"label": "Join", "value": "join"},
+                                {"label": "Leave", "value": "leave"}
                             ]
                         case "server":
                             options = [
-                                discord.SelectOption(label="Message Delete", value="message_delete"),
-                                discord.SelectOption(label="Message Edit", value="message_edit"),
-                                discord.SelectOption(label="Channel Create", value="channel_create"),
-                                discord.SelectOption(label="Channel Delete", value="channel_delete"),
-                                discord.SelectOption(label="Role Update", value="role_update")
+                                {"label": "Message Delete", "value": "message_delete"},
+                                {"label": "Message Edit", "value": "message_edit"},
+                                {"label": "Channel Create", "value": "channel_create"},
+                                {"label": "Channel Delete", "value": "channel_delete"},
+                                {"label": "Role Update", "value": "role_update"}
                             ]
                         case "moderation":
                             options = [
-                                discord.SelectOption(label="Warn", value="warn"),
-                                discord.SelectOption(label="Kick", value="kick"),
-                                discord.SelectOption(label="Ban", value="ban"),
-                                discord.SelectOption(label="Timeout", value="timeout"),
-                                discord.SelectOption(label="Lockdown", value="lockdown")
+                                {"label": "Warn", "value": "warn"},
+                                {"label": "Kick", "value": "kick"},
+                                {"label": "Ban", "value": "ban"},
+                                {"label": "Timeout", "value": "timeout"},
+                                {"label": "Lockdown", "value": "lockdown"}
                             ]
 
                     selected = await self.bot.ui_manager.create_select_menu(
                         interaction,
-                        [{
-                            "label": opt.label,
-                            "value": opt.value,
-                            "default": opt.value in config['log_types'][event_type]
-                        } for opt in options],
+                        options,
                         f"Select {event_type} events to log",
                         min_values=0,
-                        max_values=len(options)
+                        max_values=len(options),
+                        default_values=config['log_types'].get(event_type, [])
                     )
 
                     if selected is not None:  # None means timeout
@@ -297,7 +305,7 @@ class ConfigCog(commands.Cog):
 
                 if changes:
                     # Update config atomically
-                    await self.bot.db_manager.set_section(interaction.guild_id, 'logs', config)
+                    await self.bot.db_manager.update_section(interaction.guild_id, 'logs', config)
                     await interaction.followup.send(
                         embed=self.bot.ui_manager.success_embed(
                             "Logging Settings Updated",

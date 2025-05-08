@@ -60,6 +60,68 @@ class RolesCog(commands.Cog):
             print(f"Error updating color roles: {e}")
             return False
 
+    async def _get_reaction_roles(self, guild_id: int) -> dict:
+        """Get reaction roles configuration with proper parsing"""
+        data = await self.bot.db_manager.get_section(guild_id, 'reaction_roles')
+        return data if data else {}
+
+    async def _update_reaction_roles(self, guild_id: int, message_id: int, emoji: str, role_id: int) -> bool:
+        """Update reaction role configuration"""
+        try:
+            reaction_roles = await self._get_reaction_roles(guild_id)
+            msg_id = str(message_id)
+            
+            if msg_id not in reaction_roles:
+                reaction_roles[msg_id] = {}
+            reaction_roles[msg_id][str(emoji)] = str(role_id)
+            
+            return await self.bot.db_manager.update_section(guild_id, 'reaction_roles', reaction_roles)
+        except Exception as e:
+            print(f"Error updating reaction roles: {e}")
+            return False
+
+    async def _remove_reaction_role(self, guild_id: int, message_id: int, emoji: str = None) -> bool:
+        """Remove a reaction role or all roles for a message"""
+        try:
+            reaction_roles = await self._get_reaction_roles(guild_id)
+            msg_id = str(message_id)
+            
+            if msg_id in reaction_roles:
+                if emoji:
+                    if str(emoji) in reaction_roles[msg_id]:
+                        del reaction_roles[msg_id][str(emoji)]
+                    if not reaction_roles[msg_id]:  # If no more roles for this message
+                        del reaction_roles[msg_id]
+                else:
+                    del reaction_roles[msg_id]
+                
+            return await self.bot.db_manager.update_section(guild_id, 'reaction_roles', reaction_roles)
+        except Exception as e:
+            print(f"Error removing reaction role: {e}")
+            return False
+
+    async def _update_auto_role(self, guild_id: int, role_id: Optional[int]) -> bool:
+        """Update auto-role configuration"""
+        try:
+            config = await self.bot.db_manager.get_section(guild_id, 'server_config') or {}
+            config['auto_role'] = str(role_id) if role_id else None
+            config['auto_role_enabled'] = role_id is not None
+            return await self.bot.db_manager.update_section(guild_id, 'server_config', config)
+        except Exception as e:
+            print(f"Error updating auto role: {e}")
+            return False
+
+    async def _get_auto_role(self, guild_id: int) -> tuple[Optional[int], bool]:
+        """Get auto-role configuration"""
+        try:
+            config = await self.bot.db_manager.get_section(guild_id, 'server_config') or {}
+            role_id = config.get('auto_role')
+            enabled = config.get('auto_role_enabled', False)
+            return (int(role_id) if role_id else None, enabled)
+        except Exception as e:
+            print(f"Error getting auto role: {e}")
+            return (None, False)
+
     # Main roles group
     roles = app_commands.Group(
         name="roles",
@@ -85,7 +147,7 @@ class RolesCog(commands.Cog):
             if not await self._can_manage_role(interaction.guild, role):
                 raise commands.CommandError("I cannot manage that role")
                 
-            await self.bot.db_manager.update_auto_role(interaction.guild_id, role.id)
+            await self._update_auto_role(interaction.guild_id, role.id)
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.success_embed(
                     "Auto-Role Set",
@@ -114,7 +176,7 @@ class RolesCog(commands.Cog):
             if not interaction.user.guild_permissions.manage_roles:
                 raise commands.MissingPermissions(["manage_roles"])
 
-            await self.bot.db_manager.update_auto_role(interaction.guild_id, None)
+            await self._update_auto_role(interaction.guild_id, None)
             await interaction.response.send_message(
                 embed=self.bot.ui_manager.success_embed(
                     "Auto-Role Disabled",
@@ -251,7 +313,7 @@ class RolesCog(commands.Cog):
             if not await self._can_manage_role(interaction.guild, role):
                 raise commands.CommandError("I cannot manage that role")
                 
-            await self.bot.db_manager.update_reaction_roles(
+            await self._update_reaction_roles(
                 interaction.guild_id,
                 int(message_id),
                 emoji,
@@ -296,10 +358,8 @@ class RolesCog(commands.Cog):
             if not interaction.user.guild_permissions.manage_roles:
                 raise commands.MissingPermissions(["manage_roles"])
 
-            reaction_roles = await self.bot.db_manager.get_reaction_roles(interaction.guild_id)
-
             if not message_id:
-                await self.bot.db_manager.update_guild_data(interaction.guild_id, 'reaction_roles', {})
+                await self.bot.db_manager.update_section(interaction.guild_id, 'reaction_roles', {})
                 await interaction.response.send_message(
                     embed=self.bot.ui_manager.success_embed(
                         "Reaction Roles Cleared",
@@ -308,14 +368,7 @@ class RolesCog(commands.Cog):
                 )
             else:
                 # Remove specific message's reaction roles
-                if message_id in reaction_roles:
-                    del reaction_roles[message_id]
-                    await self.bot.db_manager.update_guild_data(
-                        interaction.guild_id,
-                        'reaction_roles',
-                        reaction_roles
-                    )
-                    
+                await self._remove_reaction_role(interaction.guild_id, int(message_id))
                 await interaction.response.send_message(
                     embed=self.bot.ui_manager.success_embed(
                         "Reaction Roles Removed",
@@ -344,7 +397,7 @@ class RolesCog(commands.Cog):
             if not interaction.user.guild_permissions.manage_roles:
                 raise commands.MissingPermissions(["manage_roles"])
 
-            reaction_roles = await self.bot.db_manager.get_reaction_roles(interaction.guild_id)
+            reaction_roles = await self._get_reaction_roles(interaction.guild_id)
             
             if reaction_roles:
                 description = []
@@ -551,7 +604,7 @@ class RolesCog(commands.Cog):
     async def on_member_join(self, member: discord.Member):
         """Handle giving auto-role to new members"""
         try:
-            auto_role = await self.bot.db_manager.get_auto_role(member.guild.id)
+            auto_role = await self._get_auto_role(member.guild.id)
             if auto_role[1] and auto_role[0]:  # If enabled and role is set
                 role = member.guild.get_role(auto_role[0])
                 if role and await self._can_manage_role(member.guild, role):
@@ -568,7 +621,7 @@ class RolesCog(commands.Cog):
                 return
                 
             # Get reaction role config
-            reaction_roles = await self.bot.db_manager.get_reaction_roles(payload.guild_id)
+            reaction_roles = await self._get_reaction_roles(payload.guild_id)
             if not reaction_roles:
                 return
                 
@@ -604,7 +657,7 @@ class RolesCog(commands.Cog):
                 return
                 
             # Get reaction role config
-            reaction_roles = await self.bot.db_manager.get_reaction_roles(payload.guild_id)
+            reaction_roles = await self._get_reaction_roles(payload.guild_id)
             if not reaction_roles:
                 return
                 

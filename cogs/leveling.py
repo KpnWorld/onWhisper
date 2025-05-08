@@ -10,25 +10,36 @@ class LevelingCog(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
-        self._xp_locks = {}  # Lock per user for XP updates
 
     async def _get_user_data(self, guild_id: int, user_id: str) -> dict:
-        """Safely get user XP data"""
+        """Get user XP data with safe defaults"""
+        data = await self.bot.db_manager.get_section(guild_id, 'xp_users') or {}
+        user_data = data.get(str(user_id), {'xp': 0, 'level': 0, 'last_xp': None})
+        
+        # Ensure all required fields exist
+        if 'xp' not in user_data:
+            user_data['xp'] = 0
+        if 'level' not in user_data:
+            user_data['level'] = self._calculate_level(user_data['xp'])
+        if 'last_xp' not in user_data:
+            user_data['last_xp'] = None
+            
+        return user_data
+
+    async def _update_user_data(self, guild_id: int, user_id: str, xp_data: dict) -> bool:
+        """Update user XP data"""
         try:
-            data = await self.bot.db_manager.safe_operation(
-                'get_user_xp',
-                self.bot.db_manager.get_user_xp,
-                guild_id,
-                user_id
-            )
-            if not data:
-                data = {'xp': 0, 'level': 0, 'last_xp': None}
-            elif 'level' not in data:
-                data['level'] = await self._calculate_level(data['xp'])
-            return data
+            # Get current XP data
+            data = await self.bot.db_manager.get_section(guild_id, 'xp_users') or {}
+            
+            # Update user data
+            data[str(user_id)] = xp_data
+            
+            # Save back to database
+            return await self.bot.db_manager.update_section(guild_id, 'xp_users', data)
         except Exception as e:
-            print(f"Error getting user XP data: {e}")
-            return {'xp': 0, 'level': 0, 'last_xp': None}
+            print(f"Error updating XP data: {e}")
+            return False
 
     async def _calculate_level(self, xp: int) -> int:
         """Calculate level from XP amount"""
@@ -50,65 +61,51 @@ class LevelingCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Award XP for messages"""
-        if (not message.guild or message.author.bot or 
-            message.content.startswith(self.bot.command_prefix)):
+        """Handle XP gain from messages"""
+        if message.author.bot or not message.guild:
             return
 
-        settings = await self._get_xp_settings(message.guild.id)
-        if not settings['enabled']:
-            return
+        try:
+            # Get XP settings
+            settings = await self.bot.db_manager.get_section(message.guild.id, 'xp_settings') or {}
+            if not settings.get('enabled', True):
+                return
 
-        # Get lock for this user in this guild
-        lock_key = f"{message.guild.id}:{message.author.id}"
-        if lock_key not in self._xp_locks:
-            self._xp_locks[lock_key] = asyncio.Lock()
+            rate = settings.get('rate', 15)
+            cooldown = settings.get('cooldown', 60)
 
-        async with self._xp_locks[lock_key]:
-            try:
-                # Use transaction for XP updates
-                async with await self.bot.db_manager.transaction(message.guild.id, 'xp') as txn:
-                    user_data = await self._get_user_data(message.guild.id, str(message.author.id))
-                    
-                    # Check cooldown
-                    if user_data['last_xp']:
-                        last_xp = datetime.fromisoformat(user_data['last_xp'])
-                        if (datetime.utcnow() - last_xp).total_seconds() < settings['cooldown']:
-                            return
+            # Get user data
+            user_data = await self._get_user_data(message.guild.id, str(message.author.id))
+            
+            # Check cooldown
+            if user_data['last_xp']:
+                last_xp = datetime.fromisoformat(user_data['last_xp'])
+                if (datetime.utcnow() - last_xp).total_seconds() < cooldown:
+                    return
 
-                    # Award XP
-                    old_level = user_data['level']
-                    user_data['xp'] += settings['rate']
-                    user_data['level'] = await self._calculate_level(user_data['xp'])
-                    user_data['last_xp'] = datetime.utcnow().isoformat()
+            # Add XP
+            old_level = user_data['level']
+            user_data['xp'] += rate
+            user_data['level'] = self._calculate_level(user_data['xp'])
+            user_data['last_xp'] = datetime.utcnow().isoformat()
 
-                    # Update user data
-                    success = await self.bot.db_manager.safe_operation(
-                        'update_user_xp',
-                        self.bot.db_manager.update_user_xp,
-                        message.guild.id,
-                        str(message.author.id),
-                        user_data
-                    )
+            # Save updated data
+            if await self._update_user_data(message.guild.id, str(message.author.id), user_data):
+                # Check for level up
+                if user_data['level'] > old_level:
+                    await self._handle_level_up(message.author, user_data['level'])
 
-                    if not success:
-                        return
+        except Exception as e:
+            print(f"Error processing XP: {e}")
 
-                    # Handle level up
-                    if user_data['level'] > old_level:
-                        await self._handle_level_up(message, user_data['level'])
-
-            except Exception as e:
-                print(f"Error processing XP: {e}")
-
-    async def _handle_level_up(self, message: discord.Message, new_level: int):
+    async def _handle_level_up(self, member: discord.Member, new_level: int):
         """Handle level up events with safe role assignments"""
         try:
             # Get level roles with safe operation
             roles_data = await self.bot.db_manager.safe_operation(
                 'get_section',
                 self.bot.db_manager.get_section,
-                message.guild.id,
+                member.guild.id,
                 'level_roles'
             )
 
@@ -120,21 +117,21 @@ class LevelingCog(commands.Cog):
             if not role_id:
                 return
 
-            role = message.guild.get_role(int(role_id))
+            role = member.guild.get_role(int(role_id))
             if not role:
                 return
 
             # Award role and send notification
             try:
-                await message.author.add_roles(role, reason=f"Reached level {new_level}")
+                await member.add_roles(role, reason=f"Reached level {new_level}")
                 embed = self.bot.ui_manager.success_embed(
                     "Level Up!",
-                    f"🎉 Congratulations {message.author.mention}!\n"
+                    f"🎉 Congratulations {member.mention}!\n"
                     f"You reached level {new_level} and earned the {role.mention} role!"
                 )
-                await message.channel.send(embed=embed)
+                await member.send(embed=embed)
             except discord.Forbidden:
-                print(f"Missing permissions to assign role in {message.guild.id}")
+                print(f"Missing permissions to assign role in {member.guild.id}")
             except Exception as e:
                 print(f"Error assigning level role: {e}")
 

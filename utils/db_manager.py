@@ -15,19 +15,73 @@ class DatabaseTransaction:
         self.namespace = namespace
         self._lock = asyncio.Lock()
         self.changes = {}
+        self._committed = False
+        self._snapshot = {}
 
     async def __aenter__(self):
         await self._lock.acquire()
+        # Take snapshot of current data for rollback
+        try:
+            data = await self.db_manager.get_section(self.guild_id, self.namespace)
+            self._snapshot = data.copy() if data else {}
+        except Exception as e:
+            print(f"Error taking transaction snapshot: {e}")
+            self._snapshot = {}
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         try:
-            if exc_type is None:
+            if exc_type is None and not self._committed:
                 # Commit changes
-                for key, value in self.changes.items():
-                    await self.db_manager._write_data(key, value)
+                await self.commit()
+            elif exc_type is not None:
+                # Roll back on error
+                await self.rollback()
         finally:
             self._lock.release()
+
+    async def commit(self) -> bool:
+        """Commit transaction changes"""
+        if self._committed:
+            return False
+
+        try:
+            # Apply changes atomically
+            data = await self.db_manager.get_section(self.guild_id, self.namespace) or {}
+            data.update(self.changes)
+            success = await self.db_manager.update_section(self.guild_id, self.namespace, data)
+            if success:
+                self._committed = True
+                return True
+            return False
+        except Exception as e:
+            print(f"Error committing transaction: {e}")
+            await self.rollback()
+            return False
+
+    async def rollback(self) -> bool:
+        """Roll back transaction changes"""
+        try:
+            if self._committed:
+                return False
+            # Restore snapshot
+            success = await self.db_manager.update_section(self.guild_id, self.namespace, self._snapshot)
+            return success
+        except Exception as e:
+            print(f"Error rolling back transaction: {e}")
+            return False
+
+    def update(self, key: str, value: Any) -> None:
+        """Stage an update in the transaction"""
+        if self._committed:
+            raise ValueError("Cannot update committed transaction")
+        self.changes[key] = value
+
+    def delete(self, key: str) -> None:
+        """Stage a deletion in the transaction"""
+        if self._committed:
+            raise ValueError("Cannot update committed transaction")
+        self.changes[key] = None  # Mark for deletion
 
 class DatabaseManager:
     def __init__(self, bot):
@@ -44,46 +98,78 @@ class DatabaseManager:
             return self._cache[key]
 
         try:
-            if key in db:
-                data = db[key]
-                # Convert string data to JSON if needed
-                if isinstance(data, str):
-                    try:
-                        data = json.loads(data)
-                    except json.JSONDecodeError:
-                        pass
-                self._cache[key] = data
-                return data
+            value = db.get(key)
+            if value is not None:
+                try:
+                    # Try to parse JSON data
+                    if isinstance(value, str):
+                        data = json.loads(value)
+                    else:
+                        # Non-string data is likely already parsed
+                        data = value
+                    
+                    # Cache the parsed data
+                    self._cache[key] = data
+                    return data
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, return raw value but don't cache
+                    print(f"Warning: Failed to parse JSON for key {key}")
+                    return value
             return None
         except Exception as e:
-            print(f"Error reading data: {e}")
+            print(f"Error reading data for key {key}: {e}")
+            # Invalidate cache on error
+            self._cache.pop(key, None)
             return None
 
-    async def _write_data(self, key: str, data: Any) -> bool:
-        """Write data to Replit database with proper locking"""
+    async def _write_data(self, key: str, value: Any) -> bool:
+        """Write data to Replit database"""
         try:
             async with self._write_lock:
-                # Convert data to JSON string if it's not already a string
-                if not isinstance(data, str):
-                    data = json.dumps(data)
-                
-                db[key] = data
-                self._cache[key] = data
+                # Ensure data is JSON serializable
+                if not isinstance(value, str):
+                    try:
+                        # Test JSON serialization
+                        json_str = json.dumps(value)
+                        # Only update if serialization succeeds
+                        db[key] = json_str
+                        self._cache[key] = value  # Cache the original value
+                    except (TypeError, ValueError) as e:
+                        print(f"Error serializing data for key {key}: {e}")
+                        return False
+                else:
+                    # Value is already a string, verify it's valid JSON if it looks like it
+                    if value.startswith('{') or value.startswith('['):
+                        try:
+                            # Validate JSON format
+                            json.loads(value)
+                        except json.JSONDecodeError:
+                            print(f"Warning: Invalid JSON string for key {key}")
+                            return False
+                    
+                    db[key] = value
+                    self._cache[key] = value
+
                 return True
         except Exception as e:
-            print(f"Error writing data: {e}")
+            print(f"Error writing data for key {key}: {e}")
+            # Invalidate cache on error
+            self._cache.pop(key, None)
             return False
 
     async def _delete_data(self, key: str) -> bool:
         """Delete data from Replit database"""
         try:
-            if key in db:
-                del db[key]
-                self._cache.pop(key, None)
-                return True
-            return False
+            async with self._write_lock:
+                if key in db:
+                    del db[key]
+                    self._cache.pop(key, None)
+                    return True
+                return False
         except Exception as e:
-            print(f"Error deleting data: {e}")
+            print(f"Error deleting data for key {key}: {e}")
+            # Invalidate cache on error
+            self._cache.pop(key, None)
             return False
 
     async def _list_keys(self, prefix: str = "") -> List[str]:
@@ -93,7 +179,7 @@ class DatabaseManager:
                 return list(db.prefix(prefix))
             return list(db.keys())
         except Exception as e:
-            print(f"Error listing keys: {e}")
+            print(f"Error listing keys with prefix {prefix}: {e}")
             return []
 
     async def initialize(self) -> bool:
@@ -153,22 +239,30 @@ class DatabaseManager:
                 print(f"Error in database operation {operation_name}: {e}")
                 return None
 
-    async def get_guild_data(self, guild_id: int) -> dict:
-        """Get all data for a guild"""
-        key = f"guild:{guild_id}"
-        return await self._read_data(key) or {}
+    async def get_guild_data(self, guild_id: int) -> Optional[dict]:
+        """Get all guild data"""
+        data = await self._read_data(f"guild:{guild_id}")
+        if isinstance(data, str):
+            try:
+                return json.loads(data)
+            except json.JSONDecodeError:
+                return {}
+        return data if data else {}
 
     async def get_section(self, guild_id: int, section: str) -> Optional[dict]:
         """Get a specific section of guild data"""
-        data = await self.get_guild_data(guild_id)
-        return data.get(section, {})
-
-    async def update_section(self, guild_id: int, section: str, data: dict) -> bool:
-        """Update a specific section of guild data"""
-        key = f"guild:{guild_id}"
         guild_data = await self.get_guild_data(guild_id)
+        if not guild_data:
+            return None
+        return guild_data.get(section, {})
+
+    async def update_section(self, guild_id: int, section: str, data: Any) -> bool:
+        """Update a specific section of guild data"""
+        guild_data = await self.get_guild_data(guild_id)
+        if not guild_data:
+            guild_data = {}
         guild_data[section] = data
-        return await self._write_data(key, guild_data)
+        return await self._write_data(f"guild:{guild_id}", guild_data)
 
     async def get_user_xp(self, guild_id: int, user_id: str) -> Optional[dict]:
         """Get user XP data"""
@@ -204,38 +298,78 @@ class DatabaseManager:
     async def cleanup_old_data(self, days: int = 30) -> bool:
         """Clean up old logs and expired data"""
         try:
-            cutoff = datetime.utcnow() - timedelta(days=days)
-            guilds = await self._read_data('guilds') or []
-            
-            for guild_id in guilds:
-                data = await self.get_guild_data(guild_id)
+            async with self._write_lock:
+                cutoff = datetime.utcnow() - timedelta(days=days)
+                guilds = await self._read_data('guilds') or []
+                success_count = 0
                 
-                # Clean up logs
-                if 'logs' in data:
-                    data['logs'] = [
-                        log for log in data['logs']
-                        if datetime.fromisoformat(log['timestamp']) > cutoff
-                    ]
+                for guild_id in guilds:
+                    try:
+                        # Create backup before cleanup
+                        await self.backup_guild_data(guild_id, f"Auto-backup before {days}-day cleanup")
+                        
+                        # Get guild data with validation
+                        data = await self.get_guild_data(guild_id)
+                        if not data or not isinstance(data, dict):
+                            continue
+
+                        changes = False
+                        
+                        # Clean up logs with validation
+                        if 'logs' in data and isinstance(data['logs'], list):
+                            old_len = len(data['logs'])
+                            data['logs'] = [
+                                log for log in data['logs']
+                                if isinstance(log, dict) and 
+                                'timestamp' in log and
+                                datetime.fromisoformat(log['timestamp']) > cutoff
+                            ]
+                            if len(data['logs']) != old_len:
+                                changes = True
+                        
+                        # Clean up expired warnings
+                        if 'mod_actions' in data and isinstance(data['mod_actions'], list):
+                            old_len = len(data['mod_actions'])
+                            data['mod_actions'] = [
+                                action for action in data['mod_actions']
+                                if isinstance(action, dict) and (
+                                    not action.get('expires') or
+                                    datetime.fromisoformat(action['expires']) > datetime.utcnow()
+                                )
+                            ]
+                            if len(data['mod_actions']) != old_len:
+                                changes = True
+                        
+                        # Clean up closed whispers
+                        if 'whispers' in data and isinstance(data['whispers'], dict):
+                            if 'active_threads' in data['whispers']:
+                                old_len = len(data['whispers']['active_threads'])
+                                data['whispers']['active_threads'] = [
+                                    w for w in data['whispers']['active_threads']
+                                    if isinstance(w, dict) and (
+                                        not w.get('closed_at') or
+                                        datetime.fromisoformat(w['closed_at']) > cutoff
+                                    )
+                                ]
+                                if len(data['whispers']['active_threads']) != old_len:
+                                    changes = True
+                        
+                        if changes:
+                            # Validate data before saving
+                            if await self.validate_schema(data.get('whisper_config', {}), 'whisper') and \
+                               await self.validate_schema(data.get('logs', {}), 'logs') and \
+                               await self.validate_schema(data.get('xp_settings', {}), 'xp'):
+                                if await self._write_data(f"guild:{guild_id}", data):
+                                    success_count += 1
+                        else:
+                            success_count += 1
+
+                    except Exception as e:
+                        print(f"Error cleaning up guild {guild_id}: {e}")
+                        continue
                 
-                # Clean up expired warnings
-                if 'mod_actions' in data:
-                    data['mod_actions'] = [
-                        action for action in data['mod_actions']
-                        if not action.get('expires') or
-                        datetime.fromisoformat(action['expires']) > datetime.utcnow()
-                    ]
-                
-                # Clean up closed whispers
-                if 'whispers' in data:
-                    data['whispers'] = [
-                        w for w in data['whispers']
-                        if not w.get('closed_at') or
-                        datetime.fromisoformat(w['closed_at']) > cutoff
-                    ]
-                
-                await self._write_data(f"guild:{guild_id}", data)
-                
-            return True
+                return success_count > 0
+
         except Exception as e:
             print(f"Error during cleanup: {e}")
             return False
@@ -243,17 +377,40 @@ class DatabaseManager:
     async def optimize(self) -> bool:
         """Optimize database storage"""
         try:
-            # Clear cache to force reloading
-            self._cache.clear()
-            
-            # Rewrite all data to clean up storage
-            guilds = await self._read_data('guilds') or []
-            for guild_id in guilds:
-                data = await self.get_guild_data(guild_id)
-                if data:
-                    await self._write_data(f"guild:{guild_id}", data)
-            
-            return True
+            async with self._write_lock:
+                # Clear cache to force reloading
+                self._cache.clear()
+                success_count = 0
+                
+                # Create backup before optimization
+                guilds = await self._read_data('guilds') or []
+                for guild_id in guilds:
+                    try:
+                        await self.backup_guild_data(guild_id, "Auto-backup before optimization")
+                        
+                        # Get and validate data
+                        data = await self.get_guild_data(guild_id)
+                        if not data or not isinstance(data, dict):
+                            continue
+                            
+                        # Remove empty sections
+                        data = {k: v for k, v in data.items() if v is not None and v != {} and v != []}
+                        
+                        # Validate critical sections
+                        if await self.validate_schema(data.get('whisper_config', {}), 'whisper') and \
+                           await self.validate_schema(data.get('logs', {}), 'logs') and \
+                           await self.validate_schema(data.get('xp_settings', {}), 'xp'):
+                            
+                            # Rewrite data to clean up storage
+                            if await self._write_data(f"guild:{guild_id}", data):
+                                success_count += 1
+                    
+                    except Exception as e:
+                        print(f"Error optimizing guild {guild_id}: {e}")
+                        continue
+                
+                return success_count > 0
+                
         except Exception as e:
             print(f"Error during optimization: {e}")
             return False
@@ -409,14 +566,7 @@ class DatabaseManager:
     async def increment_stat(self, bot_id: int, stat_name: str) -> bool:
         """Increment a bot statistic"""
         try:
-            stats_data = await self._read_data(f"bot_stats:{bot_id}")
-            stats = {}
-            if stats_data:
-                try:
-                    stats = json.loads(stats_data) if isinstance(stats_data, str) else stats_data
-                except json.JSONDecodeError:
-                    stats = {}
-            
+            stats = await self.get_bot_stats(bot_id) or {}
             stats[stat_name] = stats.get(stat_name, 0) + 1
             return await self._write_data(f"bot_stats:{bot_id}", stats)
         except Exception as e:
@@ -426,10 +576,161 @@ class DatabaseManager:
     async def get_bot_stats(self, bot_id: int) -> Optional[dict]:
         """Get bot statistics"""
         try:
-            return await self._read_data(f"bot_stats:{bot_id}")
+            data = await self._read_data(f"bot_stats:{bot_id}")
+            if isinstance(data, str):
+                try:
+                    return json.loads(data)
+                except json.JSONDecodeError:
+                    return {}
+            return data if data else {}
         except Exception as e:
             print(f"Error getting bot stats: {e}")
             return None
+
+    async def validate_schema(self, data: Any, schema_type: str) -> bool:
+        """Validate data against a known schema type"""
+        try:
+            schemas = {
+                'whisper': {
+                    'required': ['enabled', 'channel_id', 'staff_role'],
+                    'types': {
+                        'enabled': bool,
+                        'channel_id': (str, type(None)),
+                        'staff_role': (str, type(None)),
+                        'anonymous_allowed': bool,
+                        'auto_close_minutes': (int, type(None))
+                    }
+                },
+                'logs': {
+                    'required': ['enabled', 'log_channel', 'log_types'],
+                    'types': {
+                        'enabled': bool,
+                        'log_channel': (str, type(None)),
+                        'log_types': dict
+                    }
+                },
+                'xp': {
+                    'required': ['enabled', 'rate', 'cooldown'],
+                    'types': {
+                        'enabled': bool,
+                        'rate': int,
+                        'cooldown': int,
+                        'level_roles': dict
+                    }
+                }
+            }
+
+            if schema_type not in schemas:
+                return True  # Skip validation for unknown schemas
+
+            schema = schemas[schema_type]
+
+            # Check required fields
+            for field in schema['required']:
+                if field not in data:
+                    print(f"Missing required field {field} for schema {schema_type}")
+                    return False
+
+            # Check field types
+            for field, value in data.items():
+                if field in schema['types']:
+                    expected_type = schema['types'][field]
+                    if not isinstance(value, expected_type):
+                        if isinstance(expected_type, tuple):
+                            if not any(isinstance(value, t) for t in expected_type):
+                                print(f"Invalid type for field {field} in schema {schema_type}")
+                                return False
+                        else:
+                            print(f"Invalid type for field {field} in schema {schema_type}")
+                            return False
+
+            return True
+        except Exception as e:
+            print(f"Error validating schema: {e}")
+            return False
+
+    async def repair_data(self, guild_id: int) -> bool:
+        """Attempt to repair corrupted guild data"""
+        try:
+            data = await self.get_guild_data(guild_id)
+            if not data:
+                # Initialize with defaults if no data exists
+                return await self.ensure_guild_exists(guild_id, "Unknown Guild")
+
+            changes = False
+
+            # Check and repair known sections
+            sections = {
+                'whisper_config': 'whisper',
+                'logs': 'logs',
+                'xp_settings': 'xp'
+            }
+
+            for section, schema in sections.items():
+                if section in data:
+                    if not await self.validate_schema(data[section], schema):
+                        # Get default config for invalid section
+                        default = await self.get_defaults(section)
+                        if default:
+                            # Preserve valid fields from existing data
+                            merged = default.copy()
+                            if isinstance(data[section], dict):
+                                for key, value in data[section].items():
+                                    if key in default:
+                                        try:
+                                            if isinstance(value, type(default[key])):
+                                                merged[key] = value
+                                        except Exception:
+                                            pass
+                            data[section] = merged
+                            changes = True
+                else:
+                    # Add missing section with defaults
+                    default = await self.get_defaults(section)
+                    if default:
+                        data[section] = default
+                        changes = True
+
+            if changes:
+                # Save repaired data
+                return await self._write_data(f"guild:{guild_id}", data)
+            return True
+
+        except Exception as e:
+            print(f"Error repairing guild data: {e}")
+            return False
+
+    async def backup_guild_data(self, guild_id: int, backup_reason: str = "") -> bool:
+        """Create a backup of guild data"""
+        try:
+            data = await self.get_guild_data(guild_id)
+            if not data:
+                return False
+
+            # Add backup metadata
+            backup = {
+                'data': data,
+                'timestamp': datetime.utcnow().isoformat(),
+                'reason': backup_reason
+            }
+
+            # Store backup with timestamp
+            backup_key = f"backup:{guild_id}:{int(datetime.utcnow().timestamp())}"
+            success = await self._write_data(backup_key, backup)
+
+            if success:
+                # Keep only last 5 backups
+                backups = await self._list_keys(f"backup:{guild_id}:")
+                if len(backups) > 5:
+                    backups.sort()  # Sort by timestamp
+                    for old_backup in backups[:-5]:
+                        await self._delete_data(old_backup)
+
+            return success
+
+        except Exception as e:
+            print(f"Error creating backup: {e}")
+            return False
 
 # Alias for backward compatibility
 DBManager = DatabaseManager
