@@ -7,13 +7,13 @@ from datetime import timedelta
 class ConfigCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    config_group = app_commands.Group(
+    
+    config = app_commands.Group(
         name="config",
         description="Configure bot settings for this server"
     )
 
-    @config_group.command(name="whisper")
+    @config.command(name="whisper")
     @app_commands.describe(
         setting="The whisper setting to configure",
         value="The value to set",
@@ -109,9 +109,7 @@ class ConfigCog(commands.Cog):
             await interaction.response.send_message(
                 f"❌ An error occurred: {str(e)}",
                 ephemeral=True
-            )
-
-    @config_group.command(name="xp")
+            )    @config.command(name="xp")
     @app_commands.describe(
         setting="The XP setting to configure",
         value="The value to set",
@@ -189,9 +187,7 @@ class ConfigCog(commands.Cog):
             await interaction.response.send_message(
                 f"❌ An error occurred: {str(e)}",
                 ephemeral=True
-            )
-
-    @config_group.command(name="show")
+            )    @config.command(name="show")
     @app_commands.default_permissions(manage_guild=True)
     async def show_config(self, interaction: discord.Interaction):
         """Show current server configuration"""

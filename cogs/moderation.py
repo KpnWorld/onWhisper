@@ -423,6 +423,9 @@ class ModerationCog(commands.Cog):
     ):
         """Purge messages from a channel"""
         try:
+            # Defer response to prevent interaction timeout
+            await ctx.defer(ephemeral=True)
+            
             amount = min(100, max(1, amount))
             
             def check(msg):
@@ -443,25 +446,20 @@ class ModerationCog(commands.Cog):
                 + (f" from {user.mention}" if user else "")
             )
 
-            # Send confirmation
-            confirm_msg = await ctx.send(
+            # Send confirmation using followup
+            await ctx.followup.send(
                 f"✅ Purged {len(deleted) - 1} messages"
                 + (f" from {user.mention}" if user else ""),
                 ephemeral=True
             )
-            await asyncio.sleep(5)
-            try:
-                await confirm_msg.delete()
-            except:
-                pass
 
         except discord.Forbidden:
-            await ctx.send(
+            await ctx.followup.send(
                 "❌ I don't have permission to delete messages.",
                 ephemeral=True
             )
         except Exception as e:
-            await ctx.send(
+            await ctx.followup.send(
                 f"❌ An error occurred: {str(e)}",
                 ephemeral=True
             )

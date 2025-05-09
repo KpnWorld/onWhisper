@@ -995,3 +995,22 @@ class DBManager:
         except Exception as e:
             logging.error(f"Error removing color role {role_id} in guild {guild_id}: {str(e)}")
             raise DatabaseError(f"Failed to remove color role: {str(e)}")
+
+    @db_transaction()
+    async def get_user_last_xp(self, guild_id: int, user_id: int) -> Optional[datetime]:
+        """Get the last time a user gained XP"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT last_xp_gain FROM user_levels
+                    WHERE guild_id = ? AND user_id = ?
+                """, (guild_id, user_id))
+                
+                result = await cursor.fetchone()
+                if result and result[0]:
+                    return datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S.%f')
+                return None
+                
+        except Exception as e:
+            logging.error(f"Error getting last XP time for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get last XP time: {str(e)}")
