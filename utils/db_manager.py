@@ -70,11 +70,11 @@ class DBManager:
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s [%(levelname)s] %(message)s',
-            handlers=[
-                logging.FileHandler('db.log'),
-                logging.StreamHandler()
-            ]
-        )
+                handlers=[
+                    logging.FileHandler('db.log'),
+                    logging.StreamHandler()
+                ]
+            )
 
     async def initialize(self):
         """Initialize the database connection and create tables"""
@@ -82,7 +82,6 @@ class DBManager:
             self.db = await aiosqlite.connect(self.db_path)
             await self._create_tables()
             await self._create_indexes()
-            self._ready.set()
             return True
         except Exception as e:
             logging.error(f"Database initialization failed: {str(e)}\n{traceback.format_exc()}")
@@ -110,14 +109,14 @@ class DBManager:
         queries = [
             # Guild configuration
             """
-            CREATE TABLE IF NOT EXISTS guild_config (
-                guild_id INTEGER PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS guild_config (                guild_id INTEGER PRIMARY KEY,
                 xp_rate INTEGER DEFAULT 15,
                 xp_cooldown INTEGER DEFAULT 60,
                 whisper_enabled BOOLEAN DEFAULT 1,
                 logging_enabled BOOLEAN DEFAULT 1,
                 mod_role_id INTEGER,
                 admin_role_id INTEGER,
+                staff_role_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -843,11 +842,18 @@ class DBManager:
         except Exception as e:
             logging.error(f"Error getting reaction roles for guild {guild_id}: {str(e)}")
             raise DatabaseError(f"Failed to get reaction roles: {str(e)}")
-            
+              
     @db_transaction()
     async def get_user_color_role(self, guild_id: int, user_id: int) -> Optional[int]:
         """Get user's color role for a guild"""
+        cache_key = f"color_role_{guild_id}_{user_id}"
+        
         try:
+            # Check cache first
+            cached_data = self.cache.get(cache_key)
+            if cached_data:
+                return cached_data['role_id']
+
             async with self.db.cursor() as cursor:
                 await cursor.execute("""
                     SELECT role_id FROM color_roles
@@ -855,6 +861,9 @@ class DBManager:
                 """, (guild_id, user_id))
                 
                 result = await cursor.fetchone()
+                if result:
+                    # Update cache
+                    self.cache.set(cache_key, {'role_id': result[0]})
                 return result[0] if result else None
                 
         except Exception as e:
@@ -864,19 +873,34 @@ class DBManager:
     @db_transaction()
     async def set_user_color_role(self, guild_id: int, user_id: int, role_id: Optional[int]) -> bool:
         """Set or remove a user's color role"""
+        cache_key = f"color_role_{guild_id}_{user_id}"
+        
         try:
             async with self.db.cursor() as cursor:
-                if role_id is None:
+                # First, remove any existing color role
+                await cursor.execute("""
+                    DELETE FROM color_roles
+                    WHERE guild_id = ? AND user_id = ?
+                """, (guild_id, user_id))
+                
+                if role_id is not None:
+                    # Verify this is a valid color role
                     await cursor.execute("""
-                        DELETE FROM color_roles
-                        WHERE guild_id = ? AND user_id = ?
-                    """, (guild_id, user_id))
-                else:
-                    await cursor.execute("""
-                        INSERT OR REPLACE INTO color_roles
-                        (guild_id, user_id, role_id)
-                        VALUES (?, ?, ?)
-                    """, (guild_id, user_id, role_id))
+                        SELECT 1 FROM color_roles 
+                        WHERE guild_id = ? AND user_id = 0 AND role_id = ?
+                    """, (guild_id, role_id))
+                    
+                    if await cursor.fetchone():
+                        # Set the new color role
+                        await cursor.execute("""
+                            INSERT INTO color_roles (guild_id, user_id, role_id)
+                            VALUES (?, ?, ?)
+                        """, (guild_id, user_id, role_id))
+                    else:
+                        raise DatabaseError(f"Invalid color role ID: {role_id}")
+                
+                # Invalidate cache
+                self.cache.invalidate(cache_key)
                 return True
                 
         except Exception as e:
@@ -884,17 +908,90 @@ class DBManager:
             raise DatabaseError(f"Failed to set color role: {str(e)}")
 
     @db_transaction()
-    async def get_color_roles(self, guild_id: int) -> List[int]:
-        """Get all available color roles for a guild"""
+    async def get_color_roles(self, guild_id: int) -> List[Dict[str, Any]]:
+        """Get all available color roles for a guild with usage counts"""
+        cache_key = f"color_roles_{guild_id}"
+        
         try:
+            # Check cache first
+            cached_data = self.cache.get(cache_key)
+            if cached_data:
+                return cached_data['roles']
+
             async with self.db.cursor() as cursor:
+                # Get all color roles and their usage counts
                 await cursor.execute("""
-                    SELECT DISTINCT role_id FROM color_roles
-                    WHERE guild_id = ? AND user_id = 0
+                    SELECT cr.role_id,
+                           (SELECT COUNT(*) 
+                            FROM color_roles u 
+                            WHERE u.guild_id = cr.guild_id 
+                            AND u.role_id = cr.role_id 
+                            AND u.user_id != 0) as user_count
+                    FROM color_roles cr
+                    WHERE cr.guild_id = ? AND cr.user_id = 0
+                    ORDER BY user_count DESC, role_id ASC
                 """, (guild_id,))
                 
-                return [row[0] for row in await cursor.fetchall()]
+                roles = [{
+                    'role_id': row[0],
+                    'user_count': row[1]
+                } for row in await cursor.fetchall()]
+                
+                # Cache the result
+                self.cache.set(cache_key, {'roles': roles})
+                return roles
                 
         except Exception as e:
             logging.error(f"Error getting color roles for guild {guild_id}: {str(e)}")
             raise DatabaseError(f"Failed to get color roles: {str(e)}")
+
+    @db_transaction()
+    async def add_color_role(self, guild_id: int, role_id: int) -> bool:
+        """Add a role as an available color role"""
+        cache_key = f"color_roles_{guild_id}"
+        
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT OR IGNORE INTO color_roles (guild_id, user_id, role_id)
+                    VALUES (?, 0, ?)
+                """, (guild_id, role_id))
+                
+                # Invalidate cache
+                self.cache.invalidate(cache_key)
+                return True
+                
+        except Exception as e:
+            logging.error(f"Error adding color role {role_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to add color role: {str(e)}")
+
+    @db_transaction()
+    async def remove_color_role(self, guild_id: int, role_id: int) -> bool:
+        """Remove a role from available color roles and unassign it from users"""
+        cache_key = f"color_roles_{guild_id}"
+        
+        try:
+            async with self.db.cursor() as cursor:
+                # Remove role from available color roles and user assignments
+                await cursor.execute("""
+                    DELETE FROM color_roles
+                    WHERE guild_id = ? AND role_id = ?
+                """, (guild_id, role_id))
+                
+                # Invalidate cache for the guild's color roles
+                self.cache.invalidate(cache_key)
+                
+                # Invalidate cache for all users who had this role
+                await cursor.execute("""
+                    SELECT user_id FROM color_roles
+                    WHERE guild_id = ? AND role_id = ?
+                """, (guild_id, role_id))
+                
+                for row in await cursor.fetchall():
+                    self.cache.invalidate(f"color_role_{guild_id}_{row[0]}")
+                
+                return True
+                
+        except Exception as e:
+            logging.error(f"Error removing color role {role_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to remove color role: {str(e)}")
