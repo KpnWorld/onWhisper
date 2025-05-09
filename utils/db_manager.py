@@ -104,7 +104,7 @@ class DBManager:
             return True
         except Exception:
             return False
-
+            
     async def _create_tables(self):
         """Create all necessary database tables"""
         queries = [
@@ -189,6 +189,17 @@ class DBManager:
                 emoji TEXT,
                 role_id INTEGER,
                 PRIMARY KEY (message_id, emoji),
+                FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
+            )
+            """,
+            # Color roles
+            """
+            CREATE TABLE IF NOT EXISTS color_roles (
+                guild_id INTEGER,
+                user_id INTEGER,
+                role_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, user_id),
                 FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
             )
             """
@@ -331,6 +342,75 @@ class DBManager:
             raise DatabaseError(f"Failed to create whisper: {str(e)}")
 
     @db_transaction()
+    async def close_whisper(self, thread_id: int) -> bool:
+        """Close a whisper thread"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    UPDATE whispers
+                    SET closed_at = CURRENT_TIMESTAMP
+                    WHERE thread_id = ? AND closed_at IS NULL
+                    RETURNING 1
+                """, (thread_id,))
+                
+                result = await cursor.fetchone()
+                return bool(result)
+                
+        except Exception as e:
+            logging.error(f"Error closing whisper thread {thread_id}: {str(e)}")
+            raise DatabaseError(f"Failed to close whisper: {str(e)}")
+            
+    @db_transaction()
+    async def delete_whisper(self, thread_id: int) -> bool:
+        """Delete a whisper thread"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    DELETE FROM whispers
+                    WHERE thread_id = ?
+                    RETURNING 1
+                """, (thread_id,))
+                
+                result = await cursor.fetchone()
+                return bool(result)
+                
+        except Exception as e:
+            logging.error(f"Error deleting whisper thread {thread_id}: {str(e)}")
+            raise DatabaseError(f"Failed to delete whisper: {str(e)}")
+            
+    @db_transaction()
+    async def get_active_whispers(self, guild_id: int, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get active whisper threads for a guild or specific user"""
+        try:
+            async with self.db.cursor() as cursor:
+                query = """
+                    SELECT * FROM whispers
+                    WHERE guild_id = ? AND closed_at IS NULL
+                """
+                params = [guild_id]
+                
+                if user_id is not None:
+                    query += " AND user_id = ?"
+                    params.append(user_id)
+                    
+                query += " ORDER BY created_at DESC"
+                
+                await cursor.execute(query, params)
+                rows = await cursor.fetchall()
+                
+                return [{
+                    'thread_id': row[0],
+                    'guild_id': row[1],
+                    'user_id': row[2],
+                    'created_at': row[3],
+                    'closed_at': row[4]
+                } for row in rows]
+                
+        except Exception as e:
+            logging.error(f"Error getting active whispers in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get active whispers: {str(e)}")
+
+    @db_transaction()
     async def get_guild_config(self, guild_id: int) -> Optional[Dict[str, Any]]:
         """Get guild configuration"""
         cache_key = f"guild_config_{guild_id}"
@@ -447,3 +527,374 @@ class DBManager:
             logging.error(f"Error during cleanup: {str(e)}")
             await self.db.rollback()
             raise DatabaseError(f"Failed to clean up old data: {str(e)}")
+
+    @db_transaction()
+    async def get_reaction_role(self, guild_id: int, message_id: int, emoji: str) -> Optional[int]:
+        """Get role ID for a reaction role binding"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT role_id FROM reaction_roles
+                    WHERE message_id = ? AND emoji = ?
+                """, (message_id, emoji))
+                
+                result = await cursor.fetchone()
+                return result[0] if result else None
+
+        except Exception as e:
+            logging.error(f"Error getting reaction role for message {message_id} emoji {emoji}: {str(e)}")
+            raise DatabaseError(f"Failed to get reaction role: {str(e)}")
+
+    @db_transaction()
+    async def set_level_role(self, guild_id: int, level: int, role_id: Optional[int]) -> bool:
+        """Set or remove a level-based role reward"""
+        try:
+            async with self.db.cursor() as cursor:
+                if role_id is None:
+                    # Remove the level role
+                    await cursor.execute("""
+                        DELETE FROM level_roles
+                        WHERE guild_id = ? AND level = ?
+                    """, (guild_id, level))
+                else:
+                    # Set the level role
+                    await cursor.execute("""
+                        INSERT OR REPLACE INTO level_roles (guild_id, level, role_id)
+                        VALUES (?, ?, ?)
+                    """, (guild_id, level, role_id))
+                return True
+        except Exception as e:
+            logging.error(f"Error setting level role for level {level} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to set level role: {str(e)}")
+            
+    @db_transaction()
+    async def get_level_roles(self, guild_id: int) -> Dict[int, int]:
+        """Get all level-based role rewards for a guild"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT level, role_id FROM level_roles
+                    WHERE guild_id = ?
+                    ORDER BY level ASC
+                """, (guild_id,))
+                
+                return {row[0]: row[1] for row in await cursor.fetchall()}
+        except Exception as e:
+            logging.error(f"Error getting level roles for guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get level roles: {str(e)}")
+
+    @db_transaction()
+    async def get_mod_actions(self, guild_id: int, user_id: Optional[int] = None, active_only: bool = False) -> List[Dict[str, Any]]:
+        """Get moderation actions for a guild or specific user"""
+        try:
+            async with self.db.cursor() as cursor:
+                query = """
+                    SELECT * FROM mod_actions
+                    WHERE guild_id = ?
+                """
+                params = [guild_id]
+                
+                if user_id is not None:
+                    query += " AND user_id = ?"
+                    params.append(user_id)
+                    
+                if active_only:
+                    query += " AND active = 1"
+                    
+                query += " ORDER BY created_at DESC"
+                
+                await cursor.execute(query, params)
+                rows = await cursor.fetchall()
+                
+                return [{
+                    'action_id': row[0],
+                    'guild_id': row[1],
+                    'user_id': row[2],
+                    'moderator_id': row[3],
+                    'action_type': row[4],
+                    'reason': row[5],
+                    'created_at': row[6],
+                    'expires_at': row[7],
+                    'active': bool(row[8])
+                } for row in rows]
+                
+        except Exception as e:
+            logging.error(f"Error getting mod actions for guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get mod actions: {str(e)}")
+            
+    @db_transaction()
+    async def clear_mod_actions(self, guild_id: int, user_id: int) -> int:
+        """Clear all moderation actions for a user in a guild"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    UPDATE mod_actions
+                    SET active = 0
+                    WHERE guild_id = ? AND user_id = ? AND active = 1
+                    RETURNING changes()
+                """, (guild_id, user_id))
+                
+                result = await cursor.fetchone()
+                return result[0] if result else 0
+                
+        except Exception as e:
+            logging.error(f"Error clearing mod actions for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to clear mod actions: {str(e)}")
+            
+    @db_transaction()
+    async def get_warnings(self, guild_id: int, user_id: int) -> List[Dict[str, Any]]:
+        """Get all warnings for a user in a guild"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT * FROM mod_actions
+                    WHERE guild_id = ? AND user_id = ? AND action_type = 'warn'
+                    ORDER BY created_at DESC
+                """, (guild_id, user_id))
+                
+                rows = await cursor.fetchall()
+                return [{
+                    'action_id': row[0],
+                    'guild_id': row[1],
+                    'user_id': row[2],
+                    'moderator_id': row[3],
+                    'reason': row[5],
+                    'created_at': row[6],
+                    'active': bool(row[8])
+                } for row in rows]
+                
+        except Exception as e:
+            logging.error(f"Error getting warnings for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get warnings: {str(e)}")
+            
+    @db_transaction()
+    async def clear_warnings(self, guild_id: int, user_id: int) -> int:
+        """Clear all warnings for a user in a guild"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    UPDATE mod_actions
+                    SET active = 0
+                    WHERE guild_id = ? AND user_id = ? AND action_type = 'warn' AND active = 1
+                    RETURNING changes()
+                """, (guild_id, user_id))
+                
+                result = await cursor.fetchone()
+                return result[0] if result else 0
+                
+        except Exception as e:
+            logging.error(f"Error clearing warnings for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to clear warnings: {str(e)}")
+
+    @db_transaction()
+    async def get_user_xp(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user XP data for a guild"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT * FROM user_levels
+                    WHERE guild_id = ? AND user_id = ?
+                """, (guild_id, user_id))
+                
+                result = await cursor.fetchone()
+                if result:
+                    return {
+                        'user_id': result[0],
+                        'guild_id': result[1],
+                        'xp': result[2],
+                        'level': result[3],
+                        'last_xp_gain': result[4]
+                    }
+                return None
+                
+        except Exception as e:
+            logging.error(f"Error getting user XP for {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get user XP: {str(e)}")
+            
+    @db_transaction()
+    async def get_leaderboard(self, guild_id: int, offset: int = 0, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get XP leaderboard for a guild"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT * FROM user_levels
+                    WHERE guild_id = ?
+                    ORDER BY xp DESC
+                    LIMIT ? OFFSET ?
+                """, (guild_id, limit, offset))
+                
+                rows = await cursor.fetchall()
+                return [{
+                    'user_id': row[0],
+                    'guild_id': row[1],
+                    'xp': row[2],
+                    'level': row[3],
+                    'last_xp_gain': row[4]
+                } for row in rows]
+                
+        except Exception as e:
+            logging.error(f"Error getting leaderboard for guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get leaderboard: {str(e)}")
+
+    @db_transaction()
+    async def add_mod_action(self, guild_id: int, user_id: int, moderator_id: int, action_type: str, reason: str, expires_at: Optional[datetime] = None) -> bool:
+        """Add a moderation action to the database"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT INTO mod_actions (guild_id, user_id, moderator_id, action_type, reason, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (guild_id, user_id, moderator_id, action_type, reason, expires_at))
+                return True
+                
+        except Exception as e:
+            logging.error(f"Error adding mod action for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to add mod action: {str(e)}")
+            
+    @db_transaction()
+    async def get_logging_channel(self, guild_id: int, log_type: str) -> Optional[int]:
+        """Get logging channel ID for a specific log type"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT channel_id FROM logging_channels
+                    WHERE guild_id = ? AND channel_type = ? AND enabled = 1
+                """, (guild_id, log_type))
+                
+                result = await cursor.fetchone()
+                return result[0] if result else None
+                
+        except Exception as e:
+            logging.error(f"Error getting logging channel for {log_type} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get logging channel: {str(e)}")
+            
+    @db_transaction()
+    async def set_logging_channel(self, guild_id: int, log_type: str, channel_id: Optional[int]) -> bool:
+        """Set or disable a logging channel"""
+        try:
+            async with self.db.cursor() as cursor:
+                if channel_id is None:
+                    await cursor.execute("""
+                        UPDATE logging_channels
+                        SET enabled = 0
+                        WHERE guild_id = ? AND channel_type = ?
+                    """, (guild_id, log_type))
+                else:
+                    await cursor.execute("""
+                        INSERT OR REPLACE INTO logging_channels (guild_id, channel_type, channel_id, enabled)
+                        VALUES (?, ?, ?, 1)
+                    """, (guild_id, log_type, channel_id))
+                return True
+                
+        except Exception as e:
+            logging.error(f"Error setting logging channel for {log_type} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to set logging channel: {str(e)}")
+
+    @db_transaction()
+    async def add_reaction_role(self, guild_id: int, message_id: int, emoji: str, role_id: int) -> bool:
+        """Add a reaction role binding"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT OR REPLACE INTO reaction_roles
+                    (guild_id, message_id, emoji, role_id)
+                    VALUES (?, ?, ?, ?)
+                """, (guild_id, message_id, emoji, role_id))
+                return True
+                
+        except Exception as e:
+            logging.error(f"Error adding reaction role for message {message_id}: {str(e)}")
+            raise DatabaseError(f"Failed to add reaction role: {str(e)}")
+            
+    @db_transaction()
+    async def remove_reaction_roles(self, guild_id: int, message_id: int) -> bool:
+        """Remove all reaction roles from a message"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    DELETE FROM reaction_roles
+                    WHERE guild_id = ? AND message_id = ?
+                """, (guild_id, message_id))
+                return True
+                
+        except Exception as e:
+            logging.error(f"Error removing reaction roles for message {message_id}: {str(e)}")
+            raise DatabaseError(f"Failed to remove reaction roles: {str(e)}")
+            
+    @db_transaction()
+    async def get_reaction_roles(self, guild_id: int) -> Dict[int, Dict[str, int]]:
+        """Get all reaction role bindings for a guild"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT message_id, emoji, role_id
+                    FROM reaction_roles
+                    WHERE guild_id = ?
+                """, (guild_id,))
+                
+                result = {}
+                for row in await cursor.fetchall():
+                    message_id = row[0]
+                    if message_id not in result:
+                        result[message_id] = {}
+                    result[message_id][row[1]] = row[2]
+                return result
+                
+        except Exception as e:
+            logging.error(f"Error getting reaction roles for guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get reaction roles: {str(e)}")
+            
+    @db_transaction()
+    async def get_user_color_role(self, guild_id: int, user_id: int) -> Optional[int]:
+        """Get user's color role for a guild"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT role_id FROM color_roles
+                    WHERE guild_id = ? AND user_id = ?
+                """, (guild_id, user_id))
+                
+                result = await cursor.fetchone()
+                return result[0] if result else None
+                
+        except Exception as e:
+            logging.error(f"Error getting color role for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get color role: {str(e)}")
+
+    @db_transaction()
+    async def set_user_color_role(self, guild_id: int, user_id: int, role_id: Optional[int]) -> bool:
+        """Set or remove a user's color role"""
+        try:
+            async with self.db.cursor() as cursor:
+                if role_id is None:
+                    await cursor.execute("""
+                        DELETE FROM color_roles
+                        WHERE guild_id = ? AND user_id = ?
+                    """, (guild_id, user_id))
+                else:
+                    await cursor.execute("""
+                        INSERT OR REPLACE INTO color_roles
+                        (guild_id, user_id, role_id)
+                        VALUES (?, ?, ?)
+                    """, (guild_id, user_id, role_id))
+                return True
+                
+        except Exception as e:
+            logging.error(f"Error setting color role for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to set color role: {str(e)}")
+
+    @db_transaction()
+    async def get_color_roles(self, guild_id: int) -> List[int]:
+        """Get all available color roles for a guild"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT DISTINCT role_id FROM color_roles
+                    WHERE guild_id = ? AND user_id = 0
+                """, (guild_id,))
+                
+                return [row[0] for row in await cursor.fetchall()]
+                
+        except Exception as e:
+            logging.error(f"Error getting color roles for guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get color roles: {str(e)}")

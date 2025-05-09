@@ -73,22 +73,15 @@ class RolesCog(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(
                 f"❌ An error occurred: {str(e)}",
-                ephemeral=True
-            )
+                ephemeral=True            )
 
     @roles_group.command(name="color")
     @app_commands.describe(
-        action="The action to perform",
-        role="The color role to set",
+        role="The color role to set (leave empty to clear)"
     )
-    @app_commands.choices(action=[
-        app_commands.Choice(name="set", value="set"),
-        app_commands.Choice(name="clear", value="clear")
-    ])
-    async def color_role(
+    async def set_color_role(
         self,
         interaction: discord.Interaction,
-        action: Literal["set", "clear"],
         role: Optional[discord.Role] = None
     ):
         """Set or clear your color role"""
@@ -99,64 +92,278 @@ class RolesCog(commands.Cog):
             )
 
         try:
-            if action == "set":
-                if not role:
-                    return await interaction.response.send_message(
-                        "⚠️ Please provide a role to set as your color.",
-                        ephemeral=True
-                    )
+            await interaction.response.defer(ephemeral=True)
+            
+            # Clear current color role if any
+            current = await self.bot.db_manager.get_user_color_role(
+                interaction.guild_id,
+                interaction.user.id
+            )
+            if current:
+                current_role = interaction.guild.get_role(current)
+                if current_role:
+                    try:
+                        await interaction.user.remove_roles(current_role)
+                    except discord.Forbidden:
+                        await interaction.followup.send(
+                            f"⚠️ Unable to remove previous color role {current_role.mention} - missing permissions.",
+                            ephemeral=True
+                        )
+                        return
+                    except discord.HTTPException as e:
+                        await interaction.followup.send(
+                            f"⚠️ Failed to remove previous color role {current_role.mention}: {str(e)}",
+                            ephemeral=True
+                        )
+                        return
 
-                # Check if role is in allowed color roles
-                allowed_roles = await self.bot.db_manager.get_color_roles(interaction.guild_id)
-                if role.id not in allowed_roles:
-                    return await interaction.response.send_message(
-                        "❌ This role is not available as a color role.",
-                        ephemeral=True
-                    )
-
-                # Remove existing color roles
-                current_color = await self.bot.db_manager.get_user_color_role(
+            # Clear color role
+            if not role:
+                await self.bot.db_manager.set_user_color_role(
                     interaction.guild_id,
-                    interaction.user.id
+                    interaction.user.id,
+                    None
                 )
-                if current_color:
-                    old_role = interaction.guild.get_role(current_color)
-                    if old_role:
-                        await interaction.user.remove_roles(old_role)
+                await interaction.followup.send(
+                    "✅ Cleared your color role.",
+                    ephemeral=True
+                )
+                return
 
-                # Set new color role
+            # Verify role is a valid color role
+            color_roles = await self.bot.db_manager.get_color_roles(interaction.guild_id)
+            if role.id not in color_roles:
+                await interaction.followup.send(
+                    "❌ This role is not available as a color role.",
+                    ephemeral=True
+                )
+                return
+
+            # Check permissions
+            if role >= interaction.guild.me.top_role:
+                await interaction.followup.send(
+                    "❌ I cannot manage this role as it is above my highest role.",
+                    ephemeral=True
+                )
+                return
+
+            # Check if role has a color
+            if not role.color:
+                await interaction.followup.send(
+                    "❌ This role doesn't have a color set.",
+                    ephemeral=True
+                )
+                return
+
+            # Set new color role
+            try:
                 await interaction.user.add_roles(role)
                 await self.bot.db_manager.set_user_color_role(
                     interaction.guild_id,
                     interaction.user.id,
                     role.id
                 )
-
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"✅ Set your color to {role.mention}",
                     ephemeral=True
                 )
-
-            else:  # clear
-                current_color = await self.bot.db_manager.get_user_color_role(
-                    interaction.guild_id,
-                    interaction.user.id
-                )
-                if current_color:
-                    role = interaction.guild.get_role(current_color)
-                    if role:
-                        await interaction.user.remove_roles(role)
-
-                await self.bot.db_manager.set_user_color_role(
-                    interaction.guild_id,
-                    interaction.user.id,
-                    None
-                )
-
-                await interaction.response.send_message(
-                    "✅ Cleared your color role.",
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "❌ I don't have permission to manage that role.",
                     ephemeral=True
                 )
+            except discord.HTTPException as e:
+                await interaction.followup.send(
+                    f"❌ Failed to set color role: {str(e)}",
+                    ephemeral=True
+                )
+
+        except Exception as e:
+            try:
+                await interaction.followup.send(
+                    f"❌ An error occurred: {str(e)}",
+                    ephemeral=True
+                )
+            except:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"❌ An error occurred: {str(e)}",
+                        ephemeral=True
+                    )
+
+    @roles_group.command(name="colors")
+    @app_commands.describe(
+        action="The action to perform",
+        role="The role to manage"
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="add", value="add"),
+        app_commands.Choice(name="remove", value="remove"),
+        app_commands.Choice(name="list", value="list")
+    ])
+    @app_commands.default_permissions(manage_roles=True)
+    async def manage_color_roles(
+        self,
+        interaction: discord.Interaction,
+        action: Literal["add", "remove", "list"],
+        role: Optional[discord.Role] = None
+    ):
+        """Manage available color roles"""
+        if not self.bot.db_manager:
+            return await interaction.response.send_message(
+                "⚠️ Database connection is not available.",
+                ephemeral=True
+            )
+
+        try:
+            if action == "list":
+                await interaction.response.defer(ephemeral=True)
+                
+                color_roles = await self.bot.db_manager.get_color_roles(interaction.guild_id)
+                if not color_roles:
+                    await interaction.followup.send(
+                        "No color roles set up in this server.",
+                        ephemeral=True
+                    )
+                    return
+
+                roles = []
+                total_members = 0
+                
+                for role_id in color_roles:
+                    role = interaction.guild.get_role(role_id)
+                    if not role:
+                        continue
+                        
+                    # Count members with this role as their color
+                    async with self.bot.db_manager.db.cursor() as cursor:
+                        await cursor.execute("""
+                            SELECT COUNT(*) FROM color_roles
+                            WHERE guild_id = ? AND role_id = ? AND user_id != 0
+                        """, (interaction.guild_id, role_id))
+                        count = (await cursor.fetchone())[0]
+                        total_members += count
+                        
+                    roles.append({
+                        'role': role,
+                        'count': count
+                    })
+
+                if not roles:
+                    await interaction.followup.send(
+                        "No valid color roles found in this server.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Sort roles by position (highest first)
+                roles.sort(key=lambda x: x['role'].position, reverse=True)
+                
+                # Create a rich embed
+                embed = discord.Embed(
+                    title="🎨 Available Color Roles",
+                    color=discord.Color.blue(),
+                    timestamp=discord.utils.utcnow()
+                )                # Add role list with counts
+                role_lines = []
+                for role_info in roles:
+                    role = role_info['role']
+                    count = role_info['count']
+                    role_lines.append(
+                        f"{role.mention} `{str(role.color)}` ({count} member{'s' if count != 1 else ''})"
+                    )
+                
+                embed.description = "\n".join(role_lines)
+                embed.set_footer(text=f"Total members with color roles: {total_members}")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            if not role:
+                return await interaction.response.send_message(
+                    "⚠️ Please provide a role.",
+                    ephemeral=True
+                )
+
+            if role >= interaction.guild.me.top_role:
+                return await interaction.response.send_message(
+                    "❌ I cannot manage this role as it is above my highest role.",
+                    ephemeral=True
+                )
+
+            if action == "add":
+                if not role.color:
+                    return await interaction.response.send_message(
+                        "❌ This role doesn't have a color set.",
+                        ephemeral=True
+                    )
+
+                current_colors = await self.bot.db_manager.get_color_roles(interaction.guild_id)
+                if role.id in current_colors:
+                    return await interaction.response.send_message(
+                        "❌ This role is already in the color roles list.",
+                        ephemeral=True
+                    )
+
+                    await self.bot.db_manager.set_user_color_role(
+                        interaction.guild_id,
+                        0,  # Special user_id 0 indicates a global color role
+                        role.id
+                    )
+
+                    await interaction.response.send_message(
+                        f"✅ Added {role.mention} to available color roles.",
+                        ephemeral=True
+                    )
+
+                elif action == "remove":
+                    current_colors = await self.bot.db_manager.get_color_roles(interaction.guild_id)
+                    if role.id not in current_colors:
+                        return await interaction.response.send_message(
+                            "❌ This role is not in the color roles list.",
+                            ephemeral=True
+                        )
+                    
+                    await self.bot.db_manager.set_user_color_role(
+                        interaction.guild_id,
+                        0,  # Special user_id 0 indicates a global color role
+                        None
+                    )
+
+                    # Remove from users who have it
+                    affectedMembers = []
+                    errorMembers = []
+
+                    async with self.bot.db_manager.db.cursor() as cursor:
+                        await cursor.execute("""
+                            SELECT user_id FROM color_roles
+                            WHERE guild_id = ? AND role_id = ?
+                        """, (interaction.guild_id, role.id))
+                        
+                        for row in await cursor.fetchall():
+                            member = interaction.guild.get_member(row[0])
+                            if member:
+                                try:
+                                    await member.remove_roles(role)
+                                    await self.bot.db_manager.set_user_color_role(
+                                        interaction.guild_id,
+                                        member.id,
+                                        None
+                                    )
+                                    affectedMembers.append(member.mention)
+                                except discord.Forbidden:
+                                    errorMembers.append(f"{member.mention} (missing permissions)")
+                                except discord.HTTPException:
+                                    errorMembers.append(f"{member.mention} (failed)")
+
+                    # Build response message
+                    msg = [f"✅ Removed {role.mention} from available color roles."]
+                    if affectedMembers:
+                        msg.append("\n👥 Removed from members:")
+                        msg.append(", ".join(affectedMembers))
+                    if errorMembers:
+                        msg.append("\n⚠️ Failed to remove from:")
+                        msg.append(", ".join(errorMembers))
+                    await interaction.response.send_message("\n".join(msg), ephemeral=True)
 
         except Exception as e:
             await interaction.response.send_message(
@@ -388,22 +595,24 @@ class RolesCog(commands.Cog):
                     await member.remove_roles(role)
                 success.append(member.mention)
             except Exception:
-                failed.append(member.mention)
-
-        # Build response message
+                failed.append(member.mention)        # Build response message
         msg = []
         if success:
-            msg.append(f"✅ Successfully {'added' if action == 'add' else 'removed'} {role.mention} {'to' if action == 'add' else 'from'}:")
-            msg.append(", ".join(success))
+            msg.extend([
+                f"✅ Successfully {'added' if action == 'add' else 'removed'} {role.mention} {'to' if action == 'add' else 'from'}:",
+                ", ".join(success)
+            ])
 
         if failed:
-            msg.append(f"\n❌ Failed for these users:")
-            msg.append(", ".join(failed))
+            msg.extend([
+                "\n❌ Failed for these users:",
+                ", ".join(failed)
+            ])
 
-        if not msg:
-            msg = ["No valid users provided."]
-
-        await interaction.followup.send("\n".join(msg), ephemeral=True)
+        await interaction.followup.send(
+            msg if msg else "No valid users provided.",
+            ephemeral=True
+        )
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
