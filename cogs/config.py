@@ -7,16 +7,17 @@ from datetime import timedelta
 class ConfigCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    
+
     config = app_commands.Group(
         name="config",
         description="Configure bot settings for this server"
     )
 
+    # Whisper System Configuration
     @config.command(name="whisper")
     @app_commands.describe(
         setting="The whisper setting to configure",
-        value="The value to set",
+        value="The value to set for toggle (true/false)",
         channel="The channel for whisper threads",
         role="The staff role for whispers",
         timeout="Auto-close timeout in minutes"
@@ -116,10 +117,13 @@ class ConfigCog(commands.Cog):
             await interaction.response.send_message(
                 f"❌ An error occurred: {str(e)}",
                 ephemeral=True
-            )    @config.command(name="xp")
+            )
+
+    # XP System Configuration
+    @config.command(name="xp")
     @app_commands.describe(
         setting="The XP setting to configure",
-        value="The value to set",
+        value="The value to set for toggle (true/false)",
         rate="XP gain rate (1-100)",
         cooldown="XP gain cooldown in seconds"
     )
@@ -194,7 +198,159 @@ class ConfigCog(commands.Cog):
             await interaction.response.send_message(
                 f"❌ An error occurred: {str(e)}",
                 ephemeral=True
-            )    @config.command(name="show")
+            )
+
+    # Moderation Configuration
+    @config.command(name="mod")
+    @app_commands.describe(
+        setting="The moderation setting to configure",
+        role="The role to set"
+    )
+    @app_commands.choices(setting=[
+        app_commands.Choice(name="mod_role", value="mod_role"),
+        app_commands.Choice(name="admin_role", value="admin_role")
+    ])
+    @app_commands.default_permissions(administrator=True)
+    async def config_mod(
+        self,
+        interaction: discord.Interaction,
+        setting: Literal["mod_role", "admin_role"],
+        role: discord.Role
+    ):
+        """Configure moderation settings"""
+        if not self.bot.db_manager:
+            return await interaction.response.send_message(
+                "⚠️ Database connection is not available.",
+                ephemeral=True
+            )
+
+        try:
+            if setting == "mod_role":
+                await self.bot.db_manager.update_guild_config(
+                    interaction.guild_id,
+                    {"mod_role_id": role.id}
+                )
+                await interaction.response.send_message(
+                    f"✅ Set {role.mention} as the moderator role.",
+                    ephemeral=True
+                )
+            elif setting == "admin_role":
+                await self.bot.db_manager.update_guild_config(
+                    interaction.guild_id,
+                    {"admin_role_id": role.id}
+                )
+                await interaction.response.send_message(
+                    f"✅ Set {role.mention} as the admin role.",
+                    ephemeral=True
+                )
+
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ An error occurred: {str(e)}",
+                ephemeral=True
+            )
+    
+    # Level Roles Configuration
+    @config.command(name="level")
+    @app_commands.describe(
+        action="The action to perform",
+        level="The level to configure",
+        role="The role to assign at this level"
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="add", value="add"),
+        app_commands.Choice(name="remove", value="remove"),
+        app_commands.Choice(name="list", value="list")
+    ])
+    @app_commands.default_permissions(manage_roles=True)
+    async def config_level(
+        self,
+        interaction: discord.Interaction,
+        action: Literal["add", "remove", "list"],
+        level: Optional[int] = None,
+        role: Optional[discord.Role] = None
+    ):
+        """Configure level-based role rewards"""
+        if not self.bot.db_manager:
+            return await interaction.response.send_message(
+                "⚠️ Database connection is not available.",
+                ephemeral=True
+            )
+
+        try:
+            if action == "add":
+                if not level or level < 1:
+                    return await interaction.response.send_message(
+                        "⚠️ Please provide a valid level (minimum 1).",
+                        ephemeral=True
+                    )
+                if not role:
+                    return await interaction.response.send_message(
+                        "⚠️ Please provide a role.",
+                        ephemeral=True
+                    )
+
+                await self.bot.db_manager.set_level_role(
+                    interaction.guild_id,
+                    level,
+                    role.id
+                )
+                await interaction.response.send_message(
+                    f"✅ Set {role.mention} as the reward for level {level}.",
+                    ephemeral=True
+                )
+
+            elif action == "remove":
+                if not level:
+                    return await interaction.response.send_message(
+                        "⚠️ Please provide the level to remove.",
+                        ephemeral=True
+                    )
+
+                await self.bot.db_manager.set_level_role(
+                    interaction.guild_id,
+                    level,
+                    None
+                )
+                await interaction.response.send_message(
+                    f"✅ Removed role reward for level {level}.",
+                    ephemeral=True
+                )
+
+            elif action == "list":
+                level_roles = await self.bot.db_manager.get_level_roles(interaction.guild_id)
+                
+                if not level_roles:
+                    return await interaction.response.send_message(
+                        "ℹ️ No level roles configured.",
+                        ephemeral=True
+                    )
+
+                embed = discord.Embed(
+                    title="Level Role Rewards",
+                    color=discord.Color.blue(),
+                    description="Here are all the level-based role rewards:"
+                )
+
+                for level, role_id in sorted(level_roles.items()):
+                    role = interaction.guild.get_role(role_id)
+                    if role:
+                        embed.add_field(
+                            name=f"Level {level}",
+                            value=role.mention,
+                            inline=True
+                        )
+
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ An error occurred: {str(e)}",
+                ephemeral=True
+            )
+
+    # Show All Configuration
+    @config.command(name="show")
     @app_commands.default_permissions(manage_guild=True)
     async def show_config(self, interaction: discord.Interaction):
         """Show current server configuration"""
@@ -243,6 +399,34 @@ class ConfigCog(commands.Cog):
                 Rate: {config.get('xp_rate', 15)} XP per message
                 Cooldown: {config.get('xp_cooldown', 60)} seconds
                 """.strip(),
+                inline=False
+            )
+
+            # Mod settings
+            mod_role = interaction.guild.get_role(config.get("mod_role_id"))
+            admin_role = interaction.guild.get_role(config.get("admin_role_id"))
+            embed.add_field(
+                name="Moderation",
+                value=f"""
+                Mod Role: {mod_role.mention if mod_role else "Not set"}
+                Admin Role: {admin_role.mention if admin_role else "Not set"}
+                """.strip(),
+                inline=False
+            )
+
+            # Level roles
+            level_roles = await self.bot.db_manager.get_level_roles(interaction.guild_id)
+            if level_roles:
+                level_roles_text = "\n".join(
+                    f"Level {level}: {interaction.guild.get_role(role_id).mention if interaction.guild.get_role(role_id) else 'Invalid Role'}"
+                    for level, role_id in sorted(level_roles.items())
+                )
+            else:
+                level_roles_text = "No level roles configured"
+
+            embed.add_field(
+                name="Level Roles",
+                value=level_roles_text,
                 inline=False
             )
 
