@@ -45,10 +45,17 @@ class ConfigCog(commands.Cog):
             )
 
         try:
-            if setting == "toggle":
-                enabled = value.lower() == "true" if value else None
-                if enabled is None:
-                    config = await self.bot.db_manager.get_guild_config(interaction.guild_id)
+            if setting == "toggle":                
+                config = await self.bot.db_manager.get_guild_config(interaction.guild_id)
+                if not config:
+                    return await interaction.response.send_message(
+                        "⚠️ No configuration found for this server.",
+                        ephemeral=True
+                    )
+                
+                if value:
+                    enabled = value.lower() == "true"
+                else:
                     enabled = not config.get("whisper_enabled", True)
                 
                 await self.bot.db_manager.update_guild_config(

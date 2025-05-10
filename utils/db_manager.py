@@ -109,7 +109,8 @@ class DBManager:
         queries = [
             # Guild configuration
             """
-            CREATE TABLE IF NOT EXISTS guild_config (                guild_id INTEGER PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS guild_config (
+                guild_id INTEGER PRIMARY KEY,
                 xp_rate INTEGER DEFAULT 15,
                 xp_cooldown INTEGER DEFAULT 60,
                 whisper_enabled BOOLEAN DEFAULT 1,
@@ -117,6 +118,7 @@ class DBManager:
                 mod_role_id INTEGER,
                 admin_role_id INTEGER,
                 staff_role_id INTEGER,
+                whisper_channel_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -407,9 +409,7 @@ class DBManager:
                 
         except Exception as e:
             logging.error(f"Error getting active whispers in guild {guild_id}: {str(e)}")
-            raise DatabaseError(f"Failed to get active whispers: {str(e)}")
-
-    @db_transaction()
+            raise DatabaseError(f"Failed to get active whispers: {str(e)}")    @db_transaction()
     async def get_guild_config(self, guild_id: int) -> Optional[Dict[str, Any]]:
         """Get guild configuration"""
         cache_key = f"guild_config_{guild_id}"
@@ -417,7 +417,7 @@ class DBManager:
         try:
             # Check cache first
             cached_data = self.cache.get(cache_key)
-            if cached_data:
+            if cached_data and cached_data.get("staff_role_id") is not None:
                 return cached_data
 
             async with self.db.cursor() as cursor:
@@ -441,8 +441,10 @@ class DBManager:
                     INSERT OR IGNORE INTO guild_config (guild_id)
                     VALUES (?)
                 """, (guild_id,))
+                  # Ensure the config is migrated
+                await self.migrate_guild_config(guild_id)
                 
-                # Get the default config
+                # Get the updated config
                 await cursor.execute("""
                     SELECT * FROM guild_config 
                     WHERE guild_id = ?
@@ -1014,3 +1016,33 @@ class DBManager:
         except Exception as e:
             logging.error(f"Error getting last XP time for user {user_id} in guild {guild_id}: {str(e)}")
             raise DatabaseError(f"Failed to get last XP time: {str(e)}")
+
+    async def migrate_guild_config(self, guild_id: int):
+        """Add any missing columns to guild_config"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT OR IGNORE INTO guild_config (
+                        guild_id, staff_role_id, whisper_enabled, 
+                        whisper_channel_id, whisper_timeout,
+                        created_at, updated_at
+                    ) VALUES (?, NULL, 1, NULL, 24, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (guild_id,))
+                
+                # Verify the config exists and has all required columns
+                await cursor.execute("""
+                    UPDATE guild_config 
+                    SET staff_role_id = COALESCE(staff_role_id, NULL),
+                        whisper_enabled = COALESCE(whisper_enabled, 1),
+                        whisper_timeout = COALESCE(whisper_timeout, 24),
+                        updated_at = CASE 
+                            WHEN staff_role_id IS NULL THEN CURRENT_TIMESTAMP 
+                            ELSE updated_at 
+                        END
+                    WHERE guild_id = ?
+                """, (guild_id,))
+
+                return True
+        except Exception as e:
+            logging.error(f"Error migrating guild config for guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to migrate guild config: {str(e)}")
