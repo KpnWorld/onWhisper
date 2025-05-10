@@ -54,18 +54,18 @@ class LoggingCog(commands.Cog):
         log_type="The type of logs to configure",
         channel="The channel to send logs to",
         enabled="Whether to enable or disable logging"
-    )
-    @app_commands.choices(log_type=[
+    )    @app_commands.choices(log_type=[
         app_commands.Choice(name="mod", value="mod"),
         app_commands.Choice(name="member", value="member"),
         app_commands.Choice(name="message", value="message"),
-        app_commands.Choice(name="server", value="server")
+        app_commands.Choice(name="server", value="server"),
+        app_commands.Choice(name="all", value="all")
     ])
     @app_commands.default_permissions(manage_guild=True)
     async def setup_logging(
         self,
         interaction: discord.Interaction,
-        log_type: Literal["mod", "member", "message", "server"],
+        log_type: Literal["mod", "member", "message", "server", "all"],
         channel: Optional[discord.TextChannel] = None,
         enabled: Optional[bool] = None
     ):
@@ -74,37 +74,65 @@ class LoggingCog(commands.Cog):
             return await interaction.response.send_message(
                 "⚠️ Database connection is not available.",
                 ephemeral=True
-            )
-
+            )        
         try:
-            if enabled is None:
-                # Toggle current state
-                current = await self.bot.db_manager.get_logging_channel(
+            log_types = ["mod", "member", "message", "server"]
+            if log_type == "all":
+                log_types = ["mod", "member", "message", "server"]
+            else:
+                log_types = [log_type]
+
+            for current_type in log_types:
+                if enabled is None:
+                    # Toggle current state
+                    current = await self.bot.db_manager.get_logging_channel(
+                        interaction.guild_id,
+                        current_type
+                    )
+                    current_enabled = not bool(current)            
+                    if current_enabled and not channel:
+                        return await interaction.response.send_message(
+                            "⚠️ Please provide a channel when enabling logging.",
+                            ephemeral=True
+                        )
+                else:
+                    current_enabled = enabled
+
+                await self.bot.db_manager.set_logging_channel(
                     interaction.guild_id,
-                    log_type
-                )
-                enabled = not bool(current)
-
-            if enabled and not channel:
-                return await interaction.response.send_message(
-                    "⚠️ Please provide a channel when enabling logging.",
-                    ephemeral=True
-                )
-
-            await self.bot.db_manager.set_logging_channel(
-                interaction.guild_id,
-                log_type,
-                channel.id if enabled else None
-            )
-
-            # Update cache
+                    current_type,
+                    channel.id if current_enabled else None
+                )            # Update cache
             if interaction.guild_id not in self._log_cache:
                 self._log_cache[interaction.guild_id] = {}
             
             if enabled:
-                self._log_cache[interaction.guild_id][log_type] = channel.id
+                for current_type in log_types:
+                    self._log_cache[interaction.guild_id][current_type] = channel.id
+                # Send confirmation message to the log channel
+                setup_embed = discord.Embed(
+                    title="Logging Channel Set",
+                    description=(
+                        "This channel has been set as the logging channel for: " +
+                        (", ".join(f"`{t}`" for t in log_types))
+                    ),
+                    color=discord.Color.green(),
+                    timestamp=discord.utils.utcnow()
+                )
+                setup_embed.add_field(
+                    name="Set By",
+                    value=interaction.user.mention,
+                    inline=True
+                )
+                setup_embed.add_field(
+                    name="Channel",
+                    value=channel.mention,
+                    inline=True
+                )
+                await channel.send(embed=setup_embed)
             else:
-                self._log_cache[interaction.guild_id].pop(log_type, None)
+                for current_type in log_types:
+                    self._log_cache[interaction.guild_id].pop(current_type, None)
 
             await interaction.response.send_message(
                 f"✅ {'Enabled' if enabled else 'Disabled'} {log_type} logging "
