@@ -595,7 +595,8 @@ class RolesCog(commands.Cog):
                     await member.remove_roles(role)
                 success.append(member.mention)
             except Exception:
-                failed.append(member.mention)        # Build response message
+                failed.append(member.mention)        
+        # Build response message
         msg = []
         if success:
             msg.extend([

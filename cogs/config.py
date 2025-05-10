@@ -8,13 +8,13 @@ class ConfigCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    config = app_commands.Group(
+    config_group = app_commands.Group(
         name="config",
-        description="Configure bot settings for this server"
+        description="Server settings and configuration"
     )
 
     # Whisper System Configuration
-    @config.command(name="whisper")
+    @config_group.command(name="whisper")
     @app_commands.describe(
         setting="The whisper setting to configure",
         value="The value to set for toggle (true/false)",
@@ -120,7 +120,7 @@ class ConfigCog(commands.Cog):
             )
 
     # XP System Configuration
-    @config.command(name="xp")
+    @config_group.command(name="xp")
     @app_commands.describe(
         setting="The XP setting to configure",
         value="The value to set for toggle (true/false)",
@@ -201,7 +201,7 @@ class ConfigCog(commands.Cog):
             )
 
     # Moderation Configuration
-    @config.command(name="mod")
+    @config_group.command(name="mod")
     @app_commands.describe(
         setting="The moderation setting to configure",
         role="The role to set"
@@ -251,7 +251,7 @@ class ConfigCog(commands.Cog):
             )
     
     # Level Roles Configuration
-    @config.command(name="level")
+    @config_group.command(name="level")
     @app_commands.describe(
         action="The action to perform",
         level="The level to configure",
@@ -350,7 +350,7 @@ class ConfigCog(commands.Cog):
             )
 
     # Show All Configuration
-    @config.command(name="show")
+    @config_group.command(name="show")
     @app_commands.default_permissions(manage_guild=True)
     async def show_config(self, interaction: discord.Interaction):
         """Show current server configuration"""
