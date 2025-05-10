@@ -47,14 +47,15 @@ class LoggingCog(commands.Cog):
                     await channel.send(embed=embed, file=file if file else None)
 
         except Exception as e:
-            print(f"Error sending log: {e}")
-
+            print(f"Error sending log: {e}")    
+            
     @logging_group.command(name="setup")
     @app_commands.describe(
         log_type="The type of logs to configure",
         channel="The channel to send logs to",
         enabled="Whether to enable or disable logging"
-    )    @app_commands.choices(log_type=[
+    )
+    @app_commands.choices(log_type=[
         app_commands.Choice(name="mod", value="mod"),
         app_commands.Choice(name="member", value="member"),
         app_commands.Choice(name="message", value="message"),
