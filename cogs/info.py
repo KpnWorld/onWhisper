@@ -327,76 +327,100 @@ class InfoCog(commands.Cog):
             )
 
     @app_commands.command(name="help")
-    @app_commands.describe(command="The command to get help for")
-    async def help_command(self, interaction: discord.Interaction, command: Optional[str] = None):
-        """Show help about commands"""
+    @app_commands.describe(
+        command="The specific command to get help for"
+    )
+    async def help(
+        self,
+        interaction: discord.Interaction,
+        command: Optional[str] = None
+    ):
+        """Get help with bot commands"""
         if command:
-            # Show detailed help for a specific command
-            cmd = self.bot.tree.get_command(command)
+            # Look up specific command
+            cmd = self.bot.tree.get_command(command.lower())
             if not cmd:
-                return await interaction.response.send_message(
-                    f"❌ Command '{command}' not found.",
+                await interaction.response.send_message(
+                    embed=self.bot.ui_manager.error_embed(
+                        "Command Not Found",
+                        f"No command named '{command}' was found."
+                    ),
                     ephemeral=True
                 )
+                return
 
             embed = discord.Embed(
-                title=f"Help - {cmd.name}",
+                title=f"Help: /{cmd.name}",
                 description=cmd.description or "No description available.",
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow()
+                color=discord.Color.blue()
             )
 
-            usage = f"/{cmd.name}"
-            embed.add_field(name="Usage", value=f"```{usage}```", inline=False)
+            # Parameters
+            if cmd.parameters:
+                params = []
+                for param in cmd.parameters:
+                    is_required = param.required
+                    param_desc = param.description or "No description"
+                    params.append(f"• **{param.name}**{' (Optional)' if not is_required else ''}: {param_desc}")
+                embed.add_field(
+                    name="Parameters",
+                    value="\n".join(params) or "No parameters",
+                    inline=False
+                )
 
-            if isinstance(cmd, app_commands.Group):
-                subcommands = []
-                for subcmd in cmd.commands:
-                    subcommands.append(f"`{subcmd.name}` - {subcmd.description or 'No description'}")
-                if subcommands:
-                    embed.add_field(
-                        name="Subcommands",
-                        value="\n".join(subcommands),
-                        inline=False
-                    )
+            # Permissions
+            if getattr(cmd.callback, "__commands_permissions__", None):
+                perms = cmd.callback.__commands_permissions__
+                embed.add_field(
+                    name="Required Permissions",
+                    value="\n".join(f"• {perm}" for perm in perms),
+                    inline=False
+                )
+
+            # Cooldown
+            if getattr(cmd.callback, "__commands_cooldown__", None):
+                cooldown = cmd.callback.__commands_cooldown__
+                embed.add_field(
+                    name="Cooldown",
+                    value=f"{cooldown.rate} uses per {cooldown.per:.0f} seconds",
+                    inline=False
+                )
 
         else:
-            # Show general help with command categories
+            # Show all commands
             embed = discord.Embed(
                 title="Bot Commands",
-                description="Here are all available commands grouped by category:",
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow()
+                description="Here are all available commands grouped by category. Use `/help <command>` for detailed information about a specific command.",
+                color=discord.Color.blue()
             )
 
-            # Define command groups
+            # Group commands by category
             groups = {
                 "💬 Whisper System": [],
                 "⭐ Leveling": [],
                 "👮 Moderation": [],
-                "🎭 Roles": [],
-                "📝 Logging": [],
-                "⚙️ Configuration": [],
                 "ℹ️ Information": [],
+                "⚙️ Config": [],
+                "🎭 Roles": [],
+                "Other": []
             }
 
-            # Add commands to appropriate groups
-            for command in self.bot.tree.get_commands():
+            for command in self.bot.tree.walk_commands():
                 cmd_info = f"`/{command.name}` - {command.description or 'No description'}"
                 
+                # Handle command groups
                 if isinstance(command, app_commands.Group):
-                    # Handle command groups
-                    if command.name == "config":
-                        groups["⚙️ Configuration"].append(cmd_info)
+                    if command.name == "whisper":
+                        groups["💬 Whisper System"].append(cmd_info)
                         for subcmd in command.commands:
-                            groups["⚙️ Configuration"].append(
-                                f"`/config {subcmd.name}` - {subcmd.description or 'No description'}"
+                            groups["💬 Whisper System"].append(
+                                f"`/whisper {subcmd.name}` - {subcmd.description or 'No description'}"
                             )
-                    elif command.name == "logging":
-                        groups["📝 Logging"].append(cmd_info)
+                    elif command.name == "config":
+                        groups["⚙️ Config"].append(cmd_info)
                         for subcmd in command.commands:
-                            groups["📝 Logging"].append(
-                                f"`/logging {subcmd.name}` - {subcmd.description or 'No description'}"
+                            groups["⚙️ Config"].append(
+                                f"`/config {subcmd.name}` - {subcmd.description or 'No description'}"
                             )
                     elif command.name == "roles":
                         groups["🎭 Roles"].append(cmd_info)
@@ -415,6 +439,12 @@ class InfoCog(commands.Cog):
                         groups["👮 Moderation"].append(cmd_info)
                     elif name in ["info", "help"]:
                         groups["ℹ️ Information"].append(cmd_info)
+                    elif name in ["config", "settings"]:
+                        groups["⚙️ Config"].append(cmd_info)
+                    elif name in ["role", "roles"]:
+                        groups["🎭 Roles"].append(cmd_info)
+                    else:
+                        groups["Other"].append(cmd_info)
 
             # Add non-empty groups to embed
             for group_name, commands_list in groups.items():

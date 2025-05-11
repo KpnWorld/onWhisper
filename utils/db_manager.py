@@ -80,6 +80,15 @@ class DBManager:
         """Initialize the database connection and create tables"""
         try:
             self.db = await aiosqlite.connect(self.db_path)
+            
+            # Create regex function for SQLite
+            def regexp(pattern: str, value: str) -> bool:
+                import re
+                return bool(re.match(pattern, value))
+            
+            # Register the regexp function
+            await self.db.create_function("REGEXP", 2, regexp)
+            
             await self._create_tables()
             await self._create_indexes()
             return True
@@ -111,14 +120,16 @@ class DBManager:
             """
             CREATE TABLE IF NOT EXISTS guild_config (
                 guild_id INTEGER PRIMARY KEY,
+                xp_enabled BOOLEAN DEFAULT 1,
                 xp_rate INTEGER DEFAULT 15,
                 xp_cooldown INTEGER DEFAULT 60,
                 whisper_enabled BOOLEAN DEFAULT 1,
-                logging_enabled BOOLEAN DEFAULT 1,
+                whisper_channel_id INTEGER,
+                whisper_timeout INTEGER DEFAULT 24,
                 mod_role_id INTEGER,
                 admin_role_id INTEGER,
                 staff_role_id INTEGER,
-                whisper_channel_id INTEGER,
+                logging_enabled BOOLEAN DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -131,6 +142,7 @@ class DBManager:
                 xp INTEGER DEFAULT 0,
                 level INTEGER DEFAULT 0,
                 last_xp_gain TIMESTAMP,
+                total_messages INTEGER DEFAULT 0,
                 PRIMARY KEY (user_id, guild_id),
                 FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
             )
@@ -156,25 +168,25 @@ class DBManager:
                 FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
             )
             """,
-            # Logging channels
+            # Logging channels with validation
             """
             CREATE TABLE IF NOT EXISTS logging_channels (
                 guild_id INTEGER,
-                channel_type TEXT,
+                channel_type TEXT CHECK(channel_type IN ('mod', 'member', 'message', 'server')),
                 channel_id INTEGER,
                 enabled BOOLEAN DEFAULT 1,
                 PRIMARY KEY (guild_id, channel_type),
                 FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
             )
             """,
-            # Moderation actions
+            # Moderation actions with validation
             """
             CREATE TABLE IF NOT EXISTS mod_actions (
                 action_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id INTEGER,
                 user_id INTEGER,
                 moderator_id INTEGER,
-                action_type TEXT,
+                action_type TEXT CHECK(action_type IN ('warn', 'mute', 'kick', 'ban', 'timeout')),
                 reason TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP,
@@ -193,12 +205,24 @@ class DBManager:
                 FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
             )
             """,
-            # Color roles
+            # Reaction roles channels
+            """
+            CREATE TABLE IF NOT EXISTS reaction_roles_channels (
+                guild_id INTEGER,
+                message_id INTEGER,
+                channel_id INTEGER,
+                PRIMARY KEY (guild_id, message_id),
+                FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
+            )
+            """,
+            # Color roles with name and hex color
             """
             CREATE TABLE IF NOT EXISTS color_roles (
                 guild_id INTEGER,
                 user_id INTEGER,
                 role_id INTEGER,
+                role_name TEXT,
+                color_hex TEXT CHECK(color_hex REGEXP '^#[0-9A-Fa-f]{6}$'),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (guild_id, user_id),
                 FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
@@ -218,10 +242,11 @@ class DBManager:
             "CREATE INDEX IF NOT EXISTS idx_user_levels_guild ON user_levels(guild_id);",
             "CREATE INDEX IF NOT EXISTS idx_whispers_user ON whispers(user_id);",
             "CREATE INDEX IF NOT EXISTS idx_whispers_guild ON whispers(guild_id);",
-            "CREATE INDEX IF NOT EXISTS idx_mod_actions_user ON mod_actions(user_id);",
-            "CREATE INDEX IF NOT EXISTS idx_mod_actions_guild ON mod_actions(guild_id);",
+            "CREATE INDEX IF NOT EXISTS idx_mod_actions_user ON mod_actions(user_id);",            "CREATE INDEX IF NOT EXISTS idx_mod_actions_guild ON mod_actions(guild_id);",
             "CREATE INDEX IF NOT EXISTS idx_logging_channels_guild ON logging_channels(guild_id);",
-            "CREATE INDEX IF NOT EXISTS idx_reaction_roles_message ON reaction_roles(message_id);"
+            "CREATE INDEX IF NOT EXISTS idx_reaction_roles_message ON reaction_roles(message_id);",
+            "CREATE INDEX IF NOT EXISTS idx_color_roles_user ON color_roles(user_id);",
+            "CREATE INDEX IF NOT EXISTS idx_color_roles_guild ON color_roles(guild_id);"
         ]
         
         async with self.db.cursor() as cursor:
@@ -792,7 +817,7 @@ class DBManager:
             raise DatabaseError(f"Failed to set logging channel: {str(e)}")
 
     @db_transaction()
-    async def add_reaction_role(self, guild_id: int, message_id: int, emoji: str, role_id: int) -> bool:
+    async def add_reaction_role(self, guild_id: int, message_id: int, emoji: str, role_id: int, channel_id: int) -> bool:
         """Add a reaction role binding"""
         try:
             async with self.db.cursor() as cursor:
@@ -801,6 +826,13 @@ class DBManager:
                     (guild_id, message_id, emoji, role_id)
                     VALUES (?, ?, ?, ?)
                 """, (guild_id, message_id, emoji, role_id))
+                
+                # Store channel ID separately for easier lookups
+                await cursor.execute("""
+                    INSERT OR REPLACE INTO reaction_roles_channels
+                    (guild_id, message_id, channel_id)
+                    VALUES (?, ?, ?)
+                """, (guild_id, message_id, channel_id))
                 return True
                 
         except Exception as e:
@@ -814,6 +846,11 @@ class DBManager:
             async with self.db.cursor() as cursor:
                 await cursor.execute("""
                     DELETE FROM reaction_roles
+                    WHERE guild_id = ? AND message_id = ?
+                """, (guild_id, message_id))
+                
+                await cursor.execute("""
+                    DELETE FROM reaction_roles_channels
                     WHERE guild_id = ? AND message_id = ?
                 """, (guild_id, message_id))
                 return True
@@ -844,37 +881,60 @@ class DBManager:
         except Exception as e:
             logging.error(f"Error getting reaction roles for guild {guild_id}: {str(e)}")
             raise DatabaseError(f"Failed to get reaction roles: {str(e)}")
+
+    @db_transaction()
+    async def get_reaction_role_channel(self, guild_id: int, message_id: int) -> Optional[int]:
+        """Get channel ID for a reaction role message"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT channel_id FROM reaction_roles_channels
+                    WHERE guild_id = ? AND message_id = ?
+                    LIMIT 1
+                """, (guild_id, message_id))
+                result = await cursor.fetchone()
+                return result[0] if result else None
+        except Exception as e:
+            logging.error(f"Error getting reaction role channel for message {message_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get reaction role channel: {str(e)}")
               
     @db_transaction()
-    async def get_user_color_role(self, guild_id: int, user_id: int) -> Optional[int]:
-        """Get user's color role for a guild"""
+    async def get_user_color_role(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user's color role information"""
         cache_key = f"color_role_{guild_id}_{user_id}"
         
         try:
             # Check cache first
             cached_data = self.cache.get(cache_key)
             if cached_data:
-                return cached_data['role_id']
+                return cached_data
 
             async with self.db.cursor() as cursor:
                 await cursor.execute("""
-                    SELECT role_id FROM color_roles
+                    SELECT role_id, role_name, color_hex 
+                    FROM color_roles
                     WHERE guild_id = ? AND user_id = ?
                 """, (guild_id, user_id))
                 
                 result = await cursor.fetchone()
                 if result:
+                    data = {
+                        'role_id': result[0],
+                        'role_name': result[1],
+                        'color_hex': result[2]
+                    }
                     # Update cache
-                    self.cache.set(cache_key, {'role_id': result[0]})
-                return result[0] if result else None
+                    self.cache.set(cache_key, data)
+                    return data
+                return None
                 
         except Exception as e:
             logging.error(f"Error getting color role for user {user_id} in guild {guild_id}: {str(e)}")
             raise DatabaseError(f"Failed to get color role: {str(e)}")
 
     @db_transaction()
-    async def set_user_color_role(self, guild_id: int, user_id: int, role_id: Optional[int]) -> bool:
-        """Set or remove a user's color role"""
+    async def set_user_color_role(self, guild_id: int, user_id: int, role_id: Optional[int], role_name: Optional[str] = None, color_hex: Optional[str] = None) -> bool:
+        """Set or remove a user's color role with extended information"""
         cache_key = f"color_role_{guild_id}_{user_id}"
         
         try:
@@ -886,20 +946,25 @@ class DBManager:
                 """, (guild_id, user_id))
                 
                 if role_id is not None:
-                    # Verify this is a valid color role
-                    await cursor.execute("""
-                        SELECT 1 FROM color_roles 
-                        WHERE guild_id = ? AND user_id = 0 AND role_id = ?
-                    """, (guild_id, role_id))
-                    
-                    if await cursor.fetchone():
-                        # Set the new color role
+                    # Verify this is a valid color role and get its info if not provided
+                    if role_name is None or color_hex is None:
                         await cursor.execute("""
-                            INSERT INTO color_roles (guild_id, user_id, role_id)
-                            VALUES (?, ?, ?)
-                        """, (guild_id, user_id, role_id))
-                    else:
-                        raise DatabaseError(f"Invalid color role ID: {role_id}")
+                            SELECT role_name, color_hex FROM color_roles 
+                            WHERE guild_id = ? AND user_id = 0 AND role_id = ?
+                        """, (guild_id, role_id))
+                        result = await cursor.fetchone()
+                        if result:
+                            role_name = role_name or result[0]
+                            color_hex = color_hex or result[1]
+                        else:
+                            raise DatabaseError(f"Invalid color role ID: {role_id}")
+
+                    # Set the new color role
+                    await cursor.execute("""
+                        INSERT INTO color_roles 
+                        (guild_id, user_id, role_id, role_name, color_hex)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (guild_id, user_id, role_id, role_name, color_hex))
                 
                 # Invalidate cache
                 self.cache.invalidate(cache_key)
@@ -911,7 +976,7 @@ class DBManager:
 
     @db_transaction()
     async def get_color_roles(self, guild_id: int) -> List[Dict[str, Any]]:
-        """Get all available color roles for a guild with usage counts"""
+        """Get all available color roles for a guild with extended information"""
         cache_key = f"color_roles_{guild_id}"
         
         try:
@@ -921,9 +986,8 @@ class DBManager:
                 return cached_data['roles']
 
             async with self.db.cursor() as cursor:
-                # Get all color roles and their usage counts
                 await cursor.execute("""
-                    SELECT cr.role_id,
+                    SELECT cr.role_id, cr.role_name, cr.color_hex,
                            (SELECT COUNT(*) 
                             FROM color_roles u 
                             WHERE u.guild_id = cr.guild_id 
@@ -931,12 +995,14 @@ class DBManager:
                             AND u.user_id != 0) as user_count
                     FROM color_roles cr
                     WHERE cr.guild_id = ? AND cr.user_id = 0
-                    ORDER BY user_count DESC, role_id ASC
+                    ORDER BY user_count DESC, role_name ASC
                 """, (guild_id,))
                 
                 roles = [{
                     'role_id': row[0],
-                    'user_count': row[1]
+                    'role_name': row[1],
+                    'color_hex': row[2],
+                    'user_count': row[3]
                 } for row in await cursor.fetchall()]
                 
                 # Cache the result
@@ -948,16 +1014,17 @@ class DBManager:
             raise DatabaseError(f"Failed to get color roles: {str(e)}")
 
     @db_transaction()
-    async def add_color_role(self, guild_id: int, role_id: int) -> bool:
-        """Add a role as an available color role"""
+    async def add_color_role(self, guild_id: int, role_id: int, role_name: str, color_hex: str) -> bool:
+        """Add a new color role with name and hex color"""
         cache_key = f"color_roles_{guild_id}"
         
         try:
             async with self.db.cursor() as cursor:
                 await cursor.execute("""
-                    INSERT OR IGNORE INTO color_roles (guild_id, user_id, role_id)
-                    VALUES (?, 0, ?)
-                """, (guild_id, role_id))
+                    INSERT OR REPLACE INTO color_roles 
+                    (guild_id, user_id, role_id, role_name, color_hex)
+                    VALUES (?, 0, ?, ?, ?)
+                """, (guild_id, role_id, role_name, color_hex))
                 
                 # Invalidate cache
                 self.cache.invalidate(cache_key)
@@ -1023,20 +1090,27 @@ class DBManager:
             async with self.db.cursor() as cursor:
                 await cursor.execute("""
                     INSERT OR IGNORE INTO guild_config (
-                        guild_id, staff_role_id, whisper_enabled, 
-                        whisper_channel_id, whisper_timeout,
-                        created_at, updated_at
-                    ) VALUES (?, NULL, 1, NULL, 24, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        guild_id, xp_enabled, xp_rate, xp_cooldown,
+                        whisper_enabled, whisper_channel_id, whisper_timeout,
+                        mod_role_id, admin_role_id, staff_role_id,
+                        logging_enabled, created_at, updated_at
+                    ) VALUES (
+                        ?, 1, 15, 60, 1, NULL, 24, NULL, NULL, NULL, 1,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    )
                 """, (guild_id,))
                 
                 # Verify the config exists and has all required columns
                 await cursor.execute("""
                     UPDATE guild_config 
-                    SET staff_role_id = COALESCE(staff_role_id, NULL),
+                    SET xp_enabled = COALESCE(xp_enabled, 1),
+                        xp_rate = COALESCE(xp_rate, 15),
+                        xp_cooldown = COALESCE(xp_cooldown, 60),
                         whisper_enabled = COALESCE(whisper_enabled, 1),
                         whisper_timeout = COALESCE(whisper_timeout, 24),
+                        logging_enabled = COALESCE(logging_enabled, 1),
                         updated_at = CASE 
-                            WHEN staff_role_id IS NULL THEN CURRENT_TIMESTAMP 
+                            WHEN xp_enabled IS NULL THEN CURRENT_TIMESTAMP 
                             ELSE updated_at 
                         END
                     WHERE guild_id = ?
@@ -1046,3 +1120,131 @@ class DBManager:
         except Exception as e:
             logging.error(f"Error migrating guild config for guild {guild_id}: {str(e)}")
             raise DatabaseError(f"Failed to migrate guild config: {str(e)}")
+
+    async def validate_channel_type(self, channel_type: str) -> bool:
+        """Validate if a channel type is allowed"""
+        valid_types = ['mod', 'member', 'message', 'server']
+        return channel_type in valid_types
+
+    async def validate_action_type(self, action_type: str) -> bool:
+        """Validate if a moderation action type is allowed"""
+        valid_types = ['warn', 'mute', 'kick', 'ban', 'timeout']
+        return action_type in valid_types
+
+    @db_transaction()
+    async def increment_user_messages(self, guild_id: int, user_id: int) -> Dict[str, Any]:
+        """Increment user's message count and return updated stats"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT INTO user_levels (guild_id, user_id, total_messages)
+                    VALUES (?, ?, 1)
+                    ON CONFLICT (guild_id, user_id) DO UPDATE SET
+                    total_messages = total_messages + 1
+                    RETURNING total_messages, xp, level
+                """, (guild_id, user_id))
+                
+                result = await cursor.fetchone()
+                return {
+                    'total_messages': result[0],
+                    'xp': result[1],
+                    'level': result[2]
+                }
+        except Exception as e:
+            logging.error(f"Error incrementing messages for user {user_id}: {str(e)}")
+            raise DatabaseError(f"Failed to increment messages: {str(e)}")
+
+    @db_transaction()
+    async def get_user_stats(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get comprehensive user statistics including XP and message counts"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT xp, level, total_messages, last_xp_gain
+                    FROM user_levels
+                    WHERE guild_id = ? AND user_id = ?
+                """, (guild_id, user_id))
+                
+                result = await cursor.fetchone()
+                if result:
+                    return {
+                        'xp': result[0],
+                        'level': result[1],
+                        'total_messages': result[2],
+                        'last_xp_gain': result[3]
+                    }
+                return None
+                
+        except Exception as e:
+            logging.error(f"Error getting stats for user {user_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get user stats: {str(e)}")
+
+    @db_transaction()
+    async def get_user_mod_history(self, guild_id: int, user_id: int) -> Dict[str, Any]:
+        """Get user's complete moderation history with counts"""
+        try:
+            async with self.db.cursor() as cursor:
+                # Get all mod actions
+                await cursor.execute("""
+                    SELECT action_type, COUNT(*) as count, SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) as active
+                    FROM mod_actions
+                    WHERE guild_id = ? AND user_id = ?
+                    GROUP BY action_type
+                """, (guild_id, user_id))
+                
+                results = await cursor.fetchall()
+                history = {
+                    'total_actions': 0,
+                    'active_actions': 0,
+                    'actions_by_type': {}
+                }
+                
+                for row in results:
+                    action_type, count, active = row
+                    history['total_actions'] += count
+                    history['active_actions'] += active
+                    history['actions_by_type'][action_type] = {
+                        'total': count,
+                        'active': active
+                    }
+                
+                return history
+                
+        except Exception as e:
+            logging.error(f"Error getting mod history for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to get mod history: {str(e)}")
+
+    @db_transaction()
+    async def count_active_warnings(self, guild_id: int, user_id: int) -> int:
+        """Count active warnings for a user"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT COUNT(*) FROM mod_actions
+                    WHERE guild_id = ? AND user_id = ? 
+                    AND action_type = 'warn' AND active = 1
+                """, (guild_id, user_id))
+                
+                result = await cursor.fetchone()
+                return result[0] if result else 0
+                
+        except Exception as e:
+            logging.error(f"Error counting warnings for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to count warnings: {str(e)}")
+    @db_transaction()
+    async def get_user_warning_count(self, guild_id: int, user_id: int) -> int:
+        """Get the count of active warnings for a user"""
+        try:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT COUNT(*) FROM mod_actions
+                    WHERE guild_id = ? AND user_id = ?
+                    AND action_type = 'warn' AND active = 1
+                """, (guild_id, user_id))
+
+                result = await cursor.fetchone()
+                return result[0] if result else 0
+
+        except Exception as e:
+            logging.error(f"Error counting warnings for user {user_id} in guild {guild_id}: {str(e)}")
+            raise DatabaseError(f"Failed to count warnings: {str(e)}")
