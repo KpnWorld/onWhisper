@@ -46,6 +46,7 @@ root.setLevel(logging.INFO)
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+APPID = os.getenv('APPLICATION_ID')
 
 ACTIVITIES = [
     discord.Game("with commands"),
@@ -64,7 +65,7 @@ class Bot(commands.Bot):
             command_prefix="!",
             intents=intents,
             help_command=None,
-            application_id=1316917918239293543
+            application_id=APPID
         )
 
         self.db_manager: Optional[DBManager] = None
