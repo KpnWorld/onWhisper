@@ -86,7 +86,7 @@ class InfoCog(commands.Cog):
 
                 # Set footer
                 embed.set_footer(
-                    text=f"{self.bot.user.name} • Powered by Discord.py",
+                    text=f"{self.bot.user.name} • Powered by Py-cord",
                     icon_url=self.bot.user.display_avatar.url
                 )
 
