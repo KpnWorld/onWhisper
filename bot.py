@@ -13,9 +13,9 @@ from utils.db_manager import DBManager
 from utils.ui_manager import UIManager
 
 # Configure logging
-logging.getLogger('discord').setLevel(logging.DEBUG)  # Changed to DEBUG for more info
-logging.getLogger('discord.http').setLevel(logging.DEBUG)  # Changed to DEBUG for more info
-logging.getLogger('discord.gateway').setLevel(logging.DEBUG)  # Changed to DEBUG for more info
+logging.getLogger('discord').setLevel(logging.INFO)
+logging.getLogger('discord.http').setLevel(logging.WARNING)  # Raise to WARNING to hide detailed HTTP logs
+logging.getLogger('discord.gateway').setLevel(logging.WARNING)  # Raise to WARNING to hide detailed gateway logs
 
 # Clear any existing handlers
 root = logging.getLogger()
@@ -42,7 +42,7 @@ class CustomFormatter(logging.Formatter):
 handler = logging.StreamHandler()
 handler.setFormatter(CustomFormatter())
 root.addHandler(handler)
-root.setLevel(logging.DEBUG)  # Changed to DEBUG for more info
+root.setLevel(logging.INFO)
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -59,11 +59,11 @@ class Bot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
-        intents.members = True        
+        intents.members = True          
         super().__init__(
             command_prefix="!",
             intents=intents,
-            help_command=None,  # Adding this back from the working version
+            help_command=None,
             application_id=1316917918239293543
         )
 
