@@ -188,12 +188,18 @@ class Bot(commands.Bot):
         if not self.start_time:
             return "Bot not started"
         delta = datetime.now(timezone.utc) - self.start_time
-        return f"{delta.days}d {delta.seconds//3600}h {(delta.seconds//60)%60}m {delta.seconds%60}s"
-
+        return f"{delta.days}d {delta.seconds//3600}h {(delta.seconds//60)%60}m {delta.seconds%60}s"    
+    
     async def on_ready(self):
         logging.info(f"Bot {self.user.name} is ready!")
         # Replace datetime.utcnow() with timezone-aware alternative
         self.start_time = datetime.now(timezone.utc)
+        
+        # Set initial presence
+        try:
+            await self.change_presence(activity=random.choice(ACTIVITIES))
+        except Exception as e:
+            logging.error(f"Failed to set initial presence: {e}", exc_info=True)
 
     async def _validate_startup(self):
         try:            
@@ -227,15 +233,17 @@ class Bot(commands.Bot):
         except Exception as e:
             logging.error(f"Maintenance error: {e}", exc_info=True)
             await asyncio.sleep(300)  
-            # Back off on error 
-               
+            # Back off on error
+             
     @tasks.loop(minutes=10)
     async def change_activity(self):
-        if not self.is_ready():
+        if not self.is_ready() or not self.ws:
             return
             
         try:
-            await self.change_presence(activity=random.choice(ACTIVITIES))
+            activity = random.choice(ACTIVITIES)
+            if self.ws and self.is_ready():
+                await self.change_presence(activity=activity)
         except asyncio.CancelledError:
             # Task was cancelled, clean exit
             pass
