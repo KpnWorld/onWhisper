@@ -48,6 +48,13 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 APPID = os.getenv('APPLICATION_ID')
 
+# Debug logging for environment variables
+logging.info(f"Application ID loaded: {APPID}")
+if not APPID:
+    logging.error("No APPLICATION_ID found in environment variables")
+    APPID = "1161490846210867301"  # Fallback to hardcoded ID
+    logging.info(f"Using fallback application ID: {APPID}")
+
 ACTIVITIES = [
     discord.Game("with commands"),
     discord.Activity(type=discord.ActivityType.watching, name="over the server"),
