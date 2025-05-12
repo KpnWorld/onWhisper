@@ -39,15 +39,23 @@ class ModerationCog(commands.Cog):
                 color=discord.Color.red(),
                 timestamp=discord.utils.utcnow()
             )
-            embed.add_field(name="User", value=f"{target.mention} ({target.id})")
-            embed.add_field(name="Moderator", value=moderator.mention)
-            embed.add_field(name="Reason", value=reason, inline=False)
+
+            # Basic Info
+            action_info = (
+                f"```yaml\nUser: {target} ({target.id})```\n"
+                f"```yaml\nAction: {action.title()}```\n"
+                f"```yaml\nModerator: {moderator} ({moderator.id})```"
+            )
+            embed.add_field(name="Action Info", value=action_info, inline=False)
             
+            # Details
+            details = []
+            details.append(f"```yaml\nReason: {reason}```")
             if duration:
-                embed.add_field(
-                    name="Duration",
-                    value=f"Until <t:{int((datetime.utcnow() + duration).timestamp())}:F>"
-                )
+                until = datetime.utcnow() + duration
+                details.append(f"```yaml\nDuration: Until {discord.utils.format_dt(until)}```")
+            
+            embed.add_field(name="Details", value="\n".join(details), inline=False)
 
             # Send to logging channel
             channel_id = await self.bot.db_manager.get_logging_channel(guild.id, "mod")
@@ -76,19 +84,31 @@ class ModerationCog(commands.Cog):
         """Kick a member from the server"""
         if user.top_role >= ctx.author.top_role:
             return await ctx.send(
-                "❌ You cannot kick someone with a role higher than or equal to yours.",
+                "You cannot kick someone with a role higher than or equal to yours.",
                 ephemeral=True
             )
 
         try:
+            # Create confirmation embed
+            embed = discord.Embed(
+                title="Member Kicked",
+                color=discord.Color.red(),
+                timestamp=discord.utils.utcnow()
+            )
+
+            # Basic Info
+            kick_info = (
+                f"```yaml\nUser: {user} ({user.id})```\n"
+                f"```yaml\nModerator: {ctx.author} ({ctx.author.id})```\n"
+                f"```yaml\nReason: {reason}```"
+            )
+            if delete_days > 0:
+                kick_info += f"\n```yaml\nMessage Deletion: {delete_days} days```"
+
+            embed.add_field(name="Kick Information", value=kick_info, inline=False)
+
             # Send DM to user
             try:
-                embed = discord.Embed(
-                    title=f"Kicked from {ctx.guild.name}",
-                    description=f"You were kicked by {ctx.author.mention}",
-                    color=discord.Color.red()
-                )
-                embed.add_field(name="Reason", value=reason)
                 await user.send(embed=embed)
             except discord.Forbidden:
                 pass
@@ -118,19 +138,16 @@ class ModerationCog(commands.Cog):
                     except discord.Forbidden:
                         continue
 
-            await ctx.send(
-                f"✅ Kicked {user.mention} | Reason: {reason}",
-                ephemeral=True
-            )
+            await ctx.send(embed=embed, ephemeral=True)
 
         except discord.Forbidden:
             await ctx.send(
-                "❌ I don't have permission to kick that user.",
+                "I don't have permission to kick that user.",
                 ephemeral=True
             )
         except Exception as e:
             await ctx.send(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
@@ -153,24 +170,33 @@ class ModerationCog(commands.Cog):
         """Ban a member from the server"""
         if user.top_role >= ctx.author.top_role:
             return await ctx.send(
-                "❌ You cannot ban someone with a role higher than or equal to yours.",
+                "You cannot ban someone with a role higher than or equal to yours.",
                 ephemeral=True
             )
 
         try:
+            # Create ban embed
+            embed = discord.Embed(
+                title="Member Banned",
+                color=discord.Color.red(),
+                timestamp=discord.utils.utcnow()
+            )
+
+            # Basic Info
+            ban_info = (
+                f"```yaml\nUser: {user} ({user.id})```\n"
+                f"```yaml\nModerator: {ctx.author} ({ctx.author.id})```\n"
+                f"```yaml\nReason: {reason}```"
+            )
+            if duration:
+                ban_info += f"\n```yaml\nDuration: {duration} days```"
+            if delete_days > 0:
+                ban_info += f"\n```yaml\nMessage Deletion: {delete_days} days```"
+
+            embed.add_field(name="Ban Information", value=ban_info, inline=False)
+
             # Send DM to user
             try:
-                embed = discord.Embed(
-                    title=f"Banned from {ctx.guild.name}",
-                    description=f"You were banned by {ctx.author.mention}",
-                    color=discord.Color.red()
-                )
-                embed.add_field(name="Reason", value=reason)
-                if duration:
-                    embed.add_field(
-                        name="Duration",
-                        value=f"{duration} days"
-                    )
                 await user.send(embed=embed)
             except discord.Forbidden:
                 pass
@@ -209,20 +235,16 @@ class ModerationCog(commands.Cog):
 
                 asyncio.create_task(unban_task())
 
-            await ctx.send(
-                f"✅ Banned {user.mention} | Reason: {reason}"
-                + (f" | Duration: {duration} days" if duration else ""),
-                ephemeral=True
-            )
+            await ctx.send(embed=embed, ephemeral=True)
 
         except discord.Forbidden:
             await ctx.send(
-                "❌ I don't have permission to ban that user.",
+                "I don't have permission to ban that user.",
                 ephemeral=True
             )
         except Exception as e:
             await ctx.send(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
@@ -246,14 +268,35 @@ class ModerationCog(commands.Cog):
                 user_obj = ban_entry.user
             except ValueError:
                 return await ctx.send(
-                    "❌ Please provide a valid user ID.",
+                    "Please provide a valid user ID.",
                     ephemeral=True
                 )
             except discord.NotFound:
                 return await ctx.send(
-                    "❌ This user is not banned.",
+                    "This user is not banned.",
                     ephemeral=True
                 )
+
+            # Create unban embed
+            embed = discord.Embed(
+                title="Member Unbanned",
+                color=discord.Color.green(),
+                timestamp=discord.utils.utcnow()
+            )
+
+            # Basic Info
+            unban_info = (
+                f"```yaml\nUser: {user_obj} ({user_obj.id})```\n"
+                f"```yaml\nModerator: {ctx.author} ({ctx.author.id})```\n"
+                f"```yaml\nReason: {reason}```"
+            )
+            embed.add_field(name="Unban Information", value=unban_info, inline=False)
+
+            # Send DM to user
+            try:
+                await user_obj.send(embed=embed)
+            except discord.Forbidden:
+                pass
 
             await ctx.guild.unban(user_obj, reason=f"{ctx.author}: {reason}")
             
@@ -266,19 +309,16 @@ class ModerationCog(commands.Cog):
                 reason
             )
 
-            await ctx.send(
-                f"✅ Unbanned {user_obj.mention} | Reason: {reason}",
-                ephemeral=True
-            )
+            await ctx.send(embed=embed, ephemeral=True)
 
         except discord.Forbidden:
             await ctx.send(
-                "❌ I don't have permission to unban users.",
+                "I don't have permission to unban users.",
                 ephemeral=True
             )
         except Exception as e:
             await ctx.send(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
@@ -299,7 +339,7 @@ class ModerationCog(commands.Cog):
         """Timeout a member"""
         if user.top_role >= ctx.author.top_role:
             return await ctx.send(
-                "❌ You cannot timeout someone with a role higher than or equal to yours.",
+                "You cannot timeout someone with a role higher than or equal to yours.",
                 ephemeral=True
             )
 
@@ -307,18 +347,25 @@ class ModerationCog(commands.Cog):
             duration = min(40320, max(1, duration))  # 28 days maximum
             until = discord.utils.utcnow() + timedelta(minutes=duration)
             
+            # Create timeout embed
+            embed = discord.Embed(
+                title="Member Timed Out",
+                color=discord.Color.orange(),
+                timestamp=discord.utils.utcnow()
+            )
+
+            # Basic Info
+            timeout_info = (
+                f"```yaml\nUser: {user} ({user.id})```\n"
+                f"```yaml\nModerator: {ctx.author} ({ctx.author.id})```\n"
+                f"```yaml\nReason: {reason}```\n"
+                f"```yaml\nDuration: {duration} minutes```\n"
+                f"```yaml\nExpires: {discord.utils.format_dt(until)}```"
+            )
+            embed.add_field(name="Timeout Information", value=timeout_info, inline=False)
+
             # Send DM to user
             try:
-                embed = discord.Embed(
-                    title=f"Timeout in {ctx.guild.name}",
-                    description=f"You were timed out by {ctx.author.mention}",
-                    color=discord.Color.orange()
-                )
-                embed.add_field(name="Reason", value=reason)
-                embed.add_field(
-                    name="Duration",
-                    value=f"Until <t:{int(until.timestamp())}:F>"
-                )
                 await user.send(embed=embed)
             except discord.Forbidden:
                 pass
@@ -335,19 +382,16 @@ class ModerationCog(commands.Cog):
                 timedelta(minutes=duration)
             )
 
-            await ctx.send(
-                f"✅ Timed out {user.mention} for {duration} minutes | Reason: {reason}",
-                ephemeral=True
-            )
+            await ctx.send(embed=embed, ephemeral=True)
 
         except discord.Forbidden:
             await ctx.send(
-                "❌ I don't have permission to timeout that user.",
+                "I don't have permission to timeout that user.",
                 ephemeral=True
             )
         except Exception as e:
             await ctx.send(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
@@ -366,19 +410,35 @@ class ModerationCog(commands.Cog):
         """Warn a member"""
         if user.top_role >= ctx.author.top_role:
             return await ctx.send(
-                "❌ You cannot warn someone with a role higher than or equal to yours.",
+                "You cannot warn someone with a role higher than or equal to yours.",
                 ephemeral=True
             )
 
         try:
+            # Get warning count
+            warnings = await self.bot.db_manager.get_user_warnings(
+                ctx.guild.id,
+                user.id
+            )
+
+            # Create warning embed
+            embed = discord.Embed(
+                title="Member Warned",
+                color=discord.Color.yellow(),
+                timestamp=discord.utils.utcnow()
+            )
+
+            # Basic Info
+            warn_info = (
+                f"```yaml\nUser: {user} ({user.id})```\n"
+                f"```yaml\nModerator: {ctx.author} ({ctx.author.id})```\n"
+                f"```yaml\nReason: {reason}```\n"
+                f"```yaml\nTotal Warnings: {len(warnings) + 1}```"
+            )
+            embed.add_field(name="Warning Information", value=warn_info, inline=False)
+
             # Send DM to user
             try:
-                embed = discord.Embed(
-                    title=f"Warning in {ctx.guild.name}",
-                    description=f"You were warned by {ctx.author.mention}",
-                    color=discord.Color.yellow()
-                )
-                embed.add_field(name="Reason", value=reason)
                 await user.send(embed=embed)
             except discord.Forbidden:
                 pass
@@ -392,20 +452,11 @@ class ModerationCog(commands.Cog):
                 reason
             )
 
-            # Get warning count
-            warnings = await self.bot.db_manager.get_user_warnings(
-                ctx.guild.id,
-                user.id
-            )
-
-            await ctx.send(
-                f"✅ Warned {user.mention} | Reason: {reason} | Total Warnings: {len(warnings)}",
-                ephemeral=True
-            )
+            await ctx.send(embed=embed, ephemeral=True)
 
         except Exception as e:
             await ctx.send(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
@@ -436,6 +487,24 @@ class ModerationCog(commands.Cog):
                 check=check
             )
 
+            # Create purge embed
+            embed = discord.Embed(
+                title="Messages Purged",
+                color=discord.Color.red(),
+                timestamp=discord.utils.utcnow()
+            )
+
+            # Basic Info
+            purge_info = (
+                f"```yaml\nChannel: {ctx.channel.name}```\n"
+                f"```yaml\nModerator: {ctx.author} ({ctx.author.id})```\n"
+                f"```yaml\nAmount: {len(deleted) - 1} messages```"
+            )
+            if user:
+                purge_info += f"\n```yaml\nTarget User: {user} ({user.id})```"
+            
+            embed.add_field(name="Purge Information", value=purge_info, inline=False)
+
             # Log action
             await self._log_mod_action(
                 ctx.guild,
@@ -447,20 +516,16 @@ class ModerationCog(commands.Cog):
             )
 
             # Send confirmation using followup
-            await ctx.followup.send(
-                f"✅ Purged {len(deleted) - 1} messages"
-                + (f" from {user.mention}" if user else ""),
-                ephemeral=True
-            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
 
         except discord.Forbidden:
             await ctx.followup.send(
-                "❌ I don't have permission to delete messages.",
+                "I don't have permission to delete messages.",
                 ephemeral=True
             )
         except Exception as e:
             await ctx.followup.send(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
@@ -487,23 +552,29 @@ class ModerationCog(commands.Cog):
             )
             embed.set_thumbnail(url=user.display_avatar.url)
 
+            # Basic Info
+            user_info = (
+                f"```yaml\nUser: {user} ({user.id})```\n"
+                f"```yaml\nTotal Warnings: {len(warnings)}```\n"
+                f"```yaml\nJoined: {discord.utils.format_dt(user.joined_at)}```"
+            )
+            embed.add_field(name="User Information", value=user_info, inline=False)
+
+            # Individual Warnings
             for i, warning in enumerate(warnings, 1):
                 mod = ctx.guild.get_member(warning["moderator_id"])
-                embed.add_field(
-                    name=f"Warning #{i}",
-                    value=f"""
-                    **Reason:** {warning['reason']}
-                    **Moderator:** {mod.mention if mod else 'Unknown'}
-                    **Date:** <t:{int(warning['created_at'].timestamp())}:F>
-                    """.strip(),
-                    inline=False
+                warning_info = (
+                    f"```yaml\nModerator: {mod or 'Unknown'} ({warning['moderator_id']})```\n"
+                    f"```yaml\nReason: {warning['reason']}```\n"
+                    f"```yaml\nDate: {discord.utils.format_dt(warning['created_at'])}```"
                 )
+                embed.add_field(name=f"Warning #{i}", value=warning_info, inline=False)
 
             await ctx.send(embed=embed, ephemeral=True)
 
         except Exception as e:
             await ctx.send(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
@@ -512,10 +583,32 @@ class ModerationCog(commands.Cog):
     async def clear_warnings(self, ctx: commands.Context, user: discord.Member):
         """Clear all warnings for a user"""
         try:
+            # Get warning count before clearing
+            warnings = await self.bot.db_manager.get_user_warnings(
+                ctx.guild.id,
+                user.id
+            )
+
+            # Clear warnings
             await self.bot.db_manager.clear_user_warnings(
                 ctx.guild.id,
                 user.id
             )
+
+            # Create confirmation embed
+            embed = discord.Embed(
+                title="Warnings Cleared",
+                color=discord.Color.green(),
+                timestamp=discord.utils.utcnow()
+            )
+
+            # Action Info
+            clear_info = (
+                f"```yaml\nUser: {user} ({user.id})```\n"
+                f"```yaml\nModerator: {ctx.author} ({ctx.author.id})```\n"
+                f"```yaml\nWarnings Cleared: {len(warnings)}```"
+            )
+            embed.add_field(name="Clear Information", value=clear_info, inline=False)
 
             # Log action
             await self._log_mod_action(
@@ -523,17 +616,14 @@ class ModerationCog(commands.Cog):
                 user,
                 ctx.author,
                 "clear_warnings",
-                "Cleared all warnings"
+                f"Cleared {len(warnings)} warnings"
             )
 
-            await ctx.send(
-                f"✅ Cleared all warnings for {user.mention}",
-                ephemeral=True
-            )
+            await ctx.send(embed=embed, ephemeral=True)
 
         except Exception as e:
             await ctx.send(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
