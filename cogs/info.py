@@ -52,10 +52,10 @@ class InfoCog(commands.Cog):
                 # Basic Info Section
                 basic_info = (
                     f"```yaml\nBot ID: {self.bot.user.id}```\n"
-                    f"```yaml\nCreated: {discord.utils.format_dt(self.bot.user.created_at, 'R')}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(self.bot.user.created_at)}```\n"  # Full date format
                     f"```yaml\nUptime: {self._get_bot_uptime()}```"
                 )
-                embed.add_field(name="ℹ️ Basic Info", value=basic_info, inline=False)
+                embed.add_field(name="Basic Info", value=basic_info, inline=False)
 
                 # Stats Section
                 stats = (
@@ -63,7 +63,7 @@ class InfoCog(commands.Cog):
                     f"```yaml\nUsers: {sum(g.member_count for g in self.bot.guilds):,}```\n"
                     f"```yaml\nCommands: {len(self.bot.commands):,}```"
                 )
-                embed.add_field(name="📊 Stats", value=stats, inline=True)
+                embed.add_field(name="Stats", value=stats, inline=True)
 
                 # System Info
                 process = psutil.Process()
@@ -74,7 +74,7 @@ class InfoCog(commands.Cog):
                     f"```yaml\nPython: v{platform.python_version()}```\n"
                     f"```yaml\nDiscord.py: v{discord.__version__}```"
                 )
-                embed.add_field(name="💻 System", value=sys_info, inline=True)
+                embed.add_field(name="System", value=sys_info, inline=True)
 
                 # Usage Stats (if available from db_manager)
                 usage_info = (
@@ -82,7 +82,7 @@ class InfoCog(commands.Cog):
                     "```yaml\nMessages Seen: N/A```\n"
                     "```yaml\nThreads Open: N/A```"
                 )
-                embed.add_field(name="📈 Usage", value=usage_info, inline=False)
+                embed.add_field(name="Usage", value=usage_info, inline=False)
 
                 # Set footer
                 embed.set_footer(
@@ -106,11 +106,11 @@ class InfoCog(commands.Cog):
                 # Server Basic Info
                 basic_info = (
                     f"```yaml\nOwner: {guild.owner}```\n"
-                    f"```yaml\nCreated: {discord.utils.format_dt(guild.created_at, 'R')}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(guild.created_at)}```\n"  # Full date format
                     f"```yaml\nMembers: {guild.member_count:,}```\n"
                     f"```yaml\nRoles: {len(guild.roles):,}```"
                 )
-                embed.add_field(name="📌 General", value=basic_info, inline=True)
+                embed.add_field(name="General", value=basic_info, inline=True)
 
                 # Channel Stats
                 channels = {
@@ -123,7 +123,7 @@ class InfoCog(commands.Cog):
                 channels_info = "\n".join(
                     f"```yaml\n{k}: {v:,}```" for k, v in channels.items()
                 )
-                embed.add_field(name="📊 Channels", value=channels_info, inline=True)
+                embed.add_field(name="Channels", value=channels_info, inline=True)
 
                 # Member Stats
                 members = {
@@ -135,7 +135,7 @@ class InfoCog(commands.Cog):
                 members_info = "\n".join(
                     f"```yaml\n{k}: {v:,}```" for k, v in members.items()
                 )
-                embed.add_field(name="👥 Members", value=members_info, inline=True)
+                embed.add_field(name="Members", value=members_info, inline=True)
 
                 await interaction.response.send_message(embed=embed)
 
@@ -164,11 +164,11 @@ class InfoCog(commands.Cog):
                 # User Basic Info
                 user_info = (
                     f"```yaml\nID: {member.id}```\n"
-                    f"```yaml\nCreated: {discord.utils.format_dt(member.created_at, 'R')}```\n"
-                    f"```yaml\nJoined: {discord.utils.format_dt(member.joined_at, 'R')}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(member.created_at)}```\n"  # Full date format
+                    f"```yaml\nJoined: {discord.utils.format_dt(member.joined_at)}```\n"  # Full date format
                     f"```yaml\nBot: {'Yes' if member.bot else 'No'}```"
                 )
-                embed.add_field(name="📌 User Info", value=user_info, inline=True)
+                embed.add_field(name="User Info", value=user_info, inline=True)
 
                 # Status and Activity
                 status_emoji = {
@@ -191,13 +191,13 @@ class InfoCog(commands.Cog):
                     activity = f"{activity_type.get(member.activity.type, '❓')} {member.activity.name}"
                     status_field += f"\n{activity}"
 
-                embed.add_field(name="📊 Status", value=f"```yaml\n{status_field}```", inline=True)
+                embed.add_field(name="Status", value=f"```yaml\n{status_field}```", inline=True)
 
                 # Roles
                 roles = [role.mention for role in reversed(member.roles[1:])]
                 if roles:
                     embed.add_field(
-                        name=f"🎭 Roles ({len(roles)})",
+                        name=f"Roles ({len(roles)})",
                         value=" ".join(roles) if len(roles) <= 10 else " ".join(roles[:10]) + f" (+{len(roles) - 10} more)",
                         inline=False
                     )
@@ -228,7 +228,7 @@ class InfoCog(commands.Cog):
                     perms_info = "\n".join(perm_blocks) if perm_blocks else "```yaml\nNo special permissions```"
                 
                 embed.add_field(
-                    name="🔑 Permissions",
+                    name="Permissions",
                     value=perms_info,
                     inline=False
                 )
@@ -259,14 +259,14 @@ class InfoCog(commands.Cog):
                 # Basic Info
                 role_info = (
                     f"```yaml\nID: {role.id}```\n"
-                    f"```yaml\nCreated: {discord.utils.format_dt(role.created_at, 'R')}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(role.created_at)}```\n"  # Full date format
                     f"```yaml\nMembers: {len(role.members):,}```\n"
                     f"```yaml\nColor: {str(role.color)}```\n"
                     f"```yaml\nPosition: {role.position}```\n"
                     f"```yaml\nHoisted: {'Yes' if role.hoist else 'No'}```\n"
                     f"```yaml\nMentionable: {'Yes' if role.mentionable else 'No'}```"
                 )
-                embed.add_field(name="📌 Role Info", value=role_info, inline=False)
+                embed.add_field(name="Role Info", value=role_info, inline=False)
 
                 # Permissions
                 key_perms = []
@@ -294,7 +294,7 @@ class InfoCog(commands.Cog):
                     perms_info = "\n".join(perm_blocks) if perm_blocks else "```yaml\nNo special permissions```"
                 
                 embed.add_field(
-                    name="🔑 Permissions",
+                    name="Permissions",
                     value=perms_info,
                     inline=False
                 )
@@ -333,12 +333,12 @@ class InfoCog(commands.Cog):
                 # Basic Info
                 channel_info = (
                     f"```yaml\nID: {channel.id}```\n"
-                    f"```yaml\nCreated: {discord.utils.format_dt(channel.created_at, 'R')}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(channel.created_at)}```\n"  # Full date format
                     f"```yaml\nCategory: {channel.category.name if channel.category else 'None'}```\n"
                     f"```yaml\nPrivate: {'Yes' if not channel.permissions_for(channel.guild.default_role).view_channel else 'No'}```\n"
                     f"```yaml\nPosition: {channel.position}```"
                 )
-                embed.add_field(name="📌 Channel Info", value=channel_info, inline=False)
+                embed.add_field(name="Channel Info", value=channel_info, inline=False)
 
                 # Channel-specific info for text channels
                 if isinstance(channel, discord.TextChannel):
@@ -347,7 +347,7 @@ class InfoCog(commands.Cog):
                         f"```yaml\nSlowmode: {channel.slowmode_delay}s```\n"
                         f"```yaml\nNSFW: {'Yes' if channel.is_nsfw() else 'No'}```"
                     )
-                    embed.add_field(name="💬 Text Channel Info", value=text_info, inline=False)
+                    embed.add_field(name="Text Channel Info", value=text_info, inline=False)
                 
                 # Channel-specific info for voice channels
                 elif isinstance(channel, discord.VoiceChannel):
@@ -355,7 +355,7 @@ class InfoCog(commands.Cog):
                         f"```yaml\nUser Limit: {channel.user_limit if channel.user_limit else 'Unlimited'}```\n"
                         f"```yaml\nBitrate: {channel.bitrate // 1000}kbps```"
                     )
-                    embed.add_field(name="🔊 Voice Channel Info", value=voice_info, inline=False)
+                    embed.add_field(name="Voice Channel Info", value=voice_info, inline=False)
 
                 await interaction.response.send_message(embed=embed)
 
