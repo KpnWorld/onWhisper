@@ -66,13 +66,11 @@ class Bot(commands.Bot):
             intents=intents,
             help_command=None,
             application_id=APPID
-        )
-
+        )        
         self.db_manager: Optional[DBManager] = None
         self.ui_manager: UIManager = UIManager()
         self.bg_tasks: List[asyncio.Task] = []
         self.start_time: Optional[datetime] = None
-        self.activity_task: Optional[asyncio.Task] = None
         self._shutdown_timeout: int = 10
         self._closing: asyncio.Event = asyncio.Event()
         self._ready: asyncio.Event = asyncio.Event()
@@ -216,7 +214,8 @@ class Bot(commands.Bot):
             pass
         except Exception as e:
             logging.error(f"Cleanup error: {e}", exc_info=True)
-            await asyncio.sleep(300)  # Back off on error
+            await asyncio.sleep(300)  
+            # Back off on error
 
     @tasks.loop(hours=1)
     async def periodic_maintenance(self):
@@ -227,10 +226,14 @@ class Bot(commands.Bot):
             pass
         except Exception as e:
             logging.error(f"Maintenance error: {e}", exc_info=True)
-            await asyncio.sleep(300)  # Back off on error
-
+            await asyncio.sleep(300)  
+            # Back off on error 
+               
     @tasks.loop(minutes=10)
     async def change_activity(self):
+        if not self.is_ready():
+            return
+            
         try:
             await self.change_presence(activity=random.choice(ACTIVITIES))
         except asyncio.CancelledError:
@@ -239,7 +242,7 @@ class Bot(commands.Bot):
         except discord.HTTPException as e:
             logging.error(f"Activity update failed: {e}", exc_info=True)
         except Exception as e:
-            logging.error(f"Activity error: {e}")
+            logging.error(f"Activity error: {e}", exc_info=True)
 
     @periodic_cleanup.before_loop
     @periodic_maintenance.before_loop
