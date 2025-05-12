@@ -42,33 +42,52 @@ class InfoCog(commands.Cog):
         try:
             if target == "bot":
                 embed = discord.Embed(
-                    title="🤖 Bot Information",
+                    title=f"Bot Info: {self.bot.user.name}",
+                    description="```prolog\nA multipurpose Discord bot with moderation, leveling, and whisper systems```",
                     color=discord.Color.blue(),
                     timestamp=discord.utils.utcnow()
                 )
                 embed.set_thumbnail(url=self.bot.user.display_avatar.url)
 
-                # Basic Info
-                embed.add_field(
-                    name="📊 Bot Stats",
-                    value=f"""```
-                🌐 Servers: {len(self.bot.guilds):,}
-                👥 Users: {sum(g.member_count for g in self.bot.guilds):,}
-                ⚡ Commands: {len(self.bot.commands):,}
-                ⏰ Uptime: {self._get_bot_uptime()}```""",
-                    inline=True
+                # Basic Info Section
+                basic_info = (
+                    f"```yaml\nBot ID: {self.bot.user.id}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(self.bot.user.created_at, 'R')}```\n"
+                    f"```yaml\nUptime: {self._get_bot_uptime()}```"
                 )
+                embed.add_field(name="ℹ️ Basic Info", value=basic_info, inline=False)
+
+                # Stats Section
+                stats = (
+                    f"```yaml\nServers: {len(self.bot.guilds):,}```\n"
+                    f"```yaml\nUsers: {sum(g.member_count for g in self.bot.guilds):,}```\n"
+                    f"```yaml\nCommands: {len(self.bot.commands):,}```"
+                )
+                embed.add_field(name="📊 Stats", value=stats, inline=True)
 
                 # System Info
                 process = psutil.Process()
-                embed.add_field(
-                    name="💻 System Info",
-                    value=f"""```
-                🐍 Python: {platform.python_version()}
-                📱 Discord.py: {discord.__version__}
-                📊 Memory: {process.memory_info().rss / 1024 / 1024:.2f} MB
-                ⚡ CPU: {psutil.cpu_percent()}%```""",
-                    inline=True
+                mem_usage = process.memory_info().rss / 1024 / 1024  # Convert to MB
+                sys_info = (
+                    f"```yaml\nCPU: {psutil.cpu_percent()}%```\n"
+                    f"```yaml\nRAM: {mem_usage:.1f} MB```\n"
+                    f"```yaml\nPython: v{platform.python_version()}```\n"
+                    f"```yaml\nDiscord.py: v{discord.__version__}```"
+                )
+                embed.add_field(name="💻 System", value=sys_info, inline=True)
+
+                # Usage Stats (if available from db_manager)
+                usage_info = (
+                    "```yaml\nCommands Used: N/A```\n"
+                    "```yaml\nMessages Seen: N/A```\n"
+                    "```yaml\nThreads Open: N/A```"
+                )
+                embed.add_field(name="📈 Usage", value=usage_info, inline=False)
+
+                # Set footer
+                embed.set_footer(
+                    text=f"{self.bot.user.name} • Powered by Discord.py",
+                    icon_url=self.bot.user.display_avatar.url
                 )
 
                 await interaction.response.send_message(embed=embed)
@@ -84,43 +103,39 @@ class InfoCog(commands.Cog):
                 if guild.icon:
                     embed.set_thumbnail(url=guild.icon.url)
 
-                # Basic Info
-                embed.add_field(
-                    name="📌 General",
-                    value=f"""```
-                👑 Owner: {guild.owner}
-                📅 Created: {discord.utils.format_dt(guild.created_at, 'R')}
-                👥 Members: {guild.member_count:,}
-                🎭 Roles: {len(guild.roles):,}```""",
-                    inline=True
+                # Server Basic Info
+                basic_info = (
+                    f"```yaml\nOwner: {guild.owner}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(guild.created_at, 'R')}```\n"
+                    f"```yaml\nMembers: {guild.member_count:,}```\n"
+                    f"```yaml\nRoles: {len(guild.roles):,}```"
                 )
+                embed.add_field(name="📌 General", value=basic_info, inline=True)
 
                 # Channel Stats
                 channels = {
-                    "💬 Text": len([c for c in guild.channels if isinstance(c, discord.TextChannel)]),
-                    "🔊 Voice": len([c for c in guild.channels if isinstance(c, discord.VoiceChannel)]),
-                    "📁 Categories": len(guild.categories),
-                    "🧵 Threads": len([t for t in guild.threads if t.archived is False])
+                    "Text": len([c for c in guild.channels if isinstance(c, discord.TextChannel)]),
+                    "Voice": len([c for c in guild.channels if isinstance(c, discord.VoiceChannel)]),
+                    "Categories": len(guild.categories),
+                    "Threads": len([t for t in guild.threads if t.archived is False])
                 }
                 
-                embed.add_field(
-                    name="📊 Channels",
-                    value="```" + "\n".join(f"{k}: {v:,}" for k, v in channels.items()) + "```",
-                    inline=True
+                channels_info = "\n".join(
+                    f"```yaml\n{k}: {v:,}```" for k, v in channels.items()
                 )
+                embed.add_field(name="📊 Channels", value=channels_info, inline=True)
 
                 # Member Stats
                 members = {
-                    "👤 Humans": len([m for m in guild.members if not m.bot]),
-                    "🤖 Bots": len([m for m in guild.members if m.bot]),
-                    "🟢 Online": len([m for m in guild.members if m.status != discord.Status.offline])
+                    "Humans": len([m for m in guild.members if not m.bot]),
+                    "Bots": len([m for m in guild.members if m.bot]),
+                    "Online": len([m for m in guild.members if m.status != discord.Status.offline])
                 }
                 
-                embed.add_field(
-                    name="👥 Members",
-                    value="```" + "\n".join(f"{k}: {v:,}" for k, v in members.items()) + "```",
-                    inline=True
+                members_info = "\n".join(
+                    f"```yaml\n{k}: {v:,}```" for k, v in members.items()
                 )
+                embed.add_field(name="👥 Members", value=members_info, inline=True)
 
                 await interaction.response.send_message(embed=embed)
 
@@ -146,16 +161,14 @@ class InfoCog(commands.Cog):
                 )
                 embed.set_thumbnail(url=member.display_avatar.url)
 
-                # Basic Info
-                embed.add_field(
-                    name="📌 User Info",
-                    value=f"""```
-                🆔 ID: {member.id}
-                📅 Created: {discord.utils.format_dt(member.created_at, 'R')}
-                📥 Joined: {discord.utils.format_dt(member.joined_at, 'R')}
-                🤖 Bot: {'Yes' if member.bot else 'No'}```""",
-                    inline=True
+                # User Basic Info
+                user_info = (
+                    f"```yaml\nID: {member.id}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(member.created_at, 'R')}```\n"
+                    f"```yaml\nJoined: {discord.utils.format_dt(member.joined_at, 'R')}```\n"
+                    f"```yaml\nBot: {'Yes' if member.bot else 'No'}```"
                 )
+                embed.add_field(name="📌 User Info", value=user_info, inline=True)
 
                 # Status and Activity
                 status_emoji = {
@@ -178,11 +191,7 @@ class InfoCog(commands.Cog):
                     activity = f"{activity_type.get(member.activity.type, '❓')} {member.activity.name}"
                     status_field += f"\n{activity}"
 
-                embed.add_field(
-                    name="📊 Status",
-                    value=f"```{status_field}```",
-                    inline=True
-                )
+                embed.add_field(name="📊 Status", value=f"```yaml\n{status_field}```", inline=True)
 
                 # Roles
                 roles = [role.mention for role in reversed(member.roles[1:])]
@@ -195,27 +204,34 @@ class InfoCog(commands.Cog):
 
                 # Permissions
                 key_perms = []
-                permissions = member.guild_permissions
-                if permissions.administrator:
-                    key_perms.append("👑 Administrator")
-                else:
-                    if permissions.manage_guild:
-                        key_perms.append("🏰 Manage Server")
-                    if permissions.ban_members:
-                        key_perms.append("🔨 Ban Members")
-                    if permissions.kick_members:
-                        key_perms.append("👢 Kick Members")
-                    if permissions.manage_channels:
-                        key_perms.append("📁 Manage Channels")
-                    if permissions.manage_roles:
-                        key_perms.append("🎭 Manage Roles")
+                permissions = member.guild_permissions if target == "user" else role.permissions
+                permission_mapping = {
+                    "administrator": ("Administrator", "👑"),
+                    "manage_guild": ("Manage Server", "🏰"),
+                    "ban_members": ("Ban Members", "🔨"),
+                    "kick_members": ("Kick Members", "👢"),
+                    "manage_channels": ("Manage Channels", "📁"),
+                    "manage_roles": ("Manage Roles", "🎭"),
+                    "manage_messages": ("Manage Messages", "📝"),
+                    "mention_everyone": ("Mention Everyone", "📢"),
+                    "mute_members": ("Mute Members", "🔇"),
+                    "deafen_members": ("Deafen Members", "🔈")
+                }
 
-                if key_perms:
-                    embed.add_field(
-                        name="🔑 Key Permissions",
-                        value="```" + "\n".join(key_perms) + "```",
-                        inline=False
-                    )
+                if permissions.administrator:
+                    perms_info = "```yaml\nAdministrator: Full Access```"
+                else:
+                    perm_blocks = []
+                    for perm_name, (perm_display, emoji) in permission_mapping.items():
+                        if getattr(permissions, perm_name, False):
+                            perm_blocks.append(f"```yaml\n{emoji} {perm_display}```")
+                    perms_info = "\n".join(perm_blocks) if perm_blocks else "```yaml\nNo special permissions```"
+                
+                embed.add_field(
+                    name="🔑 Permissions",
+                    value=perms_info,
+                    inline=False
+                )
 
                 await interaction.response.send_message(embed=embed)
 
@@ -241,42 +257,47 @@ class InfoCog(commands.Cog):
                 )
 
                 # Basic Info
-                embed.add_field(
-                    name="📌 Role Info",
-                    value=f"""```
-                🆔 ID: {role.id}
-                📅 Created: {discord.utils.format_dt(role.created_at, 'R')}
-                👥 Members: {len(role.members):,}
-                🎨 Color: {str(role.color)}
-                📊 Position: {role.position}
-                🔒 Hoisted: {'Yes' if role.hoist else 'No'}
-                🎭 Mentionable: {'Yes' if role.mentionable else 'No'}```""",
-                    inline=False
+                role_info = (
+                    f"```yaml\nID: {role.id}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(role.created_at, 'R')}```\n"
+                    f"```yaml\nMembers: {len(role.members):,}```\n"
+                    f"```yaml\nColor: {str(role.color)}```\n"
+                    f"```yaml\nPosition: {role.position}```\n"
+                    f"```yaml\nHoisted: {'Yes' if role.hoist else 'No'}```\n"
+                    f"```yaml\nMentionable: {'Yes' if role.mentionable else 'No'}```"
                 )
+                embed.add_field(name="📌 Role Info", value=role_info, inline=False)
 
                 # Permissions
                 key_perms = []
-                permissions = role.permissions
-                if permissions.administrator:
-                    key_perms.append("👑 Administrator")
-                else:
-                    if permissions.manage_guild:
-                        key_perms.append("🏰 Manage Server")
-                    if permissions.ban_members:
-                        key_perms.append("🔨 Ban Members")
-                    if permissions.kick_members:
-                        key_perms.append("👢 Kick Members")
-                    if permissions.manage_channels:
-                        key_perms.append("📁 Manage Channels")
-                    if permissions.manage_roles:
-                        key_perms.append("🎭 Manage Roles")
+                permissions = member.guild_permissions if target == "user" else role.permissions
+                permission_mapping = {
+                    "administrator": ("Administrator", "👑"),
+                    "manage_guild": ("Manage Server", "🏰"),
+                    "ban_members": ("Ban Members", "🔨"),
+                    "kick_members": ("Kick Members", "👢"),
+                    "manage_channels": ("Manage Channels", "📁"),
+                    "manage_roles": ("Manage Roles", "🎭"),
+                    "manage_messages": ("Manage Messages", "📝"),
+                    "mention_everyone": ("Mention Everyone", "📢"),
+                    "mute_members": ("Mute Members", "🔇"),
+                    "deafen_members": ("Deafen Members", "🔈")
+                }
 
-                if key_perms:
-                    embed.add_field(
-                        name="🔑 Permissions",
-                        value="```" + "\n".join(key_perms) + "```",
-                        inline=False
-                    )
+                if permissions.administrator:
+                    perms_info = "```yaml\nAdministrator: Full Access```"
+                else:
+                    perm_blocks = []
+                    for perm_name, (perm_display, emoji) in permission_mapping.items():
+                        if getattr(permissions, perm_name, False):
+                            perm_blocks.append(f"```yaml\n{emoji} {perm_display}```")
+                    perms_info = "\n".join(perm_blocks) if perm_blocks else "```yaml\nNo special permissions```"
+                
+                embed.add_field(
+                    name="🔑 Permissions",
+                    value=perms_info,
+                    inline=False
+                )
 
                 await interaction.response.send_message(embed=embed)
 
@@ -310,35 +331,31 @@ class InfoCog(commands.Cog):
                 )
 
                 # Basic Info
-                embed.add_field(
-                    name="📌 Channel Info",
-                    value=f"""```
-🆔 ID: {channel.id}
-📅 Created: {discord.utils.format_dt(channel.created_at, 'R')}
-📁 Category: {channel.category.name if channel.category else 'None'}
-🔒 Private: {'Yes' if not channel.permissions_for(channel.guild.default_role).view_channel else 'No'}
-📊 Position: {channel.position}```""",
-                    inline=False
+                channel_info = (
+                    f"```yaml\nID: {channel.id}```\n"
+                    f"```yaml\nCreated: {discord.utils.format_dt(channel.created_at, 'R')}```\n"
+                    f"```yaml\nCategory: {channel.category.name if channel.category else 'None'}```\n"
+                    f"```yaml\nPrivate: {'Yes' if not channel.permissions_for(channel.guild.default_role).view_channel else 'No'}```\n"
+                    f"```yaml\nPosition: {channel.position}```"
                 )
+                embed.add_field(name="📌 Channel Info", value=channel_info, inline=False)
 
-                # Channel-specific info
+                # Channel-specific info for text channels
                 if isinstance(channel, discord.TextChannel):
-                    embed.add_field(
-                        name="💬 Text Channel Info",
-                        value=f"""```
-                    📝 Topic: {channel.topic or 'No topic set'}
-                    🐌 Slowmode: {channel.slowmode_delay}s
-                    🔞 NSFW: {'Yes' if channel.is_nsfw() else 'No'}```""",
-                        inline=False
+                    text_info = (
+                        f"```yaml\nTopic: {channel.topic or 'No topic set'}```\n"
+                        f"```yaml\nSlowmode: {channel.slowmode_delay}s```\n"
+                        f"```yaml\nNSFW: {'Yes' if channel.is_nsfw() else 'No'}```"
                     )
+                    embed.add_field(name="💬 Text Channel Info", value=text_info, inline=False)
+                
+                # Channel-specific info for voice channels
                 elif isinstance(channel, discord.VoiceChannel):
-                    embed.add_field(
-                        name="🔊 Voice Channel Info",
-                        value=f"""```
-                    👥 User Limit: {channel.user_limit if channel.user_limit else 'Unlimited'}
-                    🎵 Bitrate: {channel.bitrate // 1000}kbps```""",
-                        inline=False
+                    voice_info = (
+                        f"```yaml\nUser Limit: {channel.user_limit if channel.user_limit else 'Unlimited'}```\n"
+                        f"```yaml\nBitrate: {channel.bitrate // 1000}kbps```"
                     )
+                    embed.add_field(name="🔊 Voice Channel Info", value=voice_info, inline=False)
 
                 await interaction.response.send_message(embed=embed)
 
@@ -346,7 +363,7 @@ class InfoCog(commands.Cog):
             await interaction.response.send_message(
                 embed=discord.Embed(
                     title="❌ Error",
-                    description=f"An error occurred: {str(e)}",
+                    description=f"```\nAn error occurred: {str(e)}\n```",
                     color=discord.Color.red()
                 ),
                 ephemeral=True
