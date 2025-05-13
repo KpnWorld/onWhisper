@@ -73,15 +73,11 @@ class LoggingCog(commands.Cog):
         """Configure logging channels and settings"""
         if not self.bot.db_manager:
             return await interaction.response.send_message(
-                "⚠️ Database connection is not available.",
+                "Database connection is not available.",
                 ephemeral=True
             )        
         try:
-            log_types = ["mod", "member", "message", "server"]
-            if log_type == "all":
-                log_types = ["mod", "member", "message", "server"]
-            else:
-                log_types = [log_type]
+            log_types = ["mod", "member", "message", "server"] if log_type == "all" else [log_type]
 
             for current_type in log_types:
                 if enabled is None:
@@ -93,7 +89,7 @@ class LoggingCog(commands.Cog):
                     current_enabled = not bool(current)            
                     if current_enabled and not channel:
                         return await interaction.response.send_message(
-                            "⚠️ Please provide a channel when enabling logging.",
+                            "Please provide a channel when enabling logging.",
                             ephemeral=True
                         )
                 else:
@@ -103,47 +99,48 @@ class LoggingCog(commands.Cog):
                     interaction.guild_id,
                     current_type,
                     channel.id if current_enabled else None
-                )            # Update cache
-            if interaction.guild_id not in self._log_cache:
-                self._log_cache[interaction.guild_id] = {}
-            
-            if enabled:
-                for current_type in log_types:
+                )
+                
+                # Update cache
+                if interaction.guild_id not in self._log_cache:
+                    self._log_cache[interaction.guild_id] = {}
+                
+                if current_enabled:
                     self._log_cache[interaction.guild_id][current_type] = channel.id
+                else:
+                    self._log_cache[interaction.guild_id].pop(current_type, None)
+            
+            if current_enabled and channel:
                 # Send confirmation message to the log channel
-                setup_embed = discord.Embed(
+                embed = discord.Embed(
                     title="Logging Channel Set",
-                    description=(
-                        "This channel has been set as the logging channel for: " +
-                        (", ".join(f"`{t}`" for t in log_types))
-                    ),
                     color=discord.Color.green(),
                     timestamp=discord.utils.utcnow()
                 )
-                setup_embed.add_field(
-                    name="Set By",
-                    value=interaction.user.mention,
-                    inline=True
-                )
-                setup_embed.add_field(
-                    name="Channel",
-                    value=channel.mention,
-                    inline=True
-                )
-                await channel.send(embed=setup_embed)
-            else:
-                for current_type in log_types:
-                    self._log_cache[interaction.guild_id].pop(current_type, None)
 
+                info = (
+                    f"```yaml\n"
+                    f"Channel: #{channel.name}\n"
+                    f"Set By: {interaction.user} ({interaction.user.id})\n"
+                    f"Log Types:\n"
+                    f"{chr(10).join(f'  - {t}' for t in log_types)}\n"
+                    f"```"
+                )
+                embed.add_field(name="Configuration", value=info, inline=False)
+                await channel.send(embed=embed)
+
+            action = "Enabled" if current_enabled else "Disabled"
+            types = ", ".join(f"`{t}`" for t in log_types)
+            channel_mention = f" in {channel.mention}" if current_enabled else ""
+            
             await interaction.response.send_message(
-                f"✅ {'Enabled' if enabled else 'Disabled'} {log_type} logging "
-                f"{f'in {channel.mention}' if enabled else ''}.",
+                f"{action} {types} logging{channel_mention}.",
                 ephemeral=True
             )
 
         except Exception as e:
             await interaction.response.send_message(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
@@ -153,7 +150,7 @@ class LoggingCog(commands.Cog):
         """Show current logging settings"""
         if not self.bot.db_manager:
             return await interaction.response.send_message(
-                "⚠️ Database connection is not available.",
+                "Database connection is not available.",
                 ephemeral=True
             )
 
@@ -163,7 +160,7 @@ class LoggingCog(commands.Cog):
             )
 
             embed = discord.Embed(
-                title="Logging Settings",
+                title="Logging Configuration",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
@@ -172,20 +169,24 @@ class LoggingCog(commands.Cog):
                 channel_id = settings.get(log_type)
                 channel = interaction.guild.get_channel(channel_id) if channel_id else None
                 
-                status = "✅ Enabled" if channel else "❌ Disabled"
-                value = f"{status}\nChannel: {channel.mention if channel else 'None'}"
-                
+                info = (
+                    f"```yaml\n"
+                    f"Status: {'Enabled' if channel else 'Disabled'}\n"
+                    f"Channel: {f'#{channel.name}' if channel else 'None'}\n"
+                    f"Channel ID: {channel_id if channel else 'N/A'}\n"
+                    f"```"
+                )
                 embed.add_field(
                     name=f"{log_type.title()} Logs",
-                    value=value,
-                    inline=True
+                    value=info,
+                    inline=False
                 )
 
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
         except Exception as e:
             await interaction.response.send_message(
-                f"❌ An error occurred: {str(e)}",
+                f"An error occurred: {str(e)}",
                 ephemeral=True
             )
 
@@ -194,12 +195,18 @@ class LoggingCog(commands.Cog):
         """Log member joins"""
         embed = discord.Embed(
             title="Member Joined",
-            description=f"{member.mention} joined the server",
             color=discord.Color.green(),
             timestamp=discord.utils.utcnow()
         )
+        
+        info = (
+            f"```yaml\n"
+            f"User: {member} ({member.id})\n"
+            f"Account Created: {discord.utils.format_dt(member.created_at, style='R')}\n"
+            f"```"
+        )
+        embed.add_field(name="Basic Info", value=info, inline=False)
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="Account Created", value=f"<t:{int(member.created_at.timestamp())}:R>")
         
         await self._send_log(member.guild.id, "member", embed)
 
@@ -208,12 +215,19 @@ class LoggingCog(commands.Cog):
         """Log member leaves"""
         embed = discord.Embed(
             title="Member Left",
-            description=f"{member.mention} left the server",
             color=discord.Color.red(),
             timestamp=discord.utils.utcnow()
         )
+        
+        info = (
+            f"```yaml\n"
+            f"User: {member} ({member.id})\n"
+            f"Joined Server: {discord.utils.format_dt(member.joined_at, style='R')}\n"
+            f"Roles: {', '.join(role.name for role in member.roles[1:]) or 'None'}\n"
+            f"```"
+        )
+        embed.add_field(name="Basic Info", value=info, inline=False)
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="Joined Server", value=f"<t:{int(member.joined_at.timestamp())}:R>")
         
         await self._send_log(member.guild.id, "member", embed)
 
@@ -223,13 +237,18 @@ class LoggingCog(commands.Cog):
         if before.nick != after.nick:
             embed = discord.Embed(
                 title="Nickname Changed",
-                description=f"{after.mention} changed their nickname",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
-            embed.add_field(name="Before", value=before.nick or "None")
-            embed.add_field(name="After", value=after.nick or "None")
             
+            info = (
+                f"```yaml\n"
+                f"User: {after} ({after.id})\n"
+                f"Previous Nickname: {before.nick or 'None'}\n"
+                f"New Nickname: {after.nick or 'None'}\n"
+                f"```"
+            )
+            embed.add_field(name="Basic Info", value=info, inline=False)
             await self._send_log(after.guild.id, "member", embed)
 
         # Role changes
@@ -239,24 +258,34 @@ class LoggingCog(commands.Cog):
         if removed_roles or added_roles:
             embed = discord.Embed(
                 title="Member Roles Updated",
-                description=f"Role changes for {after.mention}",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
 
+            info = (
+                f"```yaml\n"
+                f"User: {after} ({after.id})\n"
+                f"```"
+            )
+            embed.add_field(name="Basic Info", value=info, inline=False)
+
             if added_roles:
-                embed.add_field(
-                    name="Added Roles",
-                    value=", ".join(role.mention for role in added_roles),
-                    inline=False
+                details = (
+                    f"```yaml\n"
+                    f"Added:\n"
+                    f"{chr(10).join(f'  - {role.name}' for role in added_roles)}\n"
+                    f"```"
                 )
+                embed.add_field(name="Added Roles", value=details, inline=False)
 
             if removed_roles:
-                embed.add_field(
-                    name="Removed Roles",
-                    value=", ".join(role.mention for role in removed_roles),
-                    inline=False
+                details = (
+                    f"```yaml\n"
+                    f"Removed:\n"
+                    f"{chr(10).join(f'  - {role.name}' for role in removed_roles)}\n"
+                    f"```"
                 )
+                embed.add_field(name="Removed Roles", value=details, inline=False)
 
             await self._send_log(after.guild.id, "member", embed)
 
@@ -268,27 +297,37 @@ class LoggingCog(commands.Cog):
 
         embed = discord.Embed(
             title="Message Deleted",
-            description=f"Message by {message.author.mention} deleted in {message.channel.mention}",
             color=discord.Color.red(),
             timestamp=discord.utils.utcnow()
         )
 
+        info = (
+            f"```yaml\n"
+            f"Author: {message.author} ({message.author.id})\n"
+            f"Channel: #{message.channel.name}\n"
+            f"Created: {discord.utils.format_dt(message.created_at, style='R')}\n"
+            f"```"
+        )
+        embed.add_field(name="Basic Info", value=info, inline=False)
+
         if message.content:
-            if len(message.content) > 1024:
-                embed.add_field(
-                    name="Content (Truncated)",
-                    value=f"{message.content[:1021]}...",
-                    inline=False
-                )
-            else:
-                embed.add_field(name="Content", value=message.content, inline=False)
+            content = (
+                f"```yaml\n"
+                f"Content: |\n  {message.content.replace(chr(10), chr(10) + '  ')}\n"
+                f"```"
+            )
+            if len(content) > 1024:
+                content = content[:1021] + "```"
+            embed.add_field(name="Message Content", value=content, inline=False)
 
         if message.attachments:
-            embed.add_field(
-                name="Attachments",
-                value="\n".join(a.url for a in message.attachments),
-                inline=False
+            files = (
+                f"```yaml\n"
+                f"Files:\n"
+                f"{chr(10).join(f'  - {a.filename}: {a.url}' for a in message.attachments)}\n"
+                f"```"
             )
+            embed.add_field(name="Attachments", value=files, inline=False)
 
         await self._send_log(message.guild.id, "message", embed)
 
@@ -300,28 +339,28 @@ class LoggingCog(commands.Cog):
 
         embed = discord.Embed(
             title="Message Edited",
-            description=f"Message by {before.author.mention} edited in {before.channel.mention}\n[Jump to Message]({after.jump_url})",
             color=discord.Color.blue(),
             timestamp=discord.utils.utcnow()
         )
 
-        if len(before.content) > 1024:
-            embed.add_field(
-                name="Before (Truncated)",
-                value=f"{before.content[:1021]}...",
-                inline=False
-            )
-        else:
-            embed.add_field(name="Before", value=before.content or "Empty", inline=False)
+        info = (
+            f"```yaml\n"
+            f"Author: {before.author} ({before.author.id})\n"
+            f"Channel: #{before.channel.name}\n"
+            f"Message Link: {after.jump_url}\n"
+            f"```"
+        )
+        embed.add_field(name="Basic Info", value=info, inline=False)
 
-        if len(after.content) > 1024:
-            embed.add_field(
-                name="After (Truncated)",
-                value=f"{after.content[:1021]}...",
-                inline=False
-            )
-        else:
-            embed.add_field(name="After", value=after.content or "Empty", inline=False)
+        content = (
+            f"```yaml\n"
+            f"Before: |\n  {before.content.replace(chr(10), chr(10) + '  ')}\n"
+            f"After: |\n  {after.content.replace(chr(10), chr(10) + '  ')}\n"
+            f"```"
+        )
+        if len(content) > 1024:
+            content = content[:1021] + "```"
+        embed.add_field(name="Content Changes", value=content, inline=False)
 
         await self._send_log(before.guild.id, "message", embed)
 
@@ -330,11 +369,19 @@ class LoggingCog(commands.Cog):
         """Log channel creation"""
         embed = discord.Embed(
             title="Channel Created",
-            description=f"#{channel.name} was created",
             color=discord.Color.green(),
             timestamp=discord.utils.utcnow()
         )
-        embed.add_field(name="Type", value=str(channel.type))
+        
+        info = (
+            f"```yaml\n"
+            f"Name: #{channel.name}\n"
+            f"Type: {str(channel.type)}\n"
+            f"Category: {channel.category.name if channel.category else 'None'}\n"
+            f"Position: {channel.position}\n"
+            f"```"
+        )
+        embed.add_field(name="Channel Details", value=info, inline=False)
         
         await self._send_log(channel.guild.id, "server", embed)
 
@@ -343,11 +390,19 @@ class LoggingCog(commands.Cog):
         """Log channel deletion"""
         embed = discord.Embed(
             title="Channel Deleted",
-            description=f"#{channel.name} was deleted",
             color=discord.Color.red(),
             timestamp=discord.utils.utcnow()
         )
-        embed.add_field(name="Type", value=str(channel.type))
+        
+        info = (
+            f"```yaml\n"
+            f"Name: #{channel.name}\n"
+            f"Type: {str(channel.type)}\n"
+            f"Category: {channel.category.name if channel.category else 'None'}\n"
+            f"Position: {channel.position}\n"
+            f"```"
+        )
+        embed.add_field(name="Channel Details", value=info, inline=False)
         
         await self._send_log(channel.guild.id, "server", embed)
 
@@ -356,10 +411,20 @@ class LoggingCog(commands.Cog):
         """Log role creation"""
         embed = discord.Embed(
             title="Role Created",
-            description=f"{role.mention} was created",
             color=role.color,
             timestamp=discord.utils.utcnow()
         )
+        
+        info = (
+            f"```yaml\n"
+            f"Name: {role.name}\n"
+            f"Color: {str(role.color)}\n"
+            f"Hoisted: {role.hoist}\n"
+            f"Mentionable: {role.mentionable}\n"
+            f"Position: {role.position}\n"
+            f"```"
+        )
+        embed.add_field(name="Role Details", value=info, inline=False)
         
         await self._send_log(role.guild.id, "server", embed)
 
@@ -368,10 +433,20 @@ class LoggingCog(commands.Cog):
         """Log role deletion"""
         embed = discord.Embed(
             title="Role Deleted",
-            description=f"@{role.name} was deleted",
             color=discord.Color.red(),
             timestamp=discord.utils.utcnow()
         )
+        
+        info = (
+            f"```yaml\n"
+            f"Name: {role.name}\n"
+            f"Color: {str(role.color)}\n"
+            f"Hoisted: {role.hoist}\n"
+            f"Mentionable: {role.mentionable}\n"
+            f"Position: {role.position}\n"
+            f"```"
+        )
+        embed.add_field(name="Role Details", value=info, inline=False)
         
         await self._send_log(role.guild.id, "server", embed)
 
