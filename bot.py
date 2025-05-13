@@ -118,14 +118,8 @@ class Bot(commands.Bot):
 
         loaded_cogs = 0
         failed_cogs = 0
-        
-        # Sync commands before loading cogs
-        try:
-            logging.info("Initial command sync...")
-            await self.tree.sync()
-        except Exception as e:
-            logging.warning(f"Initial sync warning (can be ignored): {e}")
-        
+
+        # Load all cogs in the cogs directory
         for file in cogs_path.glob("*.py"):
             if file.name.startswith("_"):
                 continue
@@ -141,9 +135,9 @@ class Bot(commands.Bot):
                     if cog:
                         app_commands = [cmd.name for cmd in cog.walk_app_commands()]
                         text_commands = [cmd.name for cmd in cog.get_commands()]
-                        logging.info(f"Commands in {file.name}:")
-                        logging.info(f"- Slash commands: {app_commands}")
-                        logging.info(f"- Text commands: {text_commands}")
+                        logging.debug(f"Commands in {file.name}:")
+                        logging.debug(f"- Slash commands: {app_commands}")
+                        logging.debug(f"- Text commands: {text_commands}")
                 
                 loaded_cogs += 1
                 logging.info(f"✅ Loaded cog {file.name}")
@@ -153,21 +147,10 @@ class Bot(commands.Bot):
 
         logging.info(f"📦 Loaded {loaded_cogs} cogs, {failed_cogs} failed")
 
-        # Final command sync after all cogs are loaded
+        # Sync all commands once after loading cogs
         try:
-            logging.info("Final command sync...")
-            
-            # Debug: List all commands before sync
-            all_commands = self.tree.get_commands()
-            logging.info(f"Commands before sync: {[cmd.name for cmd in all_commands]}")
-            
-            # Sync commands
             synced = await self.tree.sync()
-            
-            # Log results
-            logging.info(f"✅ Synced {len(synced)} commands globally")
-            logging.info(f"Synced commands: {[cmd.name for cmd in synced]}")
-            
+            logging.info(f"✅ Synced {len(synced)} commands")
         except discord.Forbidden as e:
             logging.error(f"❌ Missing 'applications.commands' scope: {e}")
             return await self.close()
