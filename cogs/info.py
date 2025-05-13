@@ -51,9 +51,11 @@ class InfoCog(commands.Cog):
 
                 # Basic Info Section
                 basic_info = (
-                    f"```yaml\nBot ID: {self.bot.user.id}```\n"
-                    f"```yaml\nCreated: {discord.utils.format_dt(self.bot.user.created_at)}```\n"  # Full date format
-                    f"```yaml\nUptime: {self._get_bot_uptime()}```"
+                    f"```yaml\n"
+                    f"Bot ID: {self.bot.user.id}\n"
+                    f"Created: {discord.utils.format_dt(self.bot.user.created_at, style='D')}\n"
+                    f"Uptime: {self._get_bot_uptime()}\n"
+                    f"```"
                 )
                 embed.add_field(name="Basic Info", value=basic_info, inline=False)
 
@@ -105,10 +107,12 @@ class InfoCog(commands.Cog):
 
                 # Server Basic Info
                 basic_info = (
-                    f"```yaml\nOwner: {guild.owner}```\n"
-                    f"```yaml\nCreated: {discord.utils.format_dt(guild.created_at)}```\n"  # Full date format
-                    f"```yaml\nMembers: {guild.member_count:,}```\n"
-                    f"```yaml\nRoles: {len(guild.roles):,}```"
+                    f"```yaml\n"
+                    f"Owner: {guild.owner} ({guild.owner.id})\n"
+                    f"Created: {discord.utils.format_dt(guild.created_at, style='D')}\n"
+                    f"Members: {guild.member_count:,}\n"
+                    f"Roles: {len(guild.roles):,}\n"
+                    f"```"
                 )
                 embed.add_field(name="General", value=basic_info, inline=True)
 
@@ -126,10 +130,11 @@ class InfoCog(commands.Cog):
                 embed.add_field(name="Channels", value=channels_info, inline=True)
 
                 # Member Stats
+                online_count = len([m for m in guild.members if m.status != discord.Status.offline])
                 members = {
                     "Humans": len([m for m in guild.members if not m.bot]),
                     "Bots": len([m for m in guild.members if m.bot]),
-                    "Online": len([m for m in guild.members if m.status != discord.Status.offline])
+                    "Online": online_count
                 }
                 
                 members_info = "\n".join(
