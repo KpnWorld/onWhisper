@@ -45,10 +45,9 @@ class WhisperBot(commands.Bot):
         self.db: Optional[DBManager] = None
 
     async def setup_hook(self):
-        self.db = DBManager("data/database.db")
+        self.db = DBManager("data/database.db", logger=log)
         await self.db.init()
 
-        await self.tree.sync()
         self.status_task.start()
         await self.load_all_cogs()
 
