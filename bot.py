@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import discord
-from discord.ext import commands, tasks
+from discord.ext import tasks
 from dotenv import load_dotenv
 
 from utils.db_manager import DBManager  # Your custom async DB manager
@@ -25,22 +25,25 @@ if raw_app_id is None:
 DISCORD_TOKEN: str = raw_token
 APPLICATION_ID: int = int(raw_app_id)
 
-intents = discord.Intents.all()
+# Set up intents for py-cord
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+intents.presences = True
 
 
 log = logging.getLogger("onWhisper")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-class WhisperBot(commands.Bot):
+class WhisperBot(discord.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix=commands.when_mentioned_or("-"),
             intents=intents,
             application_id=APPLICATION_ID,
         )
         self.db: Optional[DBManager] = None    
-        
+          
     async def setup_hook(self):
         # Create data directory if it doesn't exist
         data_dir = Path("./data")
@@ -49,9 +52,12 @@ class WhisperBot(commands.Bot):
         self.db = DBManager("data/database.db", logger=log)
         await self.db.init()
 
-        self.status_task.start()
+        # Load cogs first
         await self.load_all_cogs()
-
+        
+        # Start status task after cogs are loaded
+        self.status_task.start()
+        
     async def load_all_cogs(self):
         cogs_path = Path("./cogs")
         for cog_file in cogs_path.glob("*.py"):
@@ -67,6 +73,11 @@ class WhisperBot(commands.Bot):
     @tasks.loop(minutes=10)
     async def status_task(self):
         await self.change_presence(activity=discord.Game(name="Keeping Whisper running!"))
+    
+    @status_task.before_loop
+    async def before_status_task(self):
+        """Wait until the bot is ready before starting the task"""
+        await self.wait_until_ready()
 
     async def close(self):
         log.info("Shutting down bot...")
