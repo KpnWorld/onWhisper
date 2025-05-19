@@ -1,229 +1,291 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
-from typing import Literal, Optional
-from datetime import datetime, timedelta
-import asyncio
+from discord.commands import slash_command, option
+from typing import Optional, Dict
+from datetime import datetime
 
-class WhisperCog(commands.Cog):
+class Whisper(commands.Cog):
+    """Thread-based ticket system"""
+    
     def __init__(self, bot):
         self.bot = bot
-        self._whisper_checks = {}
-        self._close_tasks = {}
+        self._active_whispers: Dict[int, dict] = {}  # Cache of active whispers
+        self.prefix = "🎫"  # Emoji prefix for whisper threads
 
-    @app_commands.command(name="whisper")
-    @app_commands.describe(
-        action="The action to perform with the whisper system",
-        message="The initial message for the whisper (required for create)",
-        anonymous="Whether to make the whisper anonymous (staff can still see who sent it)"
-    )
-    @app_commands.choices(action=[
-        app_commands.Choice(name="create", value="create"),
-        app_commands.Choice(name="close", value="close"),
-        app_commands.Choice(name="delete", value="delete")
-    ])
+    async def _get_settings(self, guild_id: int) -> Optional[dict]:
+        """Get whisper settings for a guild"""
+        settings = await self.bot.db.get_whisper_settings(guild_id)
+        if not settings:
+            return None
+            
+        channel = self.bot.get_channel(settings["channel_id"])
+        if not isinstance(channel, discord.TextChannel):
+            return None
+            
+        return {
+            "channel": channel,
+            "staff_role_id": settings["staff_role_id"]
+        }
+
+    async def _generate_whisper_id(self, guild_id: int) -> str:
+        """Generate a unique whisper ID"""
+        active = await self.bot.db.get_active_whispers(guild_id)
+        base = len(active) + 1
+        
+        while any(str(base) == w["whisper_id"] for w in active):
+            base += 1
+            
+        return str(base)
+
+    async def _create_thread(
+        self,
+        channel: discord.TextChannel,
+        user: discord.Member,
+        whisper_id: str
+    ) -> Optional[discord.Thread]:
+        """Create a thread for a whisper"""
+        try:
+            thread = await channel.create_thread(
+                name=f"{self.prefix} Whisper #{whisper_id} - {user.name}",
+                type=discord.ChannelType.private_thread,
+                reason=f"Whisper ticket created by {user}"
+            )
+            
+            # Create initial message
+            embed = discord.Embed(
+                title=f"Whisper Ticket #{whisper_id}",
+                description="A staff member will be with you shortly.",
+                color=discord.Color.blue(),
+                timestamp=datetime.now()
+            )
+            embed.add_field(
+                name="Created By",
+                value=user.mention,
+                inline=True
+            )
+            
+            await thread.send(
+                content=f"{user.mention}",
+                embed=embed
+            )
+            
+            return thread
+            
+        except discord.Forbidden:
+            return None
+        except discord.HTTPException:
+            return None    
+        
+    @slash_command(name="whisper", description="Create or manage whisper tickets")
+    @option("action", description="The action to perform", type=str, choices=["create", "close", "delete"])
+    @option("user", description="The user to manage tickets for (only needed for delete action)", type=discord.User, required=False)
     async def whisper(
-        self, 
-        interaction: discord.Interaction, 
-        action: Literal["create", "close", "delete"],
-        message: Optional[str] = None,
-        anonymous: bool = False
+        self,
+        ctx: discord.ApplicationContext,
+        action: str,
+        user: Optional[discord.User] = None
     ):
-        """Manage whisper threads for private communication with staff"""
-        if not self.bot.db_manager:
-            return await interaction.response.send_message(
-                "⚠️ Database connection is not available.", 
+        """Manage whisper tickets"""
+        # Validate action choices
+        if action not in ["create", "close", "delete"]:
+            await ctx.respond(
+                "❌ Invalid action! Use create, close, or delete.",
                 ephemeral=True
             )
+            return
+
+        settings = await self._get_settings(ctx.guild.id)
+        
+        if not settings:
+            await ctx.respond(
+                "❌ Whisper system is not configured! Ask an admin to set it up.",
+                ephemeral=True
+            )
+            return
 
         if action == "create":
-            await self._handle_whisper_create(interaction, message, anonymous)
+            await self._handle_create(ctx, settings)
         elif action == "close":
-            await self._handle_whisper_close(interaction)
+            await self._handle_close(ctx, settings)
         elif action == "delete":
-            await self._handle_whisper_delete(interaction)
+            await self._handle_delete(ctx, settings, user)
 
-    async def _handle_whisper_create(
-        self, 
-        interaction: discord.Interaction, 
-        message: Optional[str],
-        anonymous: bool
-    ):
+    async def _handle_create(self, ctx, settings):
         """Handle whisper creation"""
-        if not message:
-            return await interaction.response.send_message(
-                "⚠️ You must provide a message when creating a whisper.",
+        # Check if user already has an active whisper
+        active = await self.bot.db.get_active_whispers(ctx.guild.id)
+        if any(w["user_id"] == ctx.author.id for w in active):
+            await ctx.respond(
+                "❌ You already have an active whisper ticket!",
                 ephemeral=True
             )
+            return
 
-        try:
-            # Check if user already has an active whisper
-            active_whispers = await self.bot.db_manager.get_user_active_whispers(
-                interaction.guild_id,
-                interaction.user.id
+        # Generate whisper ID
+        whisper_id = await self._generate_whisper_id(ctx.guild.id)
+        
+        # Create thread
+        thread = await self._create_thread(settings["channel"], ctx.author, whisper_id)
+        if not thread:
+            await ctx.respond(
+                "❌ Failed to create whisper ticket. Please try again later.",
+                ephemeral=True
             )
+            return
             
-            if active_whispers:
-                return await interaction.response.send_message(
-                    "⚠️ You already have an active whisper thread.",
-                    ephemeral=True
-                )
-
-            # Create the thread
-            thread = await interaction.channel.create_thread(
-                name=f"whisper-{interaction.user.name}",
-                type=discord.ChannelType.private_thread,
-                reason="Whisper thread creation"
-            )
-
-            # Store in database
-            await self.bot.db_manager.create_whisper(
-                interaction.guild_id,
-                interaction.user.id,
-                thread.id
-            )
-
-            # Set up initial permissions and send first message
-            embed = discord.Embed(
-                title="New Whisper Thread",
-                description=message,
-                color=discord.Color.blue(),
-                timestamp=datetime.utcnow()
-            )
-            embed.set_footer(text=f"From: {'Anonymous' if anonymous else interaction.user}")
-
-            await thread.send(embed=embed)
-            
-            # Set up auto-close task
-            self._setup_auto_close(thread.id)
-
-            await interaction.response.send_message(
-                f"✅ Created whisper thread {thread.mention}",
-                ephemeral=True
-            )
-
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "❌ I don't have permission to create private threads.",
-                ephemeral=True
-            )
-        except Exception as e:
-            await interaction.response.send_message(
-                f"❌ An error occurred: {str(e)}",
-                ephemeral=True
-            )
-
-    async def _handle_whisper_close(self, interaction: discord.Interaction):
-        """Handle whisper closure"""
-        try:
-            if not isinstance(interaction.channel, discord.Thread):
-                return await interaction.response.send_message(
-                    "⚠️ This command can only be used in a whisper thread.",
-                    ephemeral=True
-                )
-
-            whisper = await self.bot.db_manager.get_whisper(interaction.channel.id)
-            if not whisper:
-                return await interaction.response.send_message(
-                    "⚠️ This is not a whisper thread.",
-                    ephemeral=True
-                )
-
-            if whisper["user_id"] != interaction.user.id and not interaction.user.guild_permissions.manage_threads:
-                return await interaction.response.send_message(
-                    "❌ You don't have permission to close this whisper.",
-                    ephemeral=True
-                )
-
-            await self.bot.db_manager.close_whisper(interaction.channel.id)
-            await interaction.channel.edit(archived=True, locked=True)
-            
-            # Cancel auto-close task if it exists
-            if interaction.channel.id in self._close_tasks:
-                self._close_tasks[interaction.channel.id].cancel()
-                del self._close_tasks[interaction.channel.id]
-
-            await interaction.response.send_message(
-                "✅ Whisper thread closed.",
-                ephemeral=True
-            )
-
-        except Exception as e:
-            await interaction.response.send_message(
-                f"❌ An error occurred: {str(e)}",
-                ephemeral=True
-            )
-
-    async def _handle_whisper_delete(self, interaction: discord.Interaction):
-        """Handle whisper deletion"""
-        try:
-            if not isinstance(interaction.channel, discord.Thread):
-                return await interaction.response.send_message(
-                    "⚠️ This command can only be used in a whisper thread.",
-                    ephemeral=True
-                )
-
-            whisper = await self.bot.db_manager.get_whisper(interaction.channel.id)
-            if not whisper:
-                return await interaction.response.send_message(
-                    "⚠️ This is not a whisper thread.",
-                    ephemeral=True
-                )
-
-            if not interaction.user.guild_permissions.manage_threads:
-                return await interaction.response.send_message(
-                    "❌ You don't have permission to delete whispers.",
-                    ephemeral=True
-                )
-
-            if not whisper.get("closed_at"):
-                return await interaction.response.send_message(
-                    "⚠️ Please close the whisper before deleting it.",
-                    ephemeral=True
-                )
-
-            await self.bot.db_manager.delete_whisper(interaction.channel.id)
-            await interaction.channel.delete()
-
-            await interaction.response.send_message(
-                "✅ Whisper thread deleted.",
-                ephemeral=True
-            )
-
-        except Exception as e:
-            await interaction.response.send_message(
-                f"❌ An error occurred: {str(e)}",
-                ephemeral=True
-            )
-
-    def _setup_auto_close(self, thread_id: int):
-        """Set up auto-close task for a whisper thread"""
-        if thread_id in self._close_tasks:
-            self._close_tasks[thread_id].cancel()
-
-        async def auto_close_task():
+        # Store in database
+        await self.bot.db.create_whisper(
+            ctx.guild.id,
+            whisper_id,
+            ctx.author.id,
+            thread.id
+        )
+        
+        # Add staff role to thread if configured
+        if settings["staff_role_id"]:
             try:
-                await asyncio.sleep(24 * 3600)  # 24 hours
-                thread = self.bot.get_channel(thread_id)
-                if thread and not thread.archived:
-                    await self.bot.db_manager.close_whisper(thread_id)
-                    await thread.edit(archived=True, locked=True)
-            except asyncio.CancelledError:
+                staff_role = ctx.guild.get_role(settings["staff_role_id"])
+                if staff_role:
+                    await thread.add_user(staff_role)
+            except discord.Forbidden:
                 pass
-            except Exception as e:
-                print(f"Error in auto-close task: {e}")
-            finally:
-                if thread_id in self._close_tasks:
-                    del self._close_tasks[thread_id]
+        
+        # Cache the whisper
+        self._active_whispers[thread.id] = {
+            "id": whisper_id,
+            "user_id": ctx.author.id
+        }
+        
+        await ctx.respond(
+            f"✅ Created whisper ticket #{whisper_id}. Click here to view: {thread.mention}",
+            ephemeral=True
+        )
 
-        task = asyncio.create_task(auto_close_task())
-        self._close_tasks[thread_id] = task
+    async def _handle_close(self, ctx, settings):
+        """Handle whisper closure"""
+        if not isinstance(ctx.channel, discord.Thread):
+            await ctx.respond(
+                "❌ This command can only be used in a whisper ticket thread!",
+                ephemeral=True
+            )
+            return
+            
+        # Verify this is a whisper thread
+        thread_data = self._active_whispers.get(ctx.channel.id)
+        if not thread_data:
+            await ctx.respond(
+                "❌ This thread is not a whisper ticket!",
+                ephemeral=True
+            )
+            return
+            
+        # Check permissions
+        is_staff = (
+            settings["staff_role_id"] in [r.id for r in ctx.author.roles] or
+            ctx.author.guild_permissions.administrator
+        )
+        is_owner = ctx.author.id == thread_data["user_id"]
+        
+        if not (is_staff or is_owner):
+            await ctx.respond(
+                "❌ You don't have permission to close this ticket!",
+                ephemeral=True
+            )
+            return
+            
+        # Close the thread
+        await self.bot.db.close_whisper(ctx.guild.id, thread_data["id"])
+        
+        embed = discord.Embed(
+            title="Whisper Ticket Closed",
+            description=f"Closed by {ctx.author.mention}",
+            color=discord.Color.red(),
+            timestamp=datetime.now()
+        )
+        await ctx.channel.send(embed=embed)
+        
+        try:
+            await ctx.channel.edit(archived=True, locked=True)
+        except discord.Forbidden:
+            pass
+            
+        # Remove from cache
+        self._active_whispers.pop(ctx.channel.id, None)
+        
+        await ctx.respond("✅ Whisper ticket closed!", ephemeral=True)
 
-    async def cog_unload(self):
-        """Cleanup when cog is unloaded"""
-        for task in self._close_tasks.values():
-            task.cancel()
-        self._close_tasks.clear()
+    async def _handle_delete(self, ctx, settings, user):
+        """Handle whisper deletion"""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.respond(
+                "❌ Only administrators can delete whisper tickets!",
+                ephemeral=True
+            )
+            return
+            
+        if not user:
+            await ctx.respond(
+                "❌ Please specify a user whose ticket to delete!",
+                ephemeral=True
+            )
+            return
+            
+        # Get user's whispers
+        active = await self.bot.db.get_active_whispers(ctx.guild.id)
+        user_whispers = [w for w in active if w["user_id"] == user.id]
+        
+        if not user_whispers:
+            await ctx.respond(
+                f"❌ No active whisper tickets found for {user.mention}!",
+                ephemeral=True
+            )
+            return
+            
+        for whisper in user_whispers:
+            # Delete from database
+            await self.bot.db.delete_whisper(ctx.guild.id, whisper["whisper_id"])
+            
+            # Try to delete the thread
+            thread = ctx.guild.get_thread(whisper["thread_id"])
+            if thread:
+                try:
+                    await thread.delete()
+                except discord.Forbidden:
+                    pass
+                    
+            # Remove from cache
+            self._active_whispers.pop(whisper["thread_id"], None)
+            
+        await ctx.respond(
+            f"✅ Deleted all whisper tickets for {user.mention}!",
+            ephemeral=True
+        )
 
-async def setup(bot):
-    await bot.add_cog(WhisperCog(bot))
+    @commands.Cog.listener()
+    async def on_thread_delete(self, thread):
+        """Handle thread deletion"""
+        if thread.id in self._active_whispers:
+            whisper_data = self._active_whispers.pop(thread.id)
+            await self.bot.db.delete_whisper(
+                thread.guild.id,
+                whisper_data["id"]
+            )
+
+    @commands.Cog.listener()
+    async def on_thread_update(self, before, after):
+        """Handle thread archival"""
+        if (
+            before.id in self._active_whispers and
+            not before.archived and
+            after.archived
+        ):
+            # Auto-close whisper when thread is archived
+            whisper_data = self._active_whispers[before.id]
+            await self.bot.db.close_whisper(
+                before.guild.id,
+                whisper_data["id"]
+            )
+            self._active_whispers.pop(before.id, None)
+
+def setup(bot):
+    bot.add_cog(Whisper(bot))
