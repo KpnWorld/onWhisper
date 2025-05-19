@@ -25,11 +25,8 @@ if raw_app_id is None:
 DISCORD_TOKEN: str = raw_token
 APPLICATION_ID: int = int(raw_app_id)
 
-intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = True
-intents.guilds = True
-intents.members = True
+intents = discord.Intents.all()
+
 
 log = logging.getLogger("onWhisper")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -42,9 +39,13 @@ class WhisperBot(commands.Bot):
             intents=intents,
             application_id=APPLICATION_ID,
         )
-        self.db: Optional[DBManager] = None
-
+        self.db: Optional[DBManager] = None    
+        
     async def setup_hook(self):
+        # Create data directory if it doesn't exist
+        data_dir = Path("./data")
+        data_dir.mkdir(exist_ok=True)
+        
         self.db = DBManager("data/database.db", logger=log)
         await self.db.init()
 
