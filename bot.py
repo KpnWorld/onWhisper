@@ -3,7 +3,7 @@ import logging
 import os
 import signal
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import discord
 from discord.ext import tasks
@@ -11,33 +11,37 @@ from dotenv import load_dotenv
 
 from utils.db_manager import DBManager  # Your custom async DB manager
 
+# Load environment variables
 load_dotenv()
 
-raw_token = os.getenv("DISCORD_TOKEN")
-raw_app_id = os.getenv("APPLICATION_ID")
+# Retrieve token and application ID from environment variables
+discord_token_env: Union[str, None] = os.getenv("DISCORD_TOKEN")
+APPLICATION_ID = os.getenv("APPLICATION_ID")
 
-if raw_token is None:
+if discord_token_env is None:
     raise ValueError("DISCORD_TOKEN is not set in the environment variables.")
-if raw_app_id is None:
+DISCORD_TOKEN: str = discord_token_env  # Type assertion after None check
+if APPLICATION_ID is None:
     raise ValueError("APPLICATION_ID is not set in the environment variables.")
 
-DISCORD_TOKEN: str = raw_token
-APPLICATION_ID: int = int(raw_app_id)
+# Convert APPLICATION_ID to integer
+APPLICATION_ID = int(APPLICATION_ID)
 
+# Configure intents
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.presences = True
 
-log = logging.getLogger("onWhisper")
+# Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
+log = logging.getLogger("WhisperBot")
 
 class WhisperBot(discord.Bot):
     def __init__(self):
         super().__init__(intents=intents, application_id=APPLICATION_ID)
         self.db: Optional[DBManager] = None
-        self.status_task.start()
+        self.status_task.start()  # Start the status task within the constructor
 
     async def setup_hook(self):
         data_dir = Path("./data")
@@ -76,13 +80,12 @@ class WhisperBot(discord.Bot):
         await super().close()
 
 
+# Instantiate the bot
 bot = WhisperBot()
-
 
 def shutdown_handler(*_):
     log.info("Received shutdown signal.")
     asyncio.create_task(bot.close())
-
 
 def main():
     loop = asyncio.get_event_loop()
@@ -101,13 +104,5 @@ def main():
         loop.run_until_complete(bot.close())
         loop.close()
 
-
 if __name__ == "__main__":
     main()
-
-# This is a simple Discord bot that uses py-cord and asyncio.
-# It loads cogs dynamically from the "cogs" directory, manages a database connection,
-# and provides a framework for building interactive Discord applications.
-# The bot's status is updated every 10 minutes, and it handles graceful shutdowns.
-# The bot is designed to be run in an environment where the DISCORD_TOKEN and APPLICATION_ID
-# environment variables are set.
