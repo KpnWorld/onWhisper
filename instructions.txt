@@ -1,0 +1,14 @@
+1. Install the github repo - git clone https://github.com/KpnWorld/Test.git
+
+2. Move all contents of Test folder to root dir - 
+mv ~/workspace/Test/* ~/workspace/
+mv ~/workspace/Test/.* ~/workspace/ 2>/dev/null
+rm -r ~/workspace/Test
+
+3. Create Virtual Environment - 
+python3 -m venv venv
+source venv/bin/activate
+
+4. Install Requirements from Requirements.txt - pip install -r requirements.txt
+
+5. To remove run - rm -rf .[^.]* * __pycache__/
