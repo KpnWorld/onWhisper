@@ -1,199 +1,112 @@
+from typing import Literal, Optional
 import discord
+from discord import app_commands
 from discord.ext import commands
-from discord.commands import slash_command, option
-import datetime
-from platform import python_version
-from typing import Optional
+from discord.app_commands import Choice, command
 
-class Info(commands.Cog):
-    """Information commands"""
+class InfoCog(commands.Cog):
+    """Cog for various information commands"""
     
     def __init__(self, bot):
         self.bot = bot
-        self.start_time = datetime.datetime.now()    
+    
+    @app_commands.command(name="info", description="Get various types of information.")
+    @app_commands.describe(type="Type of info to retrieve")
+    @app_commands.choices(type=[
+        Choice(name="Server", value="server"),
+        Choice(name="Bot", value="bot"),
+        Choice(name="Role", value="role"),
+        Choice(name="Channel", value="channel"),
+        Choice(name="User", value="user")
+    ])
+    async def info(self, interaction: discord.Interaction, 
+                  type: Literal["server", "bot", "role", "channel", "user"],
+                  role: Optional[discord.Role] = None,
+                  channel: Optional[discord.TextChannel] = None,
+                  user: Optional[discord.User] = None):
+        """Get various types of information."""
         
-    @slash_command(name="info", description="Get information about users, server, roles, channels, or the bot")
-    @option("target", description="What to get info about", type=str, choices=["user", "server", "role", "channel", "bot"])
-    @option("item", description="Optional ID or mention of the item to get info about", type=str, required=False)
-    async def info_command(
-        self,
-        ctx: discord.ApplicationContext,
-        target: str,
-        item: Optional[str] = None
-    ) -> None:
-        if target == "user":
-            await self._user_info(ctx, item)
-        elif target == "server":
-            await self._server_info(ctx)
-        elif target == "role":
-            await self._role_info(ctx, item)
-        elif target == "channel":
-            await self._channel_info(ctx, item)
-        elif target == "bot":
-            await self._bot_info(ctx)
+        if not interaction.guild:
+            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
+            
+        embed = discord.Embed(color=discord.Color.blue())
+        
+        if type == "server":            
+            embed.title = f"📊 {interaction.guild.name} Info"
+            embed.description = interaction.guild.description or "No description set"
+            # Handle case where owner might be None
+            owner_value = interaction.guild.owner.mention if interaction.guild.owner else "Unknown"
+            embed.add_field(name="Owner", value=owner_value, inline=True)
+            embed.add_field(name="Created", value=discord.utils.format_dt(interaction.guild.created_at, 'R'), inline=True)
+            embed.add_field(name="Members", value=str(interaction.guild.member_count), inline=True)
+            
+        # Set thumbnail if icon exists
+        if interaction.guild.icon:
+            embed.set_thumbnail(url=interaction.guild.icon.url)
 
-    async def _user_info(
-        self,
-        ctx: discord.ApplicationContext,
-        user_arg: Optional[str] = None
-    ) -> None:
-        """Get information about a user"""
-        try:
-            if user_arg:
-                # Try to get user from mention or ID
-                user_id = int(''.join(filter(str.isdigit, user_arg)))
-                member = await ctx.guild.fetch_member(user_id)
-            else:
-                member = ctx.author if isinstance(ctx.author, discord.Member) else None
-                
-            if not member:
-                await ctx.respond("Could not find that user in this server.", ephemeral=True)
-                return
-                
-            roles = [role.mention for role in member.roles[1:]]  # All roles except @everyone
-            joined_at = member.joined_at.strftime("%Y-%m-%d %H:%M:%S") if member.joined_at else "Unknown"
-            created_at = member.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            
-            embed = discord.Embed(
-                color=member.color if hasattr(member, 'color') else discord.Color.default(),
-                timestamp=datetime.datetime.now()
-            )
-            embed.set_author(name=f"User Info - {str(member)}")
-            embed.set_thumbnail(url=member.display_avatar.url)
-            embed.add_field(name="ID", value=str(member.id))
-            embed.add_field(name="Display Name", value=member.display_name)
-            embed.add_field(name="Created at", value=created_at)
-            embed.add_field(name="Joined at", value=joined_at)
-            embed.add_field(name="Roles", value=" ".join(roles) if roles else "No roles")
-            
-            await ctx.respond(embed=embed)
-        except ValueError:
-            await ctx.respond("Invalid user ID or mention format.", ephemeral=True)
-        except discord.NotFound:
-            await ctx.respond("User not found.", ephemeral=True)
+        elif type == "bot":
+            if not self.bot.user:
+                return await interaction.response.send_message("Bot is not fully initialized yet.", ephemeral=True)
 
-    async def _server_info(
-        self,
-        ctx: discord.ApplicationContext
-    ) -> None:
-        """Get information about the server"""
-        guild = ctx.guild
-        if not guild:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
-            return
+            embed.title = f"🤖 {self.bot.user.name} Info"
+            embed.add_field(name="Guilds", value=str(len(self.bot.guilds)), inline=True)
+            embed.add_field(name="Commands", value=str(len(self.bot.tree.get_commands())), inline=True)
+            embed.add_field(name="Latency", value=f"{round(self.bot.latency * 1000)}ms", inline=True)
             
-        total_members = guild.member_count
-        total_text_channels = len(guild.text_channels)
-        total_voice_channels = len(guild.voice_channels)
-        total_categories = len(guild.categories)
-        
-        embed = discord.Embed(title=f"{guild.name} Server Information", color=discord.Color.blue())
-        if guild.icon:
-            embed.set_thumbnail(url=guild.icon.url)
-        
-        owner = guild.owner
-        embed.add_field(name="Owner", value=owner.mention if owner else "Unknown")
-        embed.add_field(name="Created At", value=guild.created_at.strftime("%Y-%m-%d"))
-        embed.add_field(name="Member Count", value=str(total_members))
-        embed.add_field(name="Channels", value=f"📝 Text: {total_text_channels}\n🔊 Voice: {total_voice_channels}\n📂 Categories: {total_categories}")
-        embed.add_field(name="Verification Level", value=str(guild.verification_level))
-        embed.add_field(name="Boost Level", value=f"Level {guild.premium_tier}")
-        
-        await ctx.respond(embed=embed)
-
-    async def _role_info(
-        self,
-        ctx: discord.ApplicationContext,
-        role_arg: Optional[str] = None
-    ) -> None:
-        """Get information about a role"""
-        try:
-            if not role_arg:
-                await ctx.respond("Please specify a role to get information about.", ephemeral=True)
-                return
-                
-            # Try to get role from mention or ID
-            role_id = int(''.join(filter(str.isdigit, role_arg)))
-            role = ctx.guild.get_role(role_id)
+            if self.bot.user.avatar:
+                embed.set_thumbnail(url=self.bot.user.display_avatar.url)
             
+        elif type == "role":
             if not role:
-                await ctx.respond("Role not found.", ephemeral=True)
-                return
-                
-            embed = discord.Embed(color=role.color)
-            embed.set_author(name=f"Role Info - {role.name}")
-            embed.add_field(name="ID", value=str(role.id))
-            embed.add_field(name="Created at", value=role.created_at.strftime("%Y-%m-%d %H:%M:%S"))
-            embed.add_field(name="Color", value=str(role.color))
-            embed.add_field(name="Members", value=str(len(role.members)))
-            embed.add_field(name="Mentionable", value=str(role.mentionable))
-            embed.add_field(name="Displayed separately", value=str(role.hoist))
+                return await interaction.response.send_message("Please specify a role!", ephemeral=True)
+            embed.title = f"👥 Role Info: {role.name}"
+            embed.color = role.color
+            embed.add_field(name="ID", value=str(role.id), inline=True)
+            embed.add_field(name="Created", value=discord.utils.format_dt(role.created_at, 'R'), inline=True)
+            embed.add_field(name="Members", value=str(len(role.members)), inline=True)
+            embed.add_field(name="Color", value=str(role.color), inline=True)
+            embed.add_field(name="Hoisted", value=str(role.hoist), inline=True)
+            embed.add_field(name="Mentionable", value=str(role.mentionable), inline=True)
             
-            await ctx.respond(embed=embed)
-        except ValueError:
-            await ctx.respond("Invalid role ID or mention format.", ephemeral=True)
-
-    async def _channel_info(
-        self,
-        ctx: discord.ApplicationContext,
-        channel_arg: Optional[str] = None
-    ) -> None:
-        """Get information about a channel"""
-        try:
-            if not channel_arg:
-                channel = ctx.channel
-            else:
-                # Try to get channel from mention or ID
-                channel_id = int(''.join(filter(str.isdigit, channel_arg)))
-                channel = ctx.guild.get_channel(channel_id)
-            
+        elif type == "channel":
             if not channel:
-                await ctx.respond("Channel not found.", ephemeral=True)
-                return
+                return await interaction.response.send_message("Please specify a channel!", ephemeral=True)
+            embed.title = f"📝 Channel Info: {channel.name}"
+            embed.add_field(name="ID", value=str(channel.id), inline=True)
+            embed.add_field(name="Created", value=discord.utils.format_dt(channel.created_at, 'R'), inline=True)
+            embed.add_field(name="Category", value=channel.category.name if channel.category else "None", inline=True)
+            embed.add_field(name="Topic", value=channel.topic or "No topic set", inline=True)
+            embed.add_field(name="Slowmode", value=f"{channel.slowmode_delay}s" if channel.slowmode_delay else "Off", inline=True)
+            embed.add_field(name="NSFW", value=str(channel.is_nsfw()), inline=True)
+            
+        elif type == "user":            
+            target = user or interaction.user
+            member = interaction.guild.get_member(target.id)
+            embed.title = f"👤 User Info: {target}"
+            
+            # Set thumbnail if avatar exists
+            if target.avatar:
+                embed.set_thumbnail(url=target.display_avatar.url)
                 
-            embed = discord.Embed(color=discord.Color.blue())
-            embed.set_author(name=f"Channel Info - {channel.name}")
-            embed.add_field(name="ID", value=str(channel.id))
-            embed.add_field(name="Type", value=str(channel.type))
-            embed.add_field(name="Category", value=channel.category.name if channel.category else "None")
-            embed.add_field(name="Created at", value=channel.created_at.strftime("%Y-%m-%d %H:%M:%S"))
+            embed.add_field(name="ID", value=str(target.id), inline=True)
+            embed.add_field(name="Created", value=discord.utils.format_dt(target.created_at, 'R'), inline=True)
             
-            if isinstance(channel, discord.TextChannel):
-                embed.add_field(name="Topic", value=channel.topic or "No topic set")
-                embed.add_field(name="NSFW", value=str(channel.is_nsfw()))
-                embed.add_field(name="Slowmode", value=f"{channel.slowmode_delay}s" if channel.slowmode_delay else "Off")
-            
-            await ctx.respond(embed=embed)
-        except ValueError:
-            await ctx.respond("Invalid channel ID or mention format.", ephemeral=True)
+            if member:
+                if member.joined_at:
+                    embed.add_field(name="Joined", value=discord.utils.format_dt(member.joined_at, 'R'), inline=True)
+                
+                # Add top role only if the member has roles beyond @everyone
+                if len(member.roles) > 1:
+                    embed.add_field(name="Top Role", value=member.top_role.mention, inline=True)
+                
+                # Set color if member has a color role
+                if member.color != discord.Color.default():
+                    embed.color = member.color
+                
+                if member.premium_since:
+                    embed.add_field(name="Boosting Since", value=discord.utils.format_dt(member.premium_since, 'R'), inline=True)
+        
+        await interaction.response.send_message(embed=embed)
 
-    async def _bot_info(
-        self,
-        ctx: discord.ApplicationContext
-    ) -> None:
-        """Get information about the bot"""
-        bot_user = ctx.bot.user
-        if not bot_user:
-            await ctx.respond("Bot user information not available.", ephemeral=True)
-            return
-            
-        embed = discord.Embed(color=discord.Color.blurple())
-        embed.set_author(name=f"Bot Info - {bot_user.name}")
-        embed.set_thumbnail(url=bot_user.display_avatar.url)
-        
-        # Calculate uptime
-        uptime = datetime.datetime.now() - self.start_time
-        uptime_str = str(uptime).split('.')[0]  # Remove microseconds
-        
-        embed.add_field(name="ID", value=str(bot_user.id))
-        embed.add_field(name="Created at", value=bot_user.created_at.strftime("%Y-%m-%d %H:%M:%S"))
-        embed.add_field(name="Uptime", value=uptime_str)
-        embed.add_field(name="Servers", value=str(len(ctx.bot.guilds)))
-        embed.add_field(name="Commands", value=str(len(ctx.bot.application_commands)))
-        embed.add_field(name="Python Version", value=python_version())
-        embed.add_field(name="discord.py Version", value=discord.__version__)
-        
-        await ctx.respond(embed=embed)
-
-def setup(bot):
-    bot.add_cog(Info(bot))
+async def setup(bot):
+    await bot.add_cog(InfoCog(bot))

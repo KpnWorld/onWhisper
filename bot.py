@@ -2,12 +2,12 @@ import asyncio
 import logging
 import os
 import signal
-import aiohttp
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 
-import discord as dc
-from discord.ext import tasks
+import aiohttp
+import discord
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from utils.db_manager import DBManager  # Your custom async DB manager
@@ -15,24 +15,19 @@ from utils.db_manager import DBManager  # Your custom async DB manager
 # Load environment variables
 load_dotenv()
 
-# Retrieve token and application ID from environment variables
-discord_token_env: Union[str, None] = os.getenv("DISCORD_TOKEN")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 APPLICATION_ID = os.getenv("APPLICATION_ID")
 
-if discord_token_env is None:
+if not DISCORD_TOKEN:
     raise ValueError("DISCORD_TOKEN is not set in the environment variables.")
-DISCORD_TOKEN: str = discord_token_env  # Type assertion after None check
-if APPLICATION_ID is None:
+if not APPLICATION_ID:
     raise ValueError("APPLICATION_ID is not set in the environment variables.")
 
 # Convert APPLICATION_ID to integer
 APPLICATION_ID = int(APPLICATION_ID)
 
 # Configure intents
-intents = dc.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.presences = True
+intents = discord.Intents.all()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -41,12 +36,13 @@ log = logging.getLogger("WhisperBot")
 # Global shutdown task variable
 shutdown_task: Optional[asyncio.Task] = None
 
-
-class WhisperBot(dc.Bot):
+class WhisperBot(commands.Bot):
+    """Base bot class with database integration."""
+    
     def __init__(self):
-        super().__init__(intents=intents, application_id=APPLICATION_ID)
-        self.db: Optional[DBManager] = None
+        super().__init__(command_prefix="!", intents=intents, application_id=APPLICATION_ID)
         self.session = aiohttp.ClientSession()
+        self.db: Optional[DBManager] = None
 
     async def setup_hook(self):
         """Called when the bot is starting up"""
@@ -57,7 +53,7 @@ class WhisperBot(dc.Bot):
         self.db = DBManager("data/database.db", logger=log)
         await self.db.init()
 
-        # Load all cogs and sync commands
+        # Load all cogs
         await self.load_all_cogs()
 
         # Start the status task
@@ -71,7 +67,7 @@ class WhisperBot(dc.Bot):
                 continue
             cog_name = f"cogs.{cog_file.stem}"
             try:
-                self.load_extension(cog_name)
+                await self.load_extension(cog_name)
                 log.info(f"Loaded cog {cog_name}")
             except Exception as e:
                 log.error(f"Failed to load cog {cog_name}: {e}")
@@ -84,16 +80,16 @@ class WhisperBot(dc.Bot):
         log.info(f"Connected to {guild_count} guild(s)")
         log.info(f"Loaded {cog_count} cog(s): {', '.join(self.cogs.keys())}")
 
-        # Correct method to sync application commands
+        # Sync application commands
         try:
-            synced = await self.sync()  # type: ignore
+            synced = await self.tree.sync()
             log.info(f"Synced {len(synced)} global application command(s) with Discord")
         except Exception as e:
             log.error(f"Failed to sync application commands: {e}")
 
     @tasks.loop(minutes=10)
     async def status_task(self):
-        await self.change_presence(activity=dc.Game(name="Keeping Whisper running!"))
+        await self.change_presence(activity=discord.Game(name="Keeping Whisper running!"))
 
     @status_task.before_loop
     async def before_status_task(self):
@@ -118,16 +114,49 @@ class WhisperBot(dc.Bot):
 
         await super().close()
 
+    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
+        """Global error handler for prefix commands."""
+        if hasattr(ctx.command, 'on_error'):
+            return  # Skip if the command has its own error handler
+
+        if isinstance(error, commands.CommandNotFound):
+            await ctx.send("❌ Command not found.")
+        elif isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send(f"⚠️ Missing argument: `{error.param.name}`.")
+        elif isinstance(error, commands.BadArgument):
+            await ctx.send("⚠️ Invalid argument provided.")
+        elif isinstance(error, commands.CommandOnCooldown):
+            await ctx.send(f"⏳ This command is on cooldown. Try again in {error.retry_after:.2f} seconds.")
+        elif isinstance(error, commands.CheckFailure):
+            await ctx.send("🚫 You do not have permission to use this command.")
+        else:
+            # Log unexpected errors
+            import traceback
+            traceback.print_exception(type(error), error, error.__traceback__)
+            await ctx.send("⚠️ An unexpected error occurred.")
 
 # Instantiate the bot
 bot = WhisperBot()
 
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+    """Global error handler for slash commands."""
+    if isinstance(error, discord.app_commands.CommandOnCooldown):
+        await interaction.response.send_message(f"⏳ This command is on cooldown. Try again in {error.retry_after:.2f} seconds.", ephemeral=True)
+    elif isinstance(error, discord.app_commands.MissingPermissions):
+        await interaction.response.send_message("🚫 You do not have the required permissions to use this command.", ephemeral=True)
+    elif isinstance(error, discord.app_commands.CommandNotFound):
+        await interaction.response.send_message("❌ Command not found.", ephemeral=True)
+    else:
+        # Log unexpected errors
+        import traceback
+        traceback.print_exception(type(error), error, error.__traceback__)
+        await interaction.response.send_message("⚠️ An unexpected error occurred.", ephemeral=True)
 
 def shutdown_handler(*_):
     global shutdown_task
     log.info("Received shutdown signal.")
     shutdown_task = asyncio.create_task(bot.close())
-
 
 def main():
     loop = asyncio.new_event_loop()
@@ -140,7 +169,7 @@ def main():
             signal.signal(sig, lambda s, f: asyncio.create_task(bot.close()))
 
     try:
-        loop.run_until_complete(bot.start(DISCORD_TOKEN))
+        loop.run_until_complete(bot.start(DISCORD_TOKEN)) # type: ignore
     except KeyboardInterrupt:
         log.info("Keyboard interrupt received.")
     finally:
@@ -152,7 +181,5 @@ def main():
                 loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
             loop.close()
 
-
 if __name__ == "__main__":
     main()
-

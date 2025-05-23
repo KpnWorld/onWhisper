@@ -1,29 +1,83 @@
+from __future__ import annotations
+
 import aiosqlite
 import logging
 import random
-from typing import Optional
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, Dict, List, Optional, Any, TypeVar, cast
 
-class DBManager:
+from aiosqlite import Connection, Cursor
+
+T = TypeVar('T')
+
+class DBManager:    
     def __init__(self, db_path: str, logger: Optional[logging.Logger] = None):
+        """Initialize the database manager.
+        
+        Args:
+            db_path: Path to the SQLite database file
+            logger: Optional logger instance. If not provided, creates a new one
+        """
         self.db_path = db_path
-        self._conn: Optional[aiosqlite.Connection] = None
+        self._conn: Optional[Connection] = None
         self.log = logger or logging.getLogger("DBManager")
 
     @property
-    def connection(self) -> aiosqlite.Connection:
+    def connection(self) -> Connection:
+        """Get the database connection.
+        
+        Returns:
+            The active database connection
+            
+        Raises:
+            RuntimeError: If the connection hasn't been initialized
+        """
         if self._conn is None:
-            raise RuntimeError("Database connection has not been initialized.")
+            raise RuntimeError("Database connection has not been initialized. Call init() first.")
         return self._conn
 
-    async def init(self):
-        self._conn = await aiosqlite.connect(self.db_path)
-        await self.connection.execute("PRAGMA foreign_keys = ON")
-        await self._create_tables()
-        self.log.info("Database initialized.")
+    async def init(self) -> None:
+        """Initialize the database connection and create tables.
+        
+        This method must be called before any other database operations.
+        
+        Raises:
+            aiosqlite.Error: If database connection or initialization fails
+        """
+        try:
+            self._conn = await aiosqlite.connect(
+                self.db_path,
+                isolation_level=None  # Enable autocommit mode
+            )
+            await self.connection.execute("PRAGMA journal_mode=WAL")  # Enable Write-Ahead Logging
+            await self.connection.execute("PRAGMA foreign_keys=ON")
+            await self._create_tables()
+            await self._create_indexes()
+            self.log.info("Database initialized successfully.")
+        except aiosqlite.Error as e:
+            self.log.error(f"Failed to initialize database: {e}")
+            raise
+
+    async def close(self) -> None:
+        """Close the database connection and perform cleanup.
+        
+        This method should be called when the database is no longer needed
+        to ensure proper resource cleanup.
+        """
+        if self._conn:
+            try:
+                await self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # Cleanup WAL files
+                await self._conn.close()
+                self._conn = None
+                self.log.info("Database connection closed successfully.")
+            except aiosqlite.Error as e:
+                self.log.error(f"Error while closing database connection: {e}")
+                raise
 
     async def _create_tables(self):
+        """Create all required database tables"""
         await self.connection.executescript("""
-        -- Config cog tables
+        -- Config Tables
         CREATE TABLE IF NOT EXISTS guild_settings (
             guild_id INTEGER,
             setting TEXT,
@@ -33,17 +87,17 @@ class DBManager:
 
         CREATE TABLE IF NOT EXISTS whisper_settings (
             guild_id INTEGER PRIMARY KEY,
-            channel_id INTEGER,
-            staff_role_id INTEGER
+            channel_id INTEGER NOT NULL,
+            staff_role_id INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS logging_settings (
             guild_id INTEGER PRIMARY KEY,
-            log_channel_id INTEGER,
+            log_channel_id INTEGER NOT NULL,
             options_json TEXT
         );
 
-        -- Roles cog tables
+        -- Role Management Tables
         CREATE TABLE IF NOT EXISTS autoroles (
             guild_id INTEGER,
             role_id INTEGER,
@@ -53,7 +107,7 @@ class DBManager:
         CREATE TABLE IF NOT EXISTS color_roles (
             guild_id INTEGER,
             role_id INTEGER,
-            color_name TEXT,
+            color_name TEXT NOT NULL,
             PRIMARY KEY (guild_id, role_id)
         );
 
@@ -61,18 +115,18 @@ class DBManager:
             guild_id INTEGER,
             message_id INTEGER,
             emoji TEXT,
-            role_id INTEGER,
+            role_id INTEGER NOT NULL,
             PRIMARY KEY (guild_id, message_id, emoji)
         );
 
         CREATE TABLE IF NOT EXISTS level_roles (
             guild_id INTEGER,
             level INTEGER,
-            role_id INTEGER,
+            role_id INTEGER NOT NULL,
             PRIMARY KEY (guild_id, level)
         );
 
-        -- Leveling cog tables
+        -- XP/Leveling Tables
         CREATE TABLE IF NOT EXISTS xp (
             guild_id INTEGER,
             user_id INTEGER,
@@ -84,35 +138,36 @@ class DBManager:
 
         CREATE TABLE IF NOT EXISTS level_config (
             guild_id INTEGER PRIMARY KEY,
-            cooldown INTEGER DEFAULT 60,  -- seconds
+            cooldown INTEGER DEFAULT 60,
             min_xp INTEGER DEFAULT 10,
             max_xp INTEGER DEFAULT 20
         );
 
-        -- Logging cog tables
+        -- Logging & Mod Actions Tables
         CREATE TABLE IF NOT EXISTS logs (
-            guild_id INTEGER,
-            event_type TEXT,
-            description TEXT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            description TEXT NOT NULL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        -- Moderation cog tables
         CREATE TABLE IF NOT EXISTS mod_actions (
-            guild_id INTEGER,
-            user_id INTEGER,
-            action TEXT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
             reason TEXT,
-            moderator_id INTEGER,
+            moderator_id INTEGER NOT NULL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        -- Whisper cog tables
+        -- Whispers Table
         CREATE TABLE IF NOT EXISTS whispers (
             guild_id INTEGER,
             whisper_id TEXT,
-            user_id INTEGER,
-            thread_id INTEGER,
+            user_id INTEGER NOT NULL,
+            thread_id INTEGER NOT NULL,
             is_closed BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             closed_at TIMESTAMP,
@@ -120,326 +175,475 @@ class DBManager:
         );
         """)
         await self.connection.commit()
-        self.log.info("Database tables created or verified.")
+        self.log.info("Database tables created.")
 
-    async def close(self):
-        if self._conn:
-            await self._conn.close()
-            self.log.info("Database connection closed.")
+    async def _create_indexes(self):
+        """Create performance indexes"""
+        await self.connection.executescript("""
+        -- Config Indexes
+        CREATE INDEX IF NOT EXISTS idx_guild_settings ON guild_settings(guild_id);
 
-    # Config cog methods
-    async def get_guild_setting(self, guild_id: int, setting: str) -> Optional[str]:
-        async with self.connection.execute(
-            "SELECT value FROM guild_settings WHERE guild_id = ? AND setting = ?",
-            (guild_id, setting)
-        ) as cursor:
-            result = await cursor.fetchone()
-            return result[0] if result else None
+        -- Role Management Indexes
+        CREATE INDEX IF NOT EXISTS idx_autoroles_guild ON autoroles(guild_id);
+        CREATE INDEX IF NOT EXISTS idx_color_roles_guild ON color_roles(guild_id);
+        CREATE INDEX IF NOT EXISTS idx_reaction_roles_guild ON reaction_roles(guild_id, message_id);
+        CREATE INDEX IF NOT EXISTS idx_level_roles_guild ON level_roles(guild_id);
 
-    async def set_guild_setting(self, guild_id: int, setting: str, value: str):
-        await self.connection.execute(
-            """INSERT OR REPLACE INTO guild_settings (guild_id, setting, value)
-            VALUES (?, ?, ?)""",
-            (guild_id, setting, value)
-        )
+        -- XP/Leveling Indexes
+        CREATE INDEX IF NOT EXISTS idx_xp_leaderboard ON xp(guild_id, xp DESC);
+        CREATE INDEX IF NOT EXISTS idx_xp_level ON xp(guild_id, level);
+
+        -- Logging & Mod Actions Indexes
+        CREATE INDEX IF NOT EXISTS idx_logs_guild ON logs(guild_id);
+        CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_logs_type ON logs(guild_id, event_type);
+
+        CREATE INDEX IF NOT EXISTS idx_mod_actions_guild ON mod_actions(guild_id);
+        CREATE INDEX IF NOT EXISTS idx_mod_actions_user ON mod_actions(guild_id, user_id);
+        CREATE INDEX IF NOT EXISTS idx_mod_actions_timestamp ON mod_actions(timestamp DESC);
+
+        -- Whispers Indexes
+        CREATE INDEX IF NOT EXISTS idx_whispers_user ON whispers(guild_id, user_id);
+        CREATE INDEX IF NOT EXISTS idx_whispers_active ON whispers(guild_id) WHERE is_closed = FALSE;
+        CREATE INDEX IF NOT EXISTS idx_whispers_thread ON whispers(thread_id);
+        """)
         await self.connection.commit()
+        self.log.info("Database indexes created.")    
+        
+     
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Cursor]:
+        """A context manager for database transactions.
+        
+        This ensures that a series of database operations either all complete successfully
+        or are all rolled back in case of an error.
+        
+        Yields:
+            Cursor: A database cursor for executing SQL commands
+            
+        Raises:
+            aiosqlite.Error: If any database operation fails
+            RuntimeError: If the database connection is not initialized
+        """
+        if self._conn is None:
+            raise RuntimeError("Database connection not initialized")
+            
+        tr = await self.connection.cursor()
+        await tr.execute("BEGIN IMMEDIATE")  # Get write lock immediately
+        
+        try:
+            yield tr
+            await self.connection.commit()
+        except Exception as e:
+            await self.connection.rollback()
+            self.log.error(f"Transaction failed, rolled back: {e}")
+            raise
+        finally:
+            await tr.close()
 
-    async def get_whisper_settings(self, guild_id: int) -> Optional[dict]:
+    # -------------------- Leveling/XP Methods --------------------
+    
+    async def add_xp(self, guild_id: int, user_id: int, xp_amount: int):
+        """Add XP to a user, creating the entry if it doesn't exist"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO xp (guild_id, user_id, xp)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET xp = xp + ?
+            """, (guild_id, user_id, xp_amount, xp_amount))
+
+    async def set_level(self, guild_id: int, user_id: int, level: int):
+        """Set a user's level directly"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO xp (guild_id, user_id, level)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET level = ?
+            """, (guild_id, user_id, level, level))
+
+    async def update_user_xp(self, guild_id: int, user_id: int, xp: int, level: int):
+        """Update user's XP and level"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO xp (guild_id, user_id, xp, level, last_message_ts)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(guild_id, user_id) DO UPDATE 
+                SET xp = ?, level = ?, last_message_ts = CURRENT_TIMESTAMP
+            """, (guild_id, user_id, xp, level, xp, level))
+            
+    async def get_user_xp(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get a user's XP and level information"""
         async with self.connection.execute(
-            "SELECT channel_id, staff_role_id FROM whisper_settings WHERE guild_id = ?",
-            (guild_id,)
+            "SELECT * FROM xp WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id)
         ) as cursor:
-            result = await cursor.fetchone()
-            if result:
-                return {
-                    "channel_id": result[0],
-                    "staff_role_id": result[1]
-                }
+            row = await cursor.fetchone()
+            if row:
+                return dict(zip([column[0] for column in cursor.description], row))
             return None
 
-    async def set_whisper_settings(self, guild_id: int, channel_id: int, staff_role_id: int):
-        await self.connection.execute(
-            """INSERT OR REPLACE INTO whisper_settings (guild_id, channel_id, staff_role_id)
-            VALUES (?, ?, ?)""",
-            (guild_id, channel_id, staff_role_id)
-        )
-        await self.connection.commit()
-
-    async def get_logging_settings(self, guild_id: int) -> Optional[dict]:
+    async def get_leaderboard(self, guild_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get the XP leaderboard for a guild"""
         async with self.connection.execute(
-            "SELECT log_channel_id, options_json FROM logging_settings WHERE guild_id = ?",
+            """SELECT user_id, xp, level FROM xp
+            WHERE guild_id = ? ORDER BY xp DESC LIMIT ?""",
+            (guild_id, limit)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
+
+    async def get_leaderboard_page(self, guild_id: int, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+        """Get a paginated XP leaderboard for a guild
+        
+        Args:
+            guild_id: The guild ID to get leaderboard for
+            limit: Number of entries to return (default: 10)
+            offset: Number of entries to skip (default: 0)
+        """
+        async with self.connection.execute(
+            """SELECT user_id, xp, level FROM xp
+            WHERE guild_id = ? ORDER BY xp DESC LIMIT ? OFFSET ?""",
+            (guild_id, limit, offset)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
+
+    async def get_total_ranked_users(self, guild_id: int) -> int:
+        """Get total number of users with XP in the guild"""
+        async with self.connection.execute(
+            "SELECT COUNT(*) FROM xp WHERE guild_id = ? AND xp > 0",
             (guild_id,)
         ) as cursor:
-            result = await cursor.fetchone()
-            if result:
-                return {
-                    "log_channel_id": result[0],
-                    "options_json": result[1]
-                }
-            return None
+            row = await cursor.fetchone()
+            return row[0] if row else 0
 
-    async def set_logging_settings(self, guild_id: int, log_channel_id: int, options_json: str):
-        await self.connection.execute(
-            """INSERT OR REPLACE INTO logging_settings (guild_id, log_channel_id, options_json)
-            VALUES (?, ?, ?)""",
-            (guild_id, log_channel_id, options_json)
-        )
-        await self.connection.commit()
+    async def get_user_rank(self, guild_id: int, user_id: int) -> Optional[int]:
+        """Get user's rank in the guild"""
+        async with self.connection.execute(
+            """WITH ranked AS (
+                SELECT user_id, RANK() OVER (ORDER BY xp DESC) as rank
+                FROM xp WHERE guild_id = ? AND xp > 0
+            )
+            SELECT rank FROM ranked WHERE user_id = ?""",
+            (guild_id, user_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
 
-    # Roles cog methods
+    async def get_level_config(self, guild_id: int) -> Optional[Dict[str, Any]]:
+        """Get the level configuration for a guild"""
+        async with self.connection.execute(
+            "SELECT * FROM level_config WHERE guild_id = ?",
+            (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(zip([column[0] for column in cursor.description], row)) if row else None
+
+    async def set_level_config(self, guild_id: int, cooldown: int, min_xp: int, max_xp: int):
+        """Set the level configuration for a guild"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO level_config (guild_id, cooldown, min_xp, max_xp)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET cooldown = ?, min_xp = ?, max_xp = ?
+            """, (guild_id, cooldown, min_xp, max_xp, cooldown, min_xp, max_xp))
+
+    # -------------------- Role Management Methods --------------------
+
     async def add_autorole(self, guild_id: int, role_id: int):
-        await self.connection.execute(
-            "INSERT OR IGNORE INTO autoroles (guild_id, role_id) VALUES (?, ?)",
-            (guild_id, role_id)
-        )
-        await self.connection.commit()
+        """Add an autorole to a guild"""
+        async with self.transaction() as tr:
+            await tr.execute(
+                "INSERT OR IGNORE INTO autoroles (guild_id, role_id) VALUES (?, ?)",
+                (guild_id, role_id)
+            )
 
     async def remove_autorole(self, guild_id: int, role_id: int):
-        await self.connection.execute(
-            "DELETE FROM autoroles WHERE guild_id = ? AND role_id = ?",
-            (guild_id, role_id)
-        )
-        await self.connection.commit()
+        """Remove an autorole from a guild"""
+        async with self.transaction() as tr:
+            await tr.execute(
+                "DELETE FROM autoroles WHERE guild_id = ? AND role_id = ?",
+                (guild_id, role_id)
+            )
 
-    async def get_autoroles(self, guild_id: int) -> list[int]:
+    async def get_autoroles(self, guild_id: int) -> List[int]:
+        """Get all autoroles for a guild"""
         async with self.connection.execute(
             "SELECT role_id FROM autoroles WHERE guild_id = ?",
             (guild_id,)
         ) as cursor:
-            return [row[0] for row in await cursor.fetchall()]
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
 
-    async def add_color_role(self, guild_id: int, role_id: int, color_name: str):
-        await self.connection.execute(
-            """INSERT OR REPLACE INTO color_roles (guild_id, role_id, color_name)
-            VALUES (?, ?, ?)""",
-            (guild_id, role_id, color_name)
-        )
-        await self.connection.commit()
+    async def set_level_role(self, guild_id: int, level: int, role_id: int):
+        """Set a role reward for reaching a specific level"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO level_roles (guild_id, level, role_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, level) DO UPDATE SET role_id = ?
+            """, (guild_id, level, role_id, role_id))
 
-    async def remove_color_role(self, guild_id: int, role_id: int):
-        await self.connection.execute(
-            "DELETE FROM color_roles WHERE guild_id = ? AND role_id = ?",
-            (guild_id, role_id)
-        )
-        await self.connection.commit()
+    async def delete_level_role(self, guild_id: int, level: int):
+        """Remove a level role reward"""
+        async with self.transaction() as tr:
+            await tr.execute(
+                "DELETE FROM level_roles WHERE guild_id = ? AND level = ?",
+                (guild_id, level)
+            )
 
-    async def get_color_roles(self, guild_id: int) -> list[dict]:
-        async with self.connection.execute(
-            "SELECT role_id, color_name FROM color_roles WHERE guild_id = ?",
-            (guild_id,)
-        ) as cursor:
-            return [{"role_id": row[0], "color_name": row[1]} for row in await cursor.fetchall()]
-
-    async def add_reaction_role(self, guild_id: int, message_id: int, emoji: str, role_id: int):
-        await self.connection.execute(
-            """INSERT OR REPLACE INTO reaction_roles (guild_id, message_id, emoji, role_id)
-            VALUES (?, ?, ?, ?)""",
-            (guild_id, message_id, emoji, role_id)
-        )
-        await self.connection.commit()
-
-    async def remove_reaction_role(self, guild_id: int, message_id: int, emoji: str):
-        await self.connection.execute(
-            "DELETE FROM reaction_roles WHERE guild_id = ? AND message_id = ? AND emoji = ?",
-            (guild_id, message_id, emoji)
-        )
-        await self.connection.commit()
-
-    async def get_reaction_roles(self, guild_id: int) -> list[dict]:
-        async with self.connection.execute(
-            "SELECT message_id, emoji, role_id FROM reaction_roles WHERE guild_id = ?",
-            (guild_id,)
-        ) as cursor:
-            return [{
-                "message_id": row[0],
-                "emoji": row[1],
-                "role_id": row[2]
-            } for row in await cursor.fetchall()]
-
-    async def add_level_role(self, guild_id: int, level: int, role_id: int):
-        await self.connection.execute(
-            """INSERT OR REPLACE INTO level_roles (guild_id, level, role_id)
-            VALUES (?, ?, ?)""",
-            (guild_id, level, role_id)
-        )
-        await self.connection.commit()
-
-    async def remove_level_role(self, guild_id: int, level: int):
-        await self.connection.execute(
-            "DELETE FROM level_roles WHERE guild_id = ? AND level = ?",
-            (guild_id, level)
-        )
-        await self.connection.commit()
-
-    async def get_level_roles(self, guild_id: int) -> list[dict]:
+    async def get_level_roles(self, guild_id: int) -> List[Dict[str, Any]]:
+        """Get all level role rewards for a guild"""
         async with self.connection.execute(
             "SELECT level, role_id FROM level_roles WHERE guild_id = ? ORDER BY level",
             (guild_id,)
         ) as cursor:
-            return [{"level": row[0], "role_id": row[1]} for row in await cursor.fetchall()]
+            rows = await cursor.fetchall()
+            return [{"level": row[0], "role_id": row[1]} for row in rows]
 
-    # Leveling cog methods
-    async def add_xp(self, guild_id: int, user_id: int, amount: int):
-        await self.connection.execute(
-            """INSERT INTO xp (guild_id, user_id, xp, level, last_message_ts)
-            VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
-            ON CONFLICT(guild_id, user_id) DO UPDATE SET
-            xp = xp + ?,
-            last_message_ts = CURRENT_TIMESTAMP""",
-            (guild_id, user_id, amount, amount)
-        )
-        await self.connection.commit()
+    # -------------------- Config Methods --------------------
 
-    async def get_user_xp(self, guild_id: int, user_id: int) -> dict:
+    async def set_guild_setting(self, guild_id: int, setting: str, value: str):
+        """Set a guild configuration setting"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO guild_settings (guild_id, setting, value)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, setting) DO UPDATE SET value = ?
+            """, (guild_id, setting, value, value))
+
+    async def get_guild_setting(self, guild_id: int, setting: str) -> Optional[str]:
+        """Get a guild configuration setting"""
         async with self.connection.execute(
-            """SELECT xp, level, last_message_ts FROM xp
-            WHERE guild_id = ? AND user_id = ?""",
+            "SELECT value FROM guild_settings WHERE guild_id = ? AND setting = ?",
+            (guild_id, setting)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def set_logging_settings(self, guild_id: int, log_channel_id: int, options_json: str):
+        """Set logging configuration for a guild"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO logging_settings (guild_id, log_channel_id, options_json)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET log_channel_id = ?, options_json = ?
+            """, (guild_id, log_channel_id, options_json, log_channel_id, options_json))
+
+    # -------------------- Logging & Mod Actions --------------------
+
+    async def insert_log(self, guild_id: int, event_type: str, description: str):
+        """Insert a new log entry"""
+        async with self.transaction() as tr:
+            await tr.execute(
+                "INSERT INTO logs (guild_id, event_type, description) VALUES (?, ?, ?)",
+                (guild_id, event_type, description)
+            )
+
+    async def insert_mod_action(self, guild_id: int, user_id: int, action: str, reason: str, moderator_id: int):
+        """Insert a new moderation action"""
+        async with self.transaction() as tr:
+            await tr.execute(
+                "INSERT INTO mod_actions (guild_id, user_id, action, reason, moderator_id) VALUES (?, ?, ?, ?, ?)",
+                (guild_id, user_id, action, reason, moderator_id)
+            )    
+    async def get_logs_filtered(self, guild_id: int, event_type: Optional[str] = None, since_days: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get filtered logs for a guild"""
+        query = "SELECT * FROM logs WHERE guild_id = ?"
+        params: List[Any] = [guild_id]
+        
+        if event_type is not None:
+            query += " AND event_type = ?"
+            params.append(event_type)
+        if since_days is not None:
+            query += " AND timestamp >= datetime('now', ?)"
+            params.append(f'-{since_days} days')
+            
+        query += " ORDER BY timestamp DESC"
+        
+        async with self.connection.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
+
+    async def get_mod_actions_page(self, guild_id: int, limit: int, offset: int) -> List[Dict[str, Any]]:
+        """Get a paginated list of moderation actions"""
+        async with self.connection.execute(
+            """SELECT * FROM mod_actions 
+            WHERE guild_id = ? 
+            ORDER BY timestamp DESC LIMIT ? OFFSET ?""",
+            (guild_id, limit, offset)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
+
+    # -------------------- Whispers --------------------
+
+    async def create_whisper(self, guild_id: int, whisper_id: str, user_id: int, thread_id: int):
+        """Create a new whisper thread"""
+        async with self.transaction() as tr:
+            await tr.execute(
+                "INSERT INTO whispers (guild_id, whisper_id, user_id, thread_id) VALUES (?, ?, ?, ?)",
+                (guild_id, whisper_id, user_id, thread_id)
+            )
+
+    async def close_whisper(self, guild_id: int, whisper_id: str):
+        """Close an existing whisper thread"""        
+        async with self.transaction() as tr:
+            await tr.execute(
+                "UPDATE whispers SET is_closed = 1, closed_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND whisper_id = ?",
+                (guild_id, whisper_id)
+            )
+
+    async def get_whispers_by_user(self, guild_id: int, user_id: int) -> List[Dict[str, Any]]:
+        """Get all whispers for a specific user"""
+        async with self.connection.execute(
+            "SELECT * FROM whispers WHERE guild_id = ? AND user_id = ?",
             (guild_id, user_id)
         ) as cursor:
-            result = await cursor.fetchone()
-            return {
-                "xp": result[0],
-                "level": result[1],
-                "last_message_ts": result[2]
-            } if result else {"xp": 0, "level": 0, "last_message_ts": None}
+            rows = await cursor.fetchall()
+            return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
 
-    async def set_xp(self, guild_id: int, user_id: int, xp: int, level: int):
-        await self.connection.execute(
-            """INSERT OR REPLACE INTO xp (guild_id, user_id, xp, level, last_message_ts)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-            (guild_id, user_id, xp, level)
-        )
-        await self.connection.commit()
+    # -------------------- Deletion & Cleanup --------------------
 
-    async def get_leaderboard(self, guild_id: int, limit: int = 10) -> list[dict]:
+    async def delete_guild_data(self, guild_id: int):
+        """Delete all data associated with a guild"""
+        async with self.transaction() as tr:
+            queries = [
+                "DELETE FROM guild_settings WHERE guild_id = ?",
+                "DELETE FROM whisper_settings WHERE guild_id = ?",
+                "DELETE FROM logging_settings WHERE guild_id = ?",
+                "DELETE FROM autoroles WHERE guild_id = ?",
+                "DELETE FROM color_roles WHERE guild_id = ?",
+                "DELETE FROM reaction_roles WHERE guild_id = ?",
+                "DELETE FROM level_roles WHERE guild_id = ?",
+                "DELETE FROM xp WHERE guild_id = ?",
+                "DELETE FROM level_config WHERE guild_id = ?",
+                "DELETE FROM logs WHERE guild_id = ?",
+                "DELETE FROM mod_actions WHERE guild_id = ?",
+                "DELETE FROM whispers WHERE guild_id = ?"
+            ]
+            for query in queries:
+                await tr.execute(query, (guild_id,))
+
+    async def delete_user_data(self, guild_id: int, user_id: int):
+        """Delete all data associated with a user in a guild"""
+        async with self.transaction() as tr:
+            queries = [
+                "DELETE FROM xp WHERE guild_id = ? AND user_id = ?",
+                "DELETE FROM mod_actions WHERE guild_id = ? AND user_id = ?",
+                "DELETE FROM whispers WHERE guild_id = ? AND user_id = ?"
+            ]
+            for query in queries:
+                await tr.execute(query, (guild_id, user_id))
+
+    async def purge_old_logs(self, days: int = 30):
+        """Purge logs and mod actions older than specified days"""
+        async with self.transaction() as tr:
+            await tr.execute(
+                "DELETE FROM logs WHERE timestamp < datetime('now', ?)",
+                (f'-{days} days',)
+            )
+            await tr.execute(
+                "DELETE FROM mod_actions WHERE timestamp < datetime('now', ?)",
+                (f'-{days} days',)
+            )
+
+    # -------------------- Reaction Role Methods --------------------
+    
+    async def add_reaction_role(self, guild_id: int, message_id: int, emoji: str, role_id: int):
+        """Add a reaction role mapping"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO reaction_roles (guild_id, message_id, emoji, role_id)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(guild_id, message_id, emoji) DO UPDATE SET role_id = ?
+            """, (guild_id, message_id, emoji, role_id, role_id))
+
+    async def remove_reaction_role(self, guild_id: int, message_id: int, emoji: str):
+        """Remove a reaction role mapping"""
+        async with self.transaction() as tr:
+            await tr.execute(
+                "DELETE FROM reaction_roles WHERE guild_id = ? AND message_id = ? AND emoji = ?",
+                (guild_id, message_id, emoji)
+            )
+
+    async def get_reaction_role(self, guild_id: int, message_id: int, emoji: str) -> Optional[int]:
+        """Get the role ID for a specific reaction role mapping"""
         async with self.connection.execute(
-            """SELECT user_id, xp, level FROM xp
-            WHERE guild_id = ?
-            ORDER BY xp DESC LIMIT ?""",
-            (guild_id, limit)
+            "SELECT role_id FROM reaction_roles WHERE guild_id = ? AND message_id = ? AND emoji = ?",
+            (guild_id, message_id, emoji)
         ) as cursor:
-            return [{
-                "user_id": row[0],
-                "xp": row[1],
-                "level": row[2]
-            } for row in await cursor.fetchall()]
+            row = await cursor.fetchone()
+            return row[0] if row else None
 
-    async def get_level_config(self, guild_id: int) -> dict:
+    async def get_message_reaction_roles(self, guild_id: int, message_id: int) -> List[Dict[str, Any]]:
+        """Get all reaction roles for a specific message"""
         async with self.connection.execute(
-            """SELECT cooldown, min_xp, max_xp FROM level_config
-            WHERE guild_id = ?""",
-            (guild_id,)
+            "SELECT emoji, role_id FROM reaction_roles WHERE guild_id = ? AND message_id = ?",
+            (guild_id, message_id)
         ) as cursor:
-            result = await cursor.fetchone()
-            return {
-                "cooldown": result[0],
-                "min_xp": result[1],
-                "max_xp": result[2]
-            } if result else {"cooldown": 60, "min_xp": 10, "max_xp": 20}
+            rows = await cursor.fetchall()
+            return [{'emoji': row[0], 'role_id': row[1]} for row in rows]
 
-    async def set_level_config(self, guild_id: int, cooldown: int, min_xp: int, max_xp: int):
-        await self.connection.execute(
-            """INSERT OR REPLACE INTO level_config (guild_id, cooldown, min_xp, max_xp)
-            VALUES (?, ?, ?, ?)""",
-            (guild_id, cooldown, min_xp, max_xp)
-        )
-        await self.connection.commit()
-
-    # Logging cog methods
-    async def log_event(self, guild_id: int, event_type: str, description: str, timestamp: Optional[float] = None):
-        await self.connection.execute(
-            """INSERT INTO logs (guild_id, event_type, description, timestamp)
-            VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))""",
-            (guild_id, event_type, description, timestamp)
-        )
-        await self.connection.commit()
-
-    async def get_logs(self, guild_id: int, limit: int = 100) -> list[dict]:
+    async def get_user_cooldown(self, guild_id: int, user_id: int) -> Optional[float]:
+        """Get user's last message timestamp for cooldown"""
         async with self.connection.execute(
-            """SELECT event_type, description, timestamp FROM logs
-            WHERE guild_id = ?
-            ORDER BY timestamp DESC LIMIT ?""",
-            (guild_id, limit)
-        ) as cursor:
-            return [{
-                "event_type": row[0],
-                "description": row[1],
-                "timestamp": row[2]
-            } for row in await cursor.fetchall()]
-
-    # Moderation cog methods
-    async def add_mod_action(self, guild_id: int, user_id: int, action: str, reason: str, moderator_id: int):
-        await self.connection.execute(
-            """INSERT INTO mod_actions (guild_id, user_id, action, reason, moderator_id)
-            VALUES (?, ?, ?, ?, ?)""",
-            (guild_id, user_id, action, reason, moderator_id)
-        )
-        await self.connection.commit()
-
-    async def get_user_mod_actions(self, guild_id: int, user_id: int) -> list[dict]:
-        async with self.connection.execute(
-            """SELECT action, reason, moderator_id, timestamp FROM mod_actions
-            WHERE guild_id = ? AND user_id = ?
-            ORDER BY timestamp DESC""",
+            "SELECT last_message_ts FROM xp WHERE guild_id = ? AND user_id = ?",
             (guild_id, user_id)
         ) as cursor:
-            return [{
-                "action": row[0],
-                "reason": row[1],
-                "moderator_id": row[2],
-                "timestamp": row[3]
-            } for row in await cursor.fetchall()]
+            row = await cursor.fetchone()
+            return float(row[0]) if row and row[0] else None
 
-    # Whisper cog methods
-    async def create_whisper(self, guild_id: int, whisper_id: int, user_id: int, thread_id: int):
-        await self.connection.execute(
-            """INSERT INTO whispers (guild_id, whisper_id, user_id, thread_id)
-            VALUES (?, ?, ?, ?)""",
-            (guild_id, whisper_id, user_id, thread_id)
-        )
-        await self.connection.commit()
+    async def update_user_level(self, guild_id: int, user_id: int, level: int):
+        """Update user's level only"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                UPDATE xp SET level = ? 
+                WHERE guild_id = ? AND user_id = ?
+            """, (level, guild_id, user_id))
 
-    async def close_whisper(self, guild_id: int, whisper_id: int):
-        await self.connection.execute(
-            """UPDATE whispers SET is_closed = TRUE, closed_at = CURRENT_TIMESTAMP
-            WHERE guild_id = ? AND whisper_id = ?""",
-            (guild_id, whisper_id)
-        )
-        await self.connection.commit()
-
-    async def delete_whisper(self, guild_id: int, whisper_id: int):
-        await self.connection.execute(
-            "DELETE FROM whispers WHERE guild_id = ? AND whisper_id = ?",
-            (guild_id, whisper_id)
-        )
-        await self.connection.commit()
-
-    async def get_whisper(self, guild_id: int, whisper_id: int) -> Optional[dict]:
+    async def get_level_roles_for_level(self, guild_id: int, level: int) -> List[int]:
+        """Get all role rewards for a specific level"""
         async with self.connection.execute(
-            """SELECT user_id, thread_id, is_closed, created_at, closed_at
-            FROM whispers WHERE guild_id = ? AND whisper_id = ?""",
-            (guild_id, whisper_id)
+            "SELECT role_id FROM level_roles WHERE guild_id = ? AND level <= ? ORDER BY level DESC",
+            (guild_id, level)
         ) as cursor:
-            result = await cursor.fetchone()
-            if result is None:
-                return None
-            return {
-                "user_id": result[0],
-                "thread_id": result[1],
-                "is_closed": bool(result[2]),
-                "created_at": result[3],
-                "closed_at": result[4]
-            }
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
 
-    async def get_active_whispers(self, guild_id: int) -> list[dict]:
+    async def get_level_notification_setting(self, guild_id: int) -> bool:
+        """Get whether level-up notifications are enabled"""
+        setting = await self.get_guild_setting(guild_id, "level_up_dm")
+        return setting == "true" if setting is not None else False
+
+    async def reset_user_xp(self, guild_id: int, user_id: int):
+        """Reset a user's XP and level to 0"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                UPDATE xp 
+                SET xp = 0, level = 0 
+                WHERE guild_id = ? AND user_id = ?
+            """, (guild_id, user_id))
+
+    # -------------------- Whisper Settings Methods --------------------
+    
+    async def set_whisper_channel(self, guild_id: int, channel_id: int, staff_role_id: int):
+        """Set the whisper channel and staff role for a guild"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO whisper_settings (guild_id, channel_id, staff_role_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET channel_id = ?, staff_role_id = ?
+            """, (guild_id, channel_id, staff_role_id, channel_id, staff_role_id))
+
+    async def get_whisper_settings(self, guild_id: int) -> Optional[Dict[str, int]]:
+        """Get the whisper settings for a guild"""
         async with self.connection.execute(
-            """SELECT whisper_id, user_id, thread_id, created_at
-            FROM whispers WHERE guild_id = ? AND is_closed = FALSE""",
+            "SELECT channel_id, staff_role_id FROM whisper_settings WHERE guild_id = ?",
             (guild_id,)
         ) as cursor:
-            return [{
-                "whisper_id": row[0],
-                "user_id": row[1],
-                "thread_id": row[2],
-                "created_at": row[3]
-            } for row in await cursor.fetchall()]
+            row = await cursor.fetchone()
+            if row:
+                return {"channel_id": row[0], "staff_role_id": row[1]}
+            return None
+

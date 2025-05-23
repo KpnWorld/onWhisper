@@ -5,112 +5,93 @@ A feature-rich Discord bot built with py-cord that includes leveling, whispers, 
 ## Features
 
 ### 🎮 Leveling System
-- Experience (XP) gain from chat activity 
-- Customizable XP rates and cooldowns
-- Level-up notifications with progress bar
-- Server-wide leaderboards
-- XP rewards based on message activity
+- Message-based XP gain with configurable rates
+- Customizable cooldown periods
+- DM/Channel level-up notifications
+- Interactive leaderboard with pagination
+- Role rewards based on levels
+- Progress tracking with visual bars
+- Level/XP management commands
+- Rank display and statistics
 
-### 💬 Whisper System
-- Thread-based private communication
-- Staff role management
-- Auto-close for inactive threads
-- Configurable retention periods
-- Anonymous reporting option
-- Comprehensive logging
+### Database Schema
+```sql
+-- XP/Leveling Tables
+CREATE TABLE xp (
+    guild_id INTEGER,
+    user_id INTEGER,
+    xp INTEGER DEFAULT 0,
+    level INTEGER DEFAULT 0,
+    last_message_ts TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id)
+);
 
-### 👮 Moderation
-- Core moderation commands (kick, ban, timeout)
-- Warning system with auto-expire
-- Message bulk deletion
-- Channel lockdown capabilities
-- Slowmode management
-- Message snipe command
-- Detailed mod logs
+CREATE TABLE level_config (
+    guild_id INTEGER PRIMARY KEY,
+    cooldown INTEGER DEFAULT 60,
+    min_xp INTEGER DEFAULT 10,
+    max_xp INTEGER DEFAULT 20
+);
 
-### 🎭 Role Management
-- Automatic role assignment for new members
-- Reaction roles with selection menu management
-- Role hierarchy respect
-- Interactive role unbinding interface
-- Bulk role assignments
-- Error handling for permissions
-- Role logging and tracking
-
-### 📝 Logging
-- Comprehensive event logging
-- Member join/leave tracking
-- Message edit/delete logging
-- Role & channel update logs
-- Mod action logging
-- Clean embed formatting
-- Customizable log channels
+CREATE TABLE level_roles (
+    guild_id INTEGER,
+    level INTEGER,
+    role_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, level)
+);
+```
 
 ## Commands
 
-### Moderation
-- `/warn <user> <reason>` - Issue a warning
-- `/warnings <user>` - View a user's warnings
-- `/kick <user> [reason]` - Kick a member
-- `/ban <user> [reason] [delete_days]` - Ban a member
-- `/timeout <user> <duration> [reason]` - Temporarily mute a user
-- `/lockdown [channel] [duration] [reason]` - Lock a channel temporarily
-- `/unlock [channel]` - Remove a channel lockdown
-- `/slowmode <seconds> [channel]` - Set slowmode in a channel
-- `/clear <amount> [user]` - Bulk delete messages (1-100)
-- `/snipe <type>` - Show recently deleted/edited messages
+### Leveling Commands
+- `/level [user]` - View level stats and progress
+  - Shows current level, XP, progress bar
+  - Displays rank on server leaderboard
+  - Shows progress to next level
+  
+- `/leaderboard [page]` - View server XP leaderboard
+  - Paginated display of top users
+  - Interactive navigation buttons
+  - Shows XP and level for each user
 
-### Role Management
-- `/roles auto_set <role>` - Enable auto-role for new members
-- `/roles auto_disable` - Disable automatic role
-- `/roles color set <role>` - Set your color role
-- `/roles color clear` - Remove your color role
-- `/roles bulk_add <role> <users>` - Add role to multiple users
-- `/roles bulk_remove <role> <users>` - Remove role from multiple users
-- `/roles react_bind <message_id> <emoji> <role>` - Create reaction role
-- `/roles react_unbind <message_id>` - Remove reaction roles
-- `/roles react_list` - List reaction roles
-- `/config color add <role>` - Add a role to allowed color roles
-- `/config color remove <role>` - Remove a role from allowed color roles
-- `/config color list` - Show all configured color roles
+- `/levelconfig` - Configure leveling system
+  - `cooldown <seconds>` - Set XP gain cooldown
+  - `xprange <min> <max>` - Set XP per message range
+  - `togglenotifications` - Toggle level-up DMs
+  - `addrole <level> <role>` - Add level role reward
+  - `removerole <level>` - Remove level role reward
+  - `roles` - List all level role rewards
+  - `reset <user>` - Reset user's XP and level
+  - `setlevel <user> <level>` - Set user's level
 
-### Leveling System
-- `/config_xp rate <amount>` - Set XP per message (1-100)
-- `/config_xp cooldown <seconds>` - Set XP gain cooldown
-- `/config_xp toggle` - Toggle XP system
-- `/config_level add <level> <role>` - Set role reward for level
-- `/config_level remove <level>` - Remove level reward
-- `/config_level list` - List all level rewards
+### Database Methods
+```python
+# XP Management
+get_user_xp(guild_id, user_id) -> Optional[Dict]
+update_user_xp(guild_id, user_id, xp, level)
+add_xp(guild_id, user_id, xp_amount)
+set_level(guild_id, user_id, level)
+reset_user_xp(guild_id, user_id)
 
-### Whisper System
-- `/whisper <message>` - Start a private thread with staff
-- `/whisper_close` - Close your whisper thread
-- `/config_whisper channel [channel]` - Set whisper channel
-- `/config_whisper staff <role>` - Set staff role
-- `/config_whisper timeout <minutes>` - Set auto-close timeout
-- `/config_whisper retention <days>` - Set thread retention period
-- `/config_whisper toggle` - Toggle whisper system
+# Leaderboard
+get_leaderboard(guild_id, limit) -> List[Dict]
+get_leaderboard_page(guild_id, limit, offset) -> List[Dict]
 
-### Logging
-- `/config_logs enable <type> <channel>` - Enable logging for specified type
-- `/config_logs disable <type>` - Disable logging for specified type
+# Level Configuration
+get_level_config(guild_id) -> Optional[Dict]
+set_level_config(guild_id, cooldown, min_xp, max_xp)
 
-### Information
-- `/info help [command]` - Show command help
-- `/info bot` - Show bot stats and info
-- `/info server` - Show server information
-- `/info user [user]` - Show user information
-- `/info role <role>` - Show role information
-- `/info uptime` - Show bot uptime
+# Role Rewards
+set_level_role(guild_id, level, role_id)
+delete_level_role(guild_id, level)
+get_level_roles(guild_id) -> List[Dict]
+get_level_roles_for_level(guild_id, level) -> List[int]
 
-### Debug (Owner Only)
-- `/debug_db` - Get database diagnostics
-- `/debug_system` - Get system diagnostics 
-- `/maintenance` - Toggle maintenance mode
-- `!sync [guild|global]` - Sync slash commands
-- `!load <cog>` - Load a cog
-- `!unload <cog>` - Unload a cog
-- `!reload <cog>` - Reload a cog
+# Cooldown & Notifications
+get_user_cooldown(guild_id, user_id) -> Optional[float]
+update_user_level(guild_id, user_id, level)
+get_level_notification_setting(guild_id) -> bool
+```
 
 ## Setup & Configuration
 

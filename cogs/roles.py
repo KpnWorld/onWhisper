@@ -1,266 +1,206 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
-from discord.commands import slash_command, option
-from typing import Optional, Literal, List, Union, cast
-import re
+from typing import Optional, List
+from discord.app_commands import Choice, Group
 
-class Roles(commands.Cog):
-    """Role management commands"""
+class RolesCog(commands.Cog):
+    """Cog for role management commands"""
     
     def __init__(self, bot):
         self.bot = bot
-
-    @slash_command(name="autorole", description="Manage roles that are automatically assigned to new members")
-    @commands.has_permissions(manage_roles=True)
-    @option("action", description="The action to perform", type=str, choices=["add", "remove", "list"])
-    @option("role", description="The role to add/remove (not needed for list)", type=discord.Role, required=False)
-    async def autorole(
-        self,
-        ctx: discord.ApplicationContext,
-        action: Literal["add", "remove", "list"],
-        role: Optional[discord.Role] = None
-    ) -> None:
-        if action == "list":
-            role_ids = await self.bot.db.get_autoroles(ctx.guild.id)
+    
+    async def _check_permissions(self, ctx_or_interaction) -> bool:
+        """Check if user has required permissions"""
+        if isinstance(ctx_or_interaction, discord.Interaction):
+            guild = ctx_or_interaction.guild
+            user = ctx_or_interaction.user
+        else:  # Context
+            guild = ctx_or_interaction.guild
+            user = ctx_or_interaction.author
+            
+        if not guild or not isinstance(user, discord.Member):
+            return False
+            
+        return user.guild_permissions.manage_roles
+    
+    roles = Group(name="roles", description="Manage server roles.")
+    
+    @roles.command(name="info", description="Get information about a role.")
+    @app_commands.describe(role="The role to get information about")
+    async def role_info(self, interaction: discord.Interaction, role: discord.Role):
+        """Get information about a role."""
+        embed = discord.Embed(
+            title=f"Role Information: {role.name}",
+            color=role.color
+        )
+        
+        embed.add_field(name="ID", value=role.id, inline=True)
+        embed.add_field(name="Color", value=str(role.color), inline=True)
+        embed.add_field(name="Position", value=role.position, inline=True)
+        embed.add_field(name="Mentionable", value=role.mentionable, inline=True)
+        embed.add_field(name="Hoisted", value=role.hoist, inline=True)
+        embed.add_field(name="Members", value=len(role.members), inline=True)
+        embed.add_field(name="Created", value=discord.utils.format_dt(role.created_at, 'R'), inline=True)
+        
+        await interaction.response.send_message(embed=embed)
+    
+    autorole = Group(name="autorole", description="Manage auto roles.")
+    
+    @autorole.command(name="add", description="Add an auto role")
+    @app_commands.describe(role="Role to add as an auto role")
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def autorole_add(self, interaction: discord.Interaction, role: discord.Role):
+        """Add an auto role."""
+        # Check if bot can manage the role
+        if not interaction.guild:
+            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
+            
+        if not interaction.guild.me.guild_permissions.manage_roles:
+            return await interaction.response.send_message("I don't have permission to manage roles!", ephemeral=True)
+        
+        if role >= interaction.guild.me.top_role:
+            return await interaction.response.send_message("I can't manage this role as it's higher than my highest role!", ephemeral=True)
+            
+        try:
+            await self.bot.db.add_autorole(interaction.guild.id, role.id)
+            await interaction.response.send_message(f"✅ Added {role.mention} as an auto role.")
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+    
+    @autorole.command(name="remove", description="Remove an auto role")
+    @app_commands.describe(role="Role to remove from auto roles")
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def autorole_remove(self, interaction: discord.Interaction, role: discord.Role):
+        """Remove an auto role."""
+        if not await self._check_permissions(interaction):
+            return await interaction.response.send_message("You need the Manage Roles permission to use this command!", ephemeral=True)
+            
+        try:
+            await self.bot.db.remove_autorole(interaction.guild, role.id)
+            await interaction.response.send_message(f"✅ Removed {role.mention} from auto roles.")
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+    
+    @autorole.command(name="list", description="List all auto roles")
+    @app_commands.guild_only()
+    async def autorole_list(self, interaction: discord.Interaction):
+        """List all auto roles."""
+        if not interaction.guild:
+            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
+            
+        try:
+            role_ids = await self.bot.db.get_autoroles(interaction.guild.id)
             if not role_ids:
-                await ctx.respond("❌ No autoroles set up!")
-                return
+                return await interaction.response.send_message("No auto roles set up!", ephemeral=True)
                 
-            roles = [ctx.guild.get_role(role_id) for role_id in role_ids]
-            roles = [role for role in roles if role]  # Filter out None/deleted roles
+            roles = [interaction.guild.get_role(role_id) for role_id in role_ids]
+            roles = [role for role in roles if role is not None]  # Filter out deleted roles
             
             embed = discord.Embed(
-                title="Autoroles",
+                title="Auto Roles",
                 description="\n".join(f"• {role.mention}" for role in roles),
                 color=discord.Color.blue()
             )
-            await ctx.respond(embed=embed)
-            return
             
-        if not role:
-            await ctx.respond("❌ Please provide a role!")
-            return
-            
-        if action == "add":
-            await self.bot.db.add_autorole(ctx.guild.id, role.id)
-            await ctx.respond(f"✅ Added {role.mention} as an autorole")
-            
-        elif action == "remove":
-            await self.bot.db.remove_autorole(ctx.guild.id, role.id)
-            await ctx.respond(f"✅ Removed {role.mention} from autoroles")    
-            
-    @slash_command(name="levelrole", description="Manage roles that are awarded at specific XP levels")
-    @commands.has_permissions(manage_roles=True)
-    @option("action", description="The action to perform", type=str, choices=["set", "delete", "list"])
-    @option("level", description="The level requirement (not needed for list)", type=int, min_value=1, required=False)
-    @option("role", description="The role to award (only needed for set)", type=discord.Role, required=False)
-    async def levelrole(
-        self,
-        ctx: discord.ApplicationContext,
-        action: Literal["set", "delete", "list"],
-        level: Optional[int] = None,
-        role: Optional[discord.Role] = None
-    ) -> None:
-        if action == "list":
-            roles = await self.bot.db.get_level_roles(ctx.guild.id)
-            if not roles:
-                await ctx.respond("❌ No level roles set up!")
-                return
-                
-            valid_roles = []
-            for role_data in roles:
-                role = ctx.guild.get_role(role_data['role_id'])
-                if role:
-                    valid_roles.append(f"Level {role_data['level']}: {role.mention}")
-            
-            if not valid_roles:
-                await ctx.respond("❌ No valid level roles found!")
-                return
+            await interaction.response.send_message(embed=embed)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+    
+    reactionrole = Group(name="reactionrole", description="Manage reaction roles.")
+    
+    @reactionrole.command(name="add", description="Add a reaction role")
+    @app_commands.describe(
+        message_id="ID of the message to add the reaction role to",
+        role="Role to give when reacting",
+        emoji="Emoji to use for the reaction"
+    )
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def reactionrole_add(self, interaction: discord.Interaction, message_id: int, role: discord.Role, emoji: str):
+        """Add a reaction role."""
+        if not interaction.guild:
+            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
 
-            embed = discord.Embed(
-                title="Level Roles",
-                description="\n".join(valid_roles),
-                color=discord.Color.blue()
-            )
-            await ctx.respond(embed=embed)
-            return
+        if not interaction.guild.me.guild_permissions.manage_roles:
+            return await interaction.response.send_message("I don't have permission to manage roles!", ephemeral=True)
+        
+        if role >= interaction.guild.me.top_role:
+            return await interaction.response.send_message("I can't manage this role as it's higher than my highest role!", ephemeral=True)
             
-        if not level and action != "list":
-            await ctx.respond("❌ Please provide a level!")
-            return
-            
-        if level is not None and level < 1:
-            await ctx.respond("❌ Level must be greater than 0!")
-            return
-            
-        if action == "set":
-            if not role:
-                await ctx.respond("❌ Please provide a role!")
-                return
-                
-            await self.bot.db.add_level_role(ctx.guild.id, level, role.id)
-            await ctx.respond(f"✅ Set {role.mention} as the reward for level {level}")
-            
-        elif action == "delete":
-            if level is not None:
-                await self.bot.db.remove_level_role(ctx.guild.id, level)
-                await ctx.respond(f"✅ Removed level {level} role reward")    
-                
-    @slash_command(name="reactionrole", description="Manage reaction roles")
-    @commands.has_permissions(manage_roles=True)
-    @option("action", description="The action to perform", type=str, choices=["add", "remove", "list"])
-    @option("message_id", description="The ID of the message to add reactions to", type=str, required=False)
-    @option("emoji", description="The emoji to use for the reaction", type=str, required=False)
-    @option("role", description="The role to give when reacted", type=discord.Role, required=False)
-    async def reactionrole(
-        self,
-        ctx: discord.ApplicationContext,
-        action: Literal["add", "remove", "list"],
-        message_id: Optional[str] = None,
-        emoji: Optional[str] = None,
-        role: Optional[discord.Role] = None
-    ) -> None:
-        if action == "list":
-            reaction_roles = await self.bot.db.get_reaction_roles(ctx.guild.id)
-            if not reaction_roles:
-                await ctx.respond("❌ No reaction roles set up!")
-                return
-                
-            embed = discord.Embed(
-                title="Reaction Roles",
-                color=discord.Color.blue()
-            )
-            
-            for rr in reaction_roles:
-                role = ctx.guild.get_role(rr['role_id'])
-                if role:
-                    embed.add_field(
-                        name=f"Message {rr['message_id']}",
-                        value=f"Emoji: {rr['emoji']}\nRole: {role.mention}",
-                        inline=True
-                    )
-                    
-            await ctx.respond(embed=embed)
-            return
-            
-        if action in ["add", "remove"] and not all([message_id, emoji]):
-            await ctx.respond("❌ Please provide message ID and emoji!")
-            return
-
-        if action == "add":
-            if not role:
-                await ctx.respond("❌ Please provide a role!")
-                return
-
-            if message_id is None:
-                await ctx.respond("❌ Please provide a message ID!")
-                return
-                
+        try:
+            message_id = int(message_id)
+            channel = interaction.channel
+            if not channel:
+                return await interaction.response.send_message("Cannot find the channel!", ephemeral=True)
+            if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.VoiceChannel)):
+                return await interaction.response.send_message("This command can only be used in text channels, threads, or voice channels!", ephemeral=True)
             try:
-                msg_id = int(message_id)
-                message = await ctx.channel.fetch_message(msg_id)
-            except (discord.NotFound, ValueError):
-                await ctx.respond("❌ Message not found!")
-                return
-                
-            if emoji is None:
-                await ctx.respond("❌ Please provide an emoji!")
-                return
-                
+                message = await channel.fetch_message(message_id)
+            except AttributeError:
+                return await interaction.response.send_message("Cannot fetch messages in this type of channel!", ephemeral=True)
+            
+            # Validate emoji
             try:
                 await message.add_reaction(emoji)
             except discord.HTTPException:
-                await ctx.respond("❌ Invalid emoji!")
-                return
-                
-            await self.bot.db.add_reaction_role(
-                ctx.guild.id,
-                str(msg_id),
-                emoji,
-                role.id
-            )
-            await ctx.respond(f"✅ Added reaction role: {emoji} → {role.mention}")
+                return await interaction.response.send_message("Invalid emoji! Please use a standard emoji or one from this server.", ephemeral=True)
             
-        elif action == "remove":
-            if message_id is not None and emoji is not None:
-                await self.bot.db.remove_reaction_role(
-                    ctx.guild.id,
-                    message_id,
-                    emoji
-                )
-                await ctx.respond("✅ Removed reaction role")
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
-        """Handle reaction role assignments"""
-        if payload.user_id == self.bot.user.id:
-            return
-            
-        reaction_role = await self.bot.db.get_reaction_role(
-            payload.guild_id,
-            str(payload.message_id),
-            str(payload.emoji)
-        )
-        
-        if not reaction_role:
-            return
-            
-        guild = self.bot.get_guild(payload.guild_id)
-        if not guild:
-            return
-            
-        member = guild.get_member(payload.user_id)
-        role = guild.get_role(reaction_role['role_id'])
-        
-        if member and role:
+            # Store in database with error handling
             try:
-                await member.add_roles(role)
-            except discord.Forbidden:
-                pass
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent) -> None:
-        """Handle reaction role removals"""
-        if payload.user_id == self.bot.user.id:
-            return
+                await self.bot.db.add_reaction_role(interaction.guild.id, message.id, str(emoji), role.id)
+            except Exception as e:
+                await message.clear_reaction(emoji)
+                raise e
             
-        reaction_role = await self.bot.db.get_reaction_role(
-            payload.guild_id,
-            str(payload.message_id),
-            str(payload.emoji)
-        )
-        
-        if not reaction_role:
-            return
+            await interaction.response.send_message(f"✅ Added reaction role:\nMessage: {message.jump_url}\nEmoji: {emoji}\nRole: {role.mention}")
             
-        guild = self.bot.get_guild(payload.guild_id)
-        if not guild:
-            return
+        except ValueError:
+            await interaction.response.send_message("Invalid message ID!", ephemeral=True)
+        except discord.NotFound:
+            await interaction.response.send_message("Message not found! Make sure you're using this command in the same channel as the message.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("I don't have permission to add reactions to that message!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+    
+    @reactionrole.command(name="remove", description="Remove a reaction role")
+    @app_commands.describe(
+        message_id="ID of the message to remove the reaction role from",
+        emoji="Emoji of the reaction role to remove"
+    )
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def reactionrole_remove(self, interaction: discord.Interaction, message_id: int, emoji: str):
+        """Remove a reaction role."""
+        if not await self._check_permissions(interaction):
+            return await interaction.response.send_message("You need the Manage Roles permission to use this command!", ephemeral=True)
             
-        member = guild.get_member(payload.user_id)
-        role = guild.get_role(reaction_role['role_id'])
-        
-        if member and role:
+        try:
+            message_id = int(message_id)
+            channel = interaction.channel
+            if not channel or not isinstance(channel, (discord.TextChannel, discord.Thread, discord.VoiceChannel)):
+                return await interaction.response.send_message("This command can only be used in text channels, threads, or voice channels!", ephemeral=True)
+            
             try:
-                await member.remove_roles(role)
-            except discord.Forbidden:
-                pass
-
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member) -> None:
-        """Assign autoroles to new members"""
-        role_ids = await self.bot.db.get_autoroles(member.guild.id)
-        if not role_ids:
-            return
+                message = await channel.fetch_message(message_id)
+                # Remove the reaction from the message
+                await message.clear_reaction(emoji)
+            except AttributeError:
+                return await interaction.response.send_message("Cannot fetch messages in this type of channel!", ephemeral=True)
             
-        roles = [member.guild.get_role(role_id) for role_id in role_ids]
-        roles = [role for role in roles if role]  # Filter out None/deleted roles
-        
-        if roles:
-            try:
-                await member.add_roles(*roles, reason="Autorole")
-            except discord.Forbidden:
-                pass
+            # Remove from database
+            await self.bot.db.remove_reaction_role(interaction.guild, message.id, str(emoji))
+            
+            await interaction.response.send_message(f"✅ Removed reaction role from {message.jump_url}")
+        except ValueError:
+            await interaction.response.send_message("Invalid message ID!", ephemeral=True)
+        except discord.NotFound:
+            await interaction.response.send_message("Message not found! Make sure you're using this command in the same channel as the message.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
 
-def setup(bot):
-    bot.add_cog(Roles(bot))
+async def setup(bot):
+    await bot.add_cog(RolesCog(bot))

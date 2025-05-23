@@ -1,148 +1,192 @@
-import json
-from typing import Optional
+from typing import Literal, Optional
 import discord
+from discord import app_commands
 from discord.ext import commands
-from discord.commands import slash_command, option
+from discord.app_commands import Choice, command
 
-class Config(commands.Cog):
-    """Configuration commands for the bot"""
+class ConfigCog(commands.Cog):
+    """Cog for managing bot and server settings"""
     
     def __init__(self, bot):
         self.bot = bot
 
-    @slash_command(name="config")
-    async def config_base(self, ctx: discord.ApplicationContext):
-        """Base config command - shows available configuration options"""
-        embed = discord.Embed(
-            title="Server Configuration",
-            description="Available configuration commands:",
-            color=discord.Color.blue()
-        )
-        embed.add_field(
-            name="/config setlog",
-            value="Set the logging channel",
-            inline=False
-        )
-        embed.add_field(
-            name="/config setwhisper",
-            value="Set the whisper ticket channel",
-            inline=False
-        )
-        embed.add_field(
-            name="/config setstaff",
-            value="Set staff role for whisper access",
-            inline=False
-        )
-        embed.add_field(
-            name="/config setxp",
-            value="Configure XP settings",
-            inline=False
-        )
-        embed.add_field(
-            name="/config setlogoptions",
-            value="Configure logging options",
-            inline=False
-        )
-        await ctx.respond(embed=embed)    
+    @app_commands.command(name="config", description="Configure server settings.")
+    @app_commands.guild_only()
+    @app_commands.choices(setting=[
+        Choice(name="Set Prefix", value="prefix"),
+        Choice(name="Set Language", value="language"),
+        Choice(name="Set Mod Role", value="mod_role"),
+        Choice(name="Set Whisper Channel", value="whisper_channel")
+    ])
+    @app_commands.describe(value="The new value for the setting")
+    async def config(self, interaction: discord.Interaction, 
+                    setting: Literal["prefix", "language", "mod_role", "whisper_channel"],
+                    value: str):
+        """Configure server settings."""
         
-    @slash_command(name="setlog")
-    @commands.has_permissions(administrator=True)
-    @option("channel", description="The channel to set for logging", type=discord.TextChannel)
-    async def setlog(
-        self,
-        ctx: discord.ApplicationContext,
-        channel: discord.TextChannel
-    ):
-        """Set the logging channel for the server"""
-        await self.bot.db.set_logging_settings(
-            ctx.guild.id,
-            channel.id,
-            "{}"  # Default empty options
-        )
-        await ctx.respond(f"✅ Logging channel set to {channel.mention}")    
-        
-    @slash_command(name="setwhisper")
-    @commands.has_permissions(administrator=True)
-    @option("channel", description="The channel to use for whisper tickets", type=discord.TextChannel)
-    async def setwhisper(
-        self,
-        ctx: discord.ApplicationContext,
-        channel: discord.TextChannel
-    ):
-        """Set the whisper ticket channel"""
-        await self.bot.db.set_whisper_settings(
-            ctx.guild.id,
-            channel.id
-        )
-        await ctx.respond(f"✅ Whisper ticket channel set to {channel.mention}")    
-    
-    @slash_command(name="setstaff")
-    @commands.has_permissions(administrator=True)
-    @option("role", description="The role that can access whisper tickets", type=discord.Role)
-    async def setstaff(
-        self,
-        ctx: discord.ApplicationContext,
-        role: discord.Role
-    ):
-        """Set the staff role for whisper ticket access"""
-        await self.bot.db.set_staff_role(
-            ctx.guild.id,
-            role.id
-        )
-        await ctx.respond(f"✅ Staff role set to {role.mention}")    
-        
-    @slash_command(name="setxp")
-    @commands.has_permissions(administrator=True)
-    @option("cooldown", description="Cooldown between XP gains in seconds", type=int, min_value=0, max_value=3600)
-    @option("min_xp", description="Minimum XP gained per message", type=int, min_value=1, max_value=100)
-    @option("max_xp", description="Maximum XP gained per message", type=int, min_value=1, max_value=100)
-    async def setxp(
-        self,
-        ctx: discord.ApplicationContext,
-        cooldown: int,
-        min_xp: int,
-        max_xp: int
-    ):
-        """Configure XP settings"""
-        if not (0 <= cooldown <= 3600):
-            await ctx.respond("❌ Cooldown must be between 0 and 3600 seconds")
-            return
-        
-        if not (1 <= min_xp <= 100) or not (1 <= max_xp <= 100):
-            await ctx.respond("❌ XP values must be between 1 and 100")
-            return
+        if not interaction.guild:
+            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
             
-        if min_xp > max_xp:
-            await ctx.respond("❌ Minimum XP cannot be greater than maximum XP")
-            return
-
-        await self.bot.db.set_xp_settings(
-            ctx.guild.id,
-            cooldown,
-            min_xp,
-            max_xp
-        )
-        await ctx.respond(f"✅ XP settings updated: Cooldown: {cooldown}s, Min XP: {min_xp}, Max XP: {max_xp}")    
+        # Type cast to Member since we know this is in a guild
+        member = interaction.user
+        if not isinstance(member, discord.Member) or not member.guild_permissions.administrator:
+            return await interaction.response.send_message("You need administrator permissions to use this command!", ephemeral=True)
         
-    @slash_command(name="setlogoptions")
-    @commands.has_permissions(administrator=True)
-    @option("options", description="JSON string of logging options", type=str)
-    async def setlogoptions(
-        self,
-        ctx: discord.ApplicationContext,
-        options: str
-    ):
-        """Configure logging options"""
-        try:
-            options_dict = json.loads(options)
-            await self.bot.db.set_logging_settings(
-                ctx.guild.id,
-                None,  # Don't change channel
-                json.dumps(options_dict)  # Save formatted JSON
-            )
-            await ctx.respond("✅ Logging options updated")
-        except json.JSONDecodeError:
-            await ctx.respond("❌ Invalid JSON format for options")
+        # Defer the response since we'll be doing database operations
+        await interaction.response.defer(ephemeral=True)
+        
+        try:            
+            if setting == "prefix":
+                # Validate prefix
+                if not value or len(value) > 5:
+                    return await interaction.followup.send("Prefix must be between 1 and 5 characters!", ephemeral=True)
+                if ' ' in value:
+                    return await interaction.followup.send("Prefix cannot contain spaces!", ephemeral=True)
+                
+                await self.bot.db.set_guild_setting(interaction.guild.id, "prefix", value)
+                await interaction.followup.send(f"✅ Server prefix has been set to: `{value}`", ephemeral=True)
+                
+            elif setting == "language":
+                valid_languages = ["en", "es", "fr", "de"]  # Add more as needed
+                if value.lower() not in valid_languages:
+                    return await interaction.followup.send(f"Invalid language! Valid options: {', '.join(valid_languages)}", ephemeral=True)
+                await self.bot.db.set_guild_setting(interaction.guild.id, "language", value.lower())
+                await interaction.followup.send(f"✅ Server language has been set to: `{value.lower()}`", ephemeral=True)
+                
+            elif setting == "mod_role":
+                # Try to find the role by mention, ID, or name
+                role = None
+                try:
+                    # First try to convert from mention or ID
+                    value = value.strip()
+                    if value.startswith('<@&') and value.endswith('>'):
+                        role_id = int(value[3:-1])
+                    else:
+                        role_id = int(value)
+                    role = interaction.guild.get_role(role_id)
+                except (ValueError, AttributeError):
+                    # If that fails, try to find by name
+                    role = discord.utils.get(interaction.guild.roles, name=value)
+                
+                if not role:
+                    return await interaction.followup.send("Could not find that role! Please provide a valid role mention, ID, or name.", ephemeral=True)
+                
+                # Check if the role is manageable
+                if role >= interaction.guild.me.top_role:
+                    return await interaction.followup.send("I cannot manage this role as it is higher than or equal to my highest role!", ephemeral=True)
+                
+                if role.managed:
+                    return await interaction.followup.send("This role is managed by an integration and cannot be used as a mod role!", ephemeral=True)
+                
+                await self.bot.db.set_guild_setting(interaction.guild.id, "mod_role", str(role.id))
+                await interaction.followup.send(f"✅ Moderator role has been set to: {role.mention}", ephemeral=True)
+                
+            elif setting == "whisper_channel":
+                # Try to get channel and role from the value (expects format: #channel @role)
+                try:
+                    parts = value.split()
+                    if len(parts) != 2:
+                        return await interaction.followup.send("Please provide both channel and role in format: #channel @role", ephemeral=True)
+                    
+                    # Parse channel
+                    channel_str = parts[0]
+                    if channel_str.startswith('<#') and channel_str.endswith('>'):
+                        channel_id = int(channel_str[2:-1])
+                        channel = interaction.guild.get_channel(channel_id)
+                    else:
+                        return await interaction.followup.send("Please mention a valid channel (#channel)", ephemeral=True)
+                    
+                    # Parse role
+                    role_str = parts[1]
+                    if role_str.startswith('<@&') and role_str.endswith('>'):
+                        role_id = int(role_str[3:-1])
+                        role = interaction.guild.get_role(role_id)
+                    else:
+                        return await interaction.followup.send("Please mention a valid role (@role)", ephemeral=True)
+                    
+                    if not isinstance(channel, discord.TextChannel):
+                        return await interaction.followup.send("The channel must be a text channel!", ephemeral=True)
+                    
+                    if not role:
+                        return await interaction.followup.send("Could not find the specified role!", ephemeral=True)
+                    
+                    await self.bot.db.set_whisper_channel(interaction.guild.id, channel.id, role.id)
+                    await interaction.followup.send(
+                        f"✅ Whisper configuration updated:\nChannel: {channel.mention}\nStaff Role: {role.mention}",
+                        ephemeral=True
+                    )
+                    
+                except ValueError:
+                    await interaction.followup.send("Invalid format! Use: #channel @role", ephemeral=True)
+                    
+        except Exception as e:
+            await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
-def setup(bot):
-    bot.add_cog(Config(bot))
+    @app_commands.command(name="viewsettings", description="View current bot/server config.")
+    @app_commands.guild_only()
+    async def viewsettings(self, interaction: discord.Interaction):
+        """View current server settings."""
+        
+        if not interaction.guild:
+            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
+        
+        # Defer the response since we'll be doing database operations
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # Fetch all relevant settings with default values
+            try:
+                prefix = await self.bot.db.get_guild_setting(interaction.guild.id, "prefix")
+            except:
+                prefix = "!"
+                
+            try:
+                language = await self.bot.db.get_guild_setting(interaction.guild.id, "language")
+            except:
+                language = "en"
+                
+            try:
+                mod_role_id = await self.bot.db.get_guild_setting(interaction.guild.id, "mod_role")
+                mod_role = interaction.guild.get_role(int(mod_role_id)) if mod_role_id else None
+            except:
+                mod_role = None
+            
+            embed = discord.Embed(
+                title=f"⚙️ Settings for {interaction.guild.name}",
+                color=discord.Color.blue()
+            )
+            
+            # Add fields with proper formatting and error handling
+            embed.add_field(
+                name="Prefix",
+                value=f"`{prefix}`" if prefix else "`!` (default)",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="Language",
+                value=(language or "en").upper(),
+                inline=True
+            )
+            
+            if mod_role and not mod_role.managed and mod_role < interaction.guild.me.top_role:
+                embed.add_field(name="Mod Role", value=mod_role.mention, inline=True)
+            else:
+                embed.add_field(name="Mod Role", value="Not set", inline=True)
+            
+            if interaction.guild.icon:
+                try:
+                    embed.set_thumbnail(url=interaction.guild.icon.url)
+                except:
+                    pass  # Ignore if setting thumbnail fails
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            await interaction.followup.send(
+                "❌ An error occurred while fetching settings. Please try again later.",
+                ephemeral=True
+            )
+
+async def setup(bot):
+    await bot.add_cog(ConfigCog(bot))
