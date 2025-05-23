@@ -41,11 +41,14 @@ class WhisperBot(commands.Bot):
     
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents, application_id=APPLICATION_ID)
-        self.session = aiohttp.ClientSession()
+        self.session: Optional[aiohttp.ClientSession] = None
         self.db: Optional[DBManager] = None
 
     async def setup_hook(self):
         """Called when the bot is starting up"""
+        # Create aiohttp session
+        self.session = aiohttp.ClientSession()
+        
         data_dir = Path("./data")
         data_dir.mkdir(exist_ok=True)
 
@@ -104,7 +107,7 @@ class WhisperBot(commands.Bot):
             await self.db.close()
 
         # Close aiohttp session if exists and open
-        if hasattr(self, "session") and not self.session.closed:
+        if self.session is not None and not self.session.closed:
             await self.session.close()
 
         # Wait for all pending tasks to complete (optional)
@@ -159,8 +162,11 @@ def shutdown_handler(*_):
     shutdown_task = asyncio.create_task(bot.close())
 
 def main():
+    if not DISCORD_TOKEN:
+        raise ValueError("DISCORD_TOKEN is not set in the environment variables.")
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    bot = WhisperBot()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -169,7 +175,7 @@ def main():
             signal.signal(sig, lambda s, f: asyncio.create_task(bot.close()))
 
     try:
-        loop.run_until_complete(bot.start(DISCORD_TOKEN)) # type: ignore
+        loop.run_until_complete(bot.start(DISCORD_TOKEN))
     except KeyboardInterrupt:
         log.info("Keyboard interrupt received.")
     finally:
