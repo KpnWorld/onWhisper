@@ -23,6 +23,7 @@ logs/
 
 # Ignore database files and directory
 db/
+data/
 *.db
 *.sqlite
 *.sqlite3
@@ -35,3 +36,5 @@ upm/
 
 # Ignore Requirements.txt
 requirements.txt
+data/database.db-shm
+data/database.db-wal
