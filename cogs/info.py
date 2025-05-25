@@ -10,7 +10,7 @@ class InfoCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
-    @app_commands.command(name="info", description="Get various types of information.")
+    @app_commands.command(name="info")
     @app_commands.describe(type="Type of info to retrieve")
     @app_commands.choices(type=[
         Choice(name="Server", value="server"),
@@ -24,38 +24,66 @@ class InfoCog(commands.Cog):
                   role: Optional[discord.Role] = None,
                   channel: Optional[discord.TextChannel] = None,
                   user: Optional[discord.User] = None):
-        """Get various types of information."""
+        """Get detailed information."""
         
         if not interaction.guild:
             return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
             
         embed = discord.Embed(color=discord.Color.blue())
         
-        if type == "server":            
-            embed.title = f"📊 {interaction.guild.name} Info"
-            embed.description = interaction.guild.description or "No description set"
-            # Handle case where owner might be None
-            owner_value = interaction.guild.owner.mention if interaction.guild.owner else "Unknown"
-            embed.add_field(name="Owner", value=owner_value, inline=True)
-            embed.add_field(name="Created", value=discord.utils.format_dt(interaction.guild.created_at, 'R'), inline=True)
-            embed.add_field(name="Members", value=str(interaction.guild.member_count), inline=True)
+        if type == "server":
+            guild = interaction.guild
+            embed.title = f"📊 {guild.name} Info"
             
-        # Set thumbnail if icon exists
-        if interaction.guild.icon:
-            embed.set_thumbnail(url=interaction.guild.icon.url)
+            # Basic Info
+            embed.add_field(name="Owner", value=guild.owner.mention if guild.owner else "Unknown", inline=True)
+            embed.add_field(name="Created", value=discord.utils.format_dt(guild.created_at, 'R'), inline=True)
+            
+            # Member Stats
+            member_count = guild.member_count or len(guild.members)
+            bot_count = sum(1 for m in guild.members if m.bot)
+            human_count = member_count - bot_count
+            embed.add_field(name="Members", value=f"Total: {member_count:,}\nHumans: {human_count:,}\nBots: {bot_count:,}", inline=True)
+            
+            # Channel Stats
+            text_channels = len(guild.text_channels)
+            voice_channels = len(guild.voice_channels)
+            categories = len(guild.categories)
+            embed.add_field(name="Channels", value=f"Text: {text_channels}\nVoice: {voice_channels}\nCategories: {categories}", inline=True)
+            
+            # Role Stats
+            embed.add_field(name="Roles", value=f"Total: {len(guild.roles)}", inline=True)
+            
+            # Server Features
+            features = "\n".join(f"✓ {feature.replace('_', ' ').title()}" for feature in guild.features) or "None"
+            embed.add_field(name="Features", value=features, inline=False)
+            
+            if guild.icon:
+                embed.set_thumbnail(url=guild.icon.url)
 
         elif type == "bot":
             if not self.bot.user:
                 return await interaction.response.send_message("Bot is not fully initialized yet.", ephemeral=True)
-
-            embed.title = f"🤖 {self.bot.user.name} Info"
-            embed.add_field(name="Guilds", value=str(len(self.bot.guilds)), inline=True)
-            embed.add_field(name="Commands", value=str(len(self.bot.tree.get_commands())), inline=True)
+                
+            total_members = sum(g.member_count or 0 for g in self.bot.guilds)
+            embed.title = f"🤖 {self.bot.user.name} Statistics"
+            
+            # Basic Stats
+            embed.add_field(name="Servers", value=f"{len(self.bot.guilds):,}", inline=True)
+            embed.add_field(name="Members", value=f"{total_members:,}", inline=True)
+            embed.add_field(name="Commands", value=f"{len(self.bot.tree.get_commands()):,}", inline=True)
+            
+            # Performance
             embed.add_field(name="Latency", value=f"{round(self.bot.latency * 1000)}ms", inline=True)
+            embed.add_field(name="Version", value="1.0.0", inline=True)  # Add your version number
+            
+            # Cog Stats
+            cog_list = "\n".join(f"✓ {name}" for name in self.bot.cogs)
+            embed.add_field(name=f"Loaded Cogs ({len(self.bot.cogs)})", value=cog_list or "None", inline=False)
             
             if self.bot.user.avatar:
                 embed.set_thumbnail(url=self.bot.user.display_avatar.url)
-            
+
         elif type == "role":
             if not role:
                 return await interaction.response.send_message("Please specify a role!", ephemeral=True)
@@ -82,29 +110,46 @@ class InfoCog(commands.Cog):
         elif type == "user":            
             target = user or interaction.user
             member = interaction.guild.get_member(target.id)
-            embed.title = f"👤 User Info: {target}"
             
-            # Set thumbnail if avatar exists
-            if target.avatar:
-                embed.set_thumbnail(url=target.display_avatar.url)
-                
-            embed.add_field(name="ID", value=str(target.id), inline=True)
-            embed.add_field(name="Created", value=discord.utils.format_dt(target.created_at, 'R'), inline=True)
+            embed.title = f"👤 User Information"
+            embed.colour = member.color if member else discord.Color.blue()
+            
+            # Basic Info
+            embed.add_field(name="Username", value=str(target), inline=True)
+            embed.add_field(name="ID", value=target.id, inline=True)
+            embed.add_field(name="Bot", value="Yes" if target.bot else "No", inline=True)
+            
+            # Timestamps
+            embed.add_field(name="Account Created", value=discord.utils.format_dt(target.created_at, 'R'), inline=True)
+            if member and member.joined_at:
+                embed.add_field(name="Joined Server", value=discord.utils.format_dt(member.joined_at, 'R'), inline=True)
             
             if member:
-                if member.joined_at:
-                    embed.add_field(name="Joined", value=discord.utils.format_dt(member.joined_at, 'R'), inline=True)
+                # Role Info
+                roles = [role.mention for role in reversed(member.roles[1:])]  # Skip @everyone
+                embed.add_field(name=f"Roles ({len(roles)})", value=" ".join(roles) or "None", inline=False)
                 
-                # Add top role only if the member has roles beyond @everyone
-                if len(member.roles) > 1:
-                    embed.add_field(name="Top Role", value=member.top_role.mention, inline=True)
+                # Permissions
+                key_perms = []
+                if member.guild_permissions.administrator:
+                    key_perms.append("Administrator")
+                if member.guild_permissions.manage_guild:
+                    key_perms.append("Manage Server")
+                if member.guild_permissions.manage_roles:
+                    key_perms.append("Manage Roles")
+                if member.guild_permissions.manage_channels:
+                    key_perms.append("Manage Channels")
+                if member.guild_permissions.manage_messages:
+                    key_perms.append("Manage Messages")
                 
-                # Set color if member has a color role
-                if member.color != discord.Color.default():
-                    embed.color = member.color
+                if key_perms:
+                    embed.add_field(name="Key Permissions", value="\n".join(key_perms), inline=False)
                 
+                # Boost Status
                 if member.premium_since:
                     embed.add_field(name="Boosting Since", value=discord.utils.format_dt(member.premium_since, 'R'), inline=True)
+            
+            embed.set_thumbnail(url=target.display_avatar.url)
         
         await interaction.response.send_message(embed=embed)
 
