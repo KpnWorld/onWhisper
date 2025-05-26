@@ -359,8 +359,8 @@ class LevelingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if (not message.guild or message.author.bot or 
-            isinstance(message.channel, discord.TextChannel) or
-            not isinstance(message.author, discord.Member)):  # Add proper type check
+            not isinstance(message.channel, discord.TextChannel) or  # Changed this condition
+            not isinstance(message.author, discord.Member)):
             return
 
         try:
