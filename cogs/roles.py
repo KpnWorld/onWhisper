@@ -113,32 +113,33 @@ class RolesCog(commands.Cog):
     
     @reactionrole.command(name="add", description="Add a reaction role")
     @app_commands.describe(
-        message_id="ID of the message to add the reaction role to",
+        message_id="ID of the message to add reaction role to (Right click message -> Copy ID)",
         role="Role to give when reacting",
-        emoji="Emoji to use for the reaction"
+        emoji="Emoji to use for the reaction (Unicode emoji or custom emoji)"
     )
-    @app_commands.guild_only()
-    @app_commands.checks.has_permissions(manage_roles=True)
-    async def reactionrole_add(self, interaction: discord.Interaction, message_id: int, role: discord.Role, emoji: str):
-        """Add a reaction role."""
-        if not interaction.guild:
-            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
-
-        if not interaction.guild.me.guild_permissions.manage_roles:
-            return await interaction.response.send_message("I don't have permission to manage roles!", ephemeral=True)
-        
-        if role >= interaction.guild.me.top_role:
-            return await interaction.response.send_message("I can't manage this role as it's higher than my highest role!", ephemeral=True)
-            
+    async def reactionrole_add(self, interaction: discord.Interaction, message_id: str, role: discord.Role, emoji: str):
         try:
-            message_id = int(message_id)
+            msg_id = int(message_id)  # Convert string to int
+            
+            if not interaction.guild:
+                return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
+
+            if not interaction.guild.me.guild_permissions.manage_roles:
+                return await interaction.response.send_message("I don't have permission to manage roles!", ephemeral=True)
+            
+            if role >= interaction.guild.me.top_role:
+                return await interaction.response.send_message("I can't manage this role as it's higher than my highest role!", ephemeral=True)
+                
             channel = interaction.channel
             if not channel:
                 return await interaction.response.send_message("Cannot find the channel!", ephemeral=True)
             if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.VoiceChannel)):
                 return await interaction.response.send_message("This command can only be used in text channels, threads, or voice channels!", ephemeral=True)
+                
             try:
-                message = await channel.fetch_message(message_id)
+                message = await channel.fetch_message(msg_id)
+            except discord.NotFound:
+                return await interaction.response.send_message("Message not found! Make sure you're using this command in the same channel as the message.", ephemeral=True)
             except AttributeError:
                 return await interaction.response.send_message("Cannot fetch messages in this type of channel!", ephemeral=True)
             

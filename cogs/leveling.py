@@ -90,11 +90,20 @@ class LevelingCog(commands.Cog):
                 color=target.color if isinstance(target, discord.Member) else discord.Color.blue()
             )
             
+            # Add basic level info
             embed.add_field(
                 name=f"Level {current_level}",
                 value=f"XP: {current_xp:,}/{next_level_xp:,}\n{progress_bar} {progress_percentage:.1f}%",
                 inline=False
             )
+            
+            # Add last message XP gain info if available
+            if 'last_xp_gain' in xp_data and 'last_message' in xp_data:
+                embed.add_field(
+                    name="Last XP Gain",
+                    value=f"+{xp_data['last_xp_gain']} XP\n```{xp_data['last_message']}```",
+                    inline=False
+                )
             
             # Add rank info
             leaderboard = await self.bot.db.get_leaderboard(interaction.guild.id)
@@ -176,9 +185,7 @@ class LevelingCog(commands.Cog):
     levelconfig = app_commands.Group(name="levelconfig", description="Configure leveling system.")
     
     @levelconfig.command(name="cooldown", description="Set XP cooldown time.")
-    @app_commands.guild_only()
-    @app_commands.describe(seconds="Cooldown time in seconds")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(seconds="Cooldown time in seconds (0-3600)")
     async def set_cooldown(self, interaction: discord.Interaction, seconds: int):
         """Set the cooldown between XP gains."""
         if not interaction.guild:
@@ -188,8 +195,8 @@ class LevelingCog(commands.Cog):
         if not member.guild_permissions.manage_guild:
             return await interaction.response.send_message("You need the Manage Server permission to use this command!", ephemeral=True)
             
-        if seconds < 0:
-            return await interaction.response.send_message("Cooldown cannot be negative!", ephemeral=True)
+        if seconds < 0 or seconds > 3600:  # 1 hour max
+            return await interaction.response.send_message("Cooldown must be between 0 and 3600 seconds!", ephemeral=True)
             
         try:
             # Get current config
@@ -215,12 +222,10 @@ class LevelingCog(commands.Cog):
             await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
     
     @levelconfig.command(name="xprange", description="Set XP min/max range.")
-    @app_commands.guild_only()
     @app_commands.describe(
-        min_xp="Minimum XP per message",
-        max_xp="Maximum XP per message"
+        min_xp="Minimum XP per message (1-100)",
+        max_xp="Maximum XP per message (1-100)"
     )
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def set_xprange(self, interaction: discord.Interaction, min_xp: int, max_xp: int):
         """Set the XP range for messages."""
         
@@ -231,8 +236,8 @@ class LevelingCog(commands.Cog):
         if not member.guild_permissions.manage_guild:
             return await interaction.response.send_message("You need the Manage Server permission to use this command!", ephemeral=True)
             
-        if min_xp < 0 or max_xp < 0:
-            return await interaction.response.send_message("XP values cannot be negative!", ephemeral=True)
+        if min_xp < 1 or min_xp > 100 or max_xp < 1 or max_xp > 100:
+            return await interaction.response.send_message("XP values must be between 1 and 100!", ephemeral=True)
             
         if min_xp > max_xp:
             return await interaction.response.send_message("Minimum XP cannot be greater than maximum XP!", ephemeral=True)
@@ -358,30 +363,34 @@ class LevelingCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if (not message.guild or message.author.bot or 
-            not isinstance(message.channel, discord.TextChannel) or  # Changed this condition
-            not isinstance(message.author, discord.Member)):
+        # Only process messages in guilds, from non-bots, in text channels
+        if (not message.guild or 
+            message.author.bot or 
+            not isinstance(message.author, discord.Member) or
+            not isinstance(message.channel, (discord.TextChannel, discord.Thread))):
             return
 
         try:
-            # Get XP data to check cooldown
+            # Get XP data and config
             xp_data = await self.bot.db.get_user_xp(message.guild.id, message.author.id)
+            config = await self.bot.db.get_level_config(message.guild.id)
+
+            # Use default config values if none exist
+            if not config:
+                config = {
+                    'cooldown': 60,
+                    'min_xp': 15,
+                    'max_xp': 25
+                }
+
+            # Check cooldown
+            current_time = time.time()
             if xp_data and xp_data.get('last_message_ts'):
-                config = await self.bot.db.get_level_config(message.guild.id)
-                if not config:
-                    return
-                
-                # Check cooldown using timestamp
                 last_time = float(xp_data['last_message_ts'])
-                current_time = time.time()
                 if current_time - last_time < config['cooldown']:
                     return
 
-            # Calculate and add XP
-            config = await self.bot.db.get_level_config(message.guild.id)
-            if not config:
-                return
-                
+            # Calculate XP gain and new totals
             xp_gain = random.randint(config['min_xp'], config['max_xp'])
             current_xp = xp_data['xp'] if xp_data else 0
             current_level = xp_data['level'] if xp_data else 0
@@ -389,13 +398,22 @@ class LevelingCog(commands.Cog):
             new_xp = current_xp + xp_gain
             new_level = self._calculate_level(new_xp)
             
-            await self.bot.db.update_user_xp(message.guild.id, message.author.id, new_xp, new_level)
+            # Update the database with new values including last message
+            await self.bot.db.update_user_xp_with_message(
+                message.guild.id,
+                message.author.id,
+                new_xp,
+                new_level,
+                xp_gain,
+                message.content[:100]  # Store first 100 chars of message
+            )
             
+            # Handle level up if needed
             if new_level > current_level:
                 await self._handle_level_up(message.guild, message.author, new_level)
                 
         except Exception as e:
-            print(f"Error in XP handling: {e}")
+            self.bot.logger.error(f"Error in XP handling: {e}", exc_info=True)
 
     async def _handle_level_up(self, guild: discord.Guild, member: discord.Member, new_level: int):
         """Handle level up rewards and notifications."""

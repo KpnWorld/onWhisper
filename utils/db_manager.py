@@ -271,6 +271,18 @@ class DBManager:
                 SET xp = ?, level = ?, last_message_ts = CURRENT_TIMESTAMP
             """, (guild_id, user_id, xp, level, xp, level))
             
+    async def update_user_xp_with_message(self, guild_id: int, user_id: int, xp: int, level: int, xp_gain: int, message: str):
+        """Update user's XP and level with last message info"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO xp (guild_id, user_id, xp, level, last_message_ts, last_xp_gain, last_message)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE 
+                SET xp = ?, level = ?, last_message_ts = CURRENT_TIMESTAMP,
+                    last_xp_gain = ?, last_message = ?
+            """, (guild_id, user_id, xp, level, xp_gain, message, 
+                  xp, level, xp_gain, message))
+
     async def get_user_xp(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
         """Get a user's XP and level information"""
         async with self.connection.execute(

@@ -119,12 +119,20 @@ class ModerationCog(commands.Cog):
     
     @commands.guild_only()
     @commands.hybrid_command(name="timeout", description="Timeout a member temporarily.")
-    @app_commands.describe(user="User to timeout", duration="Duration in minutes", reason="Reason for the timeout")
+    @app_commands.describe(
+        user="User to timeout",
+        duration="Duration in minutes (1-40320)", # 28 days max
+        reason="Reason for the timeout"
+    )
     async def timeout(self, ctx: commands.Context, user: discord.Member, duration: int, *, reason: str = "No reason provided"):
         """Timeout a member temporarily."""
         
         if not await self._check_mod_permissions(ctx.interaction if hasattr(ctx, 'interaction') else ctx):
             return await ctx.send("You don't have permission to use this command!", ephemeral=True)
+            
+        # Add bounds checking for duration
+        if duration < 1 or duration > 40320:  # 28 days in minutes
+            return await ctx.send("Duration must be between 1 minute and 28 days!", ephemeral=True)
             
         try:
             until = datetime.utcnow() + timedelta(minutes=duration)
@@ -202,7 +210,7 @@ class ModerationCog(commands.Cog):
     
     @commands.guild_only()
     @commands.hybrid_command(name="purge", description="Delete a number of messages.")
-    @app_commands.describe(amount="Number of messages to delete")
+    @app_commands.describe(amount="Number of messages to delete (1-1000)")
     async def purge(self, ctx: commands.Context, amount: int):
         """Delete a number of messages."""
         
@@ -212,6 +220,10 @@ class ModerationCog(commands.Cog):
         if not isinstance(ctx.channel, discord.TextChannel):
             return await ctx.send("This command can only be used in text channels!", ephemeral=True)
             
+        # Add bounds checking for amount
+        if amount < 1 or amount > 1000:
+            return await ctx.send("Please provide a number between 1 and 1000.", ephemeral=True)
+
         try:
             deleted = await ctx.channel.purge(limit=amount + 1)  # +1 to include command message
             await ctx.send(f"✨ Deleted {len(deleted) - 1} messages.", ephemeral=True)
