@@ -109,18 +109,48 @@ class ConfigCog(commands.Cog):
                     
                     if not role:
                         return await interaction.followup.send("Could not find the specified role!", ephemeral=True)
+
+                    # Check bot permissions in the channel
+                    bot_perms = channel.permissions_for(interaction.guild.me)
+                    if not (bot_perms.send_messages and bot_perms.create_private_threads):
+                        return await interaction.followup.send("I need permissions to send messages and create private threads in that channel!", ephemeral=True)
                     
-                    await self.bot.db.set_whisper_channel(interaction.guild.id, channel.id, role.id)
+                    # Save both settings
+                    await self.bot.db.set_whisper_settings(
+                        interaction.guild.id,
+                        {
+                            'channel_id': channel.id,
+                            'staff_role_id': role.id,
+                        }
+                    )
+
+                    # Also save the mod role for consistency
+                    await self.bot.db.set_guild_setting(interaction.guild.id, "mod_role", str(role.id))
+                    
+                    # Send success message with mention of both channel and role
                     await interaction.followup.send(
-                        f"✅ Whisper configuration updated:\nChannel: {channel.mention}\nStaff Role: {role.mention}",
+                        f"✅ Whisper configuration updated:\n"
+                        f"Channel: {channel.mention}\n"
+                        f"Staff Role: {role.mention}\n"
+                        f"This role will be able to see and manage whisper threads.",
                         ephemeral=True
                     )
                     
                 except ValueError:
                     await interaction.followup.send("Invalid format! Use: #channel @role", ephemeral=True)
-                    
+                except Exception as e:
+                    await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+
+        except discord.Forbidden:
+            await interaction.followup.send("❌ I don't have the required permissions to perform this action!", ephemeral=True)
+        except discord.HTTPException as e:
+            await interaction.followup.send(f"❌ Failed to communicate with Discord: {str(e)}", ephemeral=True)
+        except ValueError as e:
+            await interaction.followup.send(f"❌ Invalid value: {str(e)}", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ An unexpected error occurred: {str(e)}", ephemeral=True)
+            # Log the error
+            self.bot.logger.error(f"Error in config command: {str(e)}", exc_info=True)
 
     @app_commands.command(name="viewsettings", description="View current bot/server config.")
     @app_commands.guild_only()
