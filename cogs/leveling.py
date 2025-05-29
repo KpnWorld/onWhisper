@@ -44,6 +44,7 @@ class LevelingCog(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
+        self.log = bot.get_logger("LevelingCog")
         self.xp_cooldowns = {}
         
     def _calculate_level(self, xp: int) -> int:
@@ -117,7 +118,8 @@ class LevelingCog(commands.Cog):
             await interaction.response.send_message(embed=embed)
             
         except Exception as e:
-            await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
+            self.log.error(f"Error in level command: {e}", exc_info=True)
+            await interaction.response.send_message("❌ An unexpected error occurred.", ephemeral=True)
     
     async def display_leaderboard(self, interaction: discord.Interaction, page: int = 1):
         """Handle leaderboard display logic."""
@@ -413,7 +415,7 @@ class LevelingCog(commands.Cog):
                 await self._handle_level_up(message.guild, message.author, new_level)
                 
         except Exception as e:
-            self.bot.logger.error(f"Error in XP handling: {e}", exc_info=True)
+            self.log.error(f"Error handling XP gain: {e}", exc_info=True)
 
     async def _handle_level_up(self, guild: discord.Guild, member: discord.Member, new_level: int):
         """Handle level up rewards and notifications."""
@@ -447,7 +449,7 @@ class LevelingCog(commands.Cog):
                     pass
                     
         except Exception as e:
-            print(f"Error in level up handling: {e}")
+            self.log.error(f"Error handling level up: {e}", exc_info=True)
 
     @levelconfig.command(name="reset", description="Reset a user's XP and level.")
     @app_commands.guild_only()

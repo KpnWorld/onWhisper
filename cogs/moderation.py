@@ -9,6 +9,7 @@ class ModerationCog(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
+        self.log = bot.get_logger("ModerationCog")  # Get logger from bot
     
     async def _check_mod_permissions(self, ctx_or_interaction) -> bool:
         """Check if user has mod permissions"""
@@ -76,10 +77,12 @@ class ModerationCog(commands.Cog):
             
             await ctx.send(embed=embed)
             
-        except discord.Forbidden:
+        except discord.Forbidden as e:
+            self.log.warning(f"Permission error in ban command: {e}")
             await ctx.send("I don't have permission to ban that user!", ephemeral=True)
         except Exception as e:
-            await ctx.send(f"An error occurred: {str(e)}", ephemeral=True)
+            self.log.error(f"Error in ban command: {e}", exc_info=True)
+            await ctx.send("❌ An unexpected error occurred.", ephemeral=True)
     
     @commands.guild_only()
     @commands.hybrid_command(name="kick", description="Kick a member from the server.")

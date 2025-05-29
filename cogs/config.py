@@ -9,6 +9,7 @@ class ConfigCog(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
+        self.log = bot.get_logger("ConfigCog")  # Get logger from bot
 
     @app_commands.command(name="config", description="Configure server settings.")
     @app_commands.guild_only()
@@ -115,42 +116,36 @@ class ConfigCog(commands.Cog):
                     if not (bot_perms.send_messages and bot_perms.create_private_threads):
                         return await interaction.followup.send("I need permissions to send messages and create private threads in that channel!", ephemeral=True)
                     
-                    # Save both settings
-                    await self.bot.db.set_whisper_settings(
+                    # Use centralized method to save whisper settings
+                    await self._save_whisper_settings(
                         interaction.guild.id,
-                        {
-                            'channel_id': channel.id,
-                            'staff_role_id': role.id,
-                        }
+                        channel.id,
+                        role.id
                     )
 
                     # Also save the mod role for consistency
                     await self.bot.db.set_guild_setting(interaction.guild.id, "mod_role", str(role.id))
                     
-                    # Send success message with mention of both channel and role
                     await interaction.followup.send(
                         f"✅ Whisper configuration updated:\n"
                         f"Channel: {channel.mention}\n"
-                        f"Staff Role: {role.mention}\n"
-                        f"This role will be able to see and manage whisper threads.",
+                        f"Staff Role: {role.mention}",
                         ephemeral=True
                     )
                     
-                except ValueError:
+                except ValueError as ve:
+                    self.log.warning(f"Invalid whisper config format: {str(ve)}")
                     await interaction.followup.send("Invalid format! Use: #channel @role", ephemeral=True)
                 except Exception as e:
+                    self.log.error(f"Error setting whisper config: {str(e)}", exc_info=True)
                     await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
-        except discord.Forbidden:
+        except discord.Forbidden as e:
+            self.log.error(f"Permission error in config command: {str(e)}")
             await interaction.followup.send("❌ I don't have the required permissions to perform this action!", ephemeral=True)
-        except discord.HTTPException as e:
-            await interaction.followup.send(f"❌ Failed to communicate with Discord: {str(e)}", ephemeral=True)
-        except ValueError as e:
-            await interaction.followup.send(f"❌ Invalid value: {str(e)}", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"❌ An unexpected error occurred: {str(e)}", ephemeral=True)
-            # Log the error
-            self.bot.logger.error(f"Error in config command: {str(e)}", exc_info=True)
+            self.log.error(f"Unexpected error in config command: {str(e)}", exc_info=True)
+            await interaction.followup.send("❌ An unexpected error occurred. Please try again later.", ephemeral=True)
 
     @app_commands.command(name="viewsettings", description="View current bot/server config.")
     @app_commands.guild_only()
@@ -164,59 +159,66 @@ class ConfigCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            # Fetch all relevant settings with default values
-            try:
-                prefix = await self.bot.db.get_guild_setting(interaction.guild.id, "prefix")
-            except:
-                prefix = "!"
-                
-            try:
-                language = await self.bot.db.get_guild_setting(interaction.guild.id, "language")
-            except:
-                language = "en"
-                
-            try:
-                mod_role_id = await self.bot.db.get_guild_setting(interaction.guild.id, "mod_role")
-                mod_role = interaction.guild.get_role(int(mod_role_id)) if mod_role_id else None
-            except:
-                mod_role = None
-            
-            embed = discord.Embed(
-                title=f"⚙️ Settings for {interaction.guild.name}",
-                color=discord.Color.blue()
-            )
-            
-            # Add fields with proper formatting and error handling
-            embed.add_field(
-                name="Prefix",
-                value=f"`{prefix}`" if prefix else "`!` (default)",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="Language",
-                value=(language or "en").upper(),
-                inline=True
-            )
-            
-            if mod_role and not mod_role.managed and mod_role < interaction.guild.me.top_role:
-                embed.add_field(name="Mod Role", value=mod_role.mention, inline=True)
-            else:
-                embed.add_field(name="Mod Role", value="Not set", inline=True)
-            
-            if interaction.guild.icon:
-                try:
-                    embed.set_thumbnail(url=interaction.guild.icon.url)
-                except:
-                    pass  # Ignore if setting thumbnail fails
-            
+            settings = await self._fetch_all_settings(interaction.guild.id)
+            embed = self._create_settings_embed(interaction.guild, settings)
             await interaction.followup.send(embed=embed, ephemeral=True)
             
         except Exception as e:
+            self.log.error(f"Error in viewsettings: {str(e)}", exc_info=True)
             await interaction.followup.send(
                 "❌ An error occurred while fetching settings. Please try again later.",
                 ephemeral=True
             )
+
+    async def _save_whisper_settings(self, guild_id: int, channel_id: int, role_id: int) -> None:
+        """Helper method to save whisper settings consistently"""
+        await self.bot.db.set_whisper_channel(guild_id, channel_id, role_id)
+
+    async def _fetch_all_settings(self, guild_id: int) -> dict:
+        """Helper method to fetch all settings"""
+        settings = {}
+        try:
+            settings['prefix'] = await self.bot.db.get_guild_setting(guild_id, "prefix") or "!"
+            settings['language'] = await self.bot.db.get_guild_setting(guild_id, "language") or "en"
+            settings['mod_role_id'] = await self.bot.db.get_guild_setting(guild_id, "mod_role")
+        except Exception as e:
+            self.log.error(f"Error fetching settings: {str(e)}", exc_info=True)
+            raise
+        return settings
+
+    def _create_settings_embed(self, guild: discord.Guild, settings: dict) -> discord.Embed:
+        """Helper method to create settings embed"""
+        embed = discord.Embed(
+            title=f"⚙️ Settings for {guild.name}",
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(
+            name="Prefix",
+            value=f"`{settings['prefix']}`",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Language",
+            value=settings['language'].upper(),
+            inline=True
+        )
+        
+        # Handle mod role
+        if settings.get('mod_role_id'):
+            mod_role = guild.get_role(int(settings['mod_role_id']))
+            if mod_role and not mod_role.managed and mod_role < guild.me.top_role:
+                embed.add_field(name="Mod Role", value=mod_role.mention, inline=True)
+            else:
+                embed.add_field(name="Mod Role", value="Not set", inline=True)
+        else:
+            embed.add_field(name="Mod Role", value="Not set", inline=True)
+        
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+            
+        return embed
 
 async def setup(bot):
     await bot.add_cog(ConfigCog(bot))
