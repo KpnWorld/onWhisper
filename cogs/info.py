@@ -13,14 +13,6 @@ class InfoCog(commands.Cog):
         self.version = "1.0.0"
         self.log = logging.getLogger("cogs.info")  # Use standard logging
 
-    async def cog_load(self) -> None:
-        """Called when the cog is loaded."""
-        self.log.info(f"{self.__class__.__name__} loaded successfully")
-
-    async def cog_unload(self) -> None:
-        """Called when the cog is unloaded."""
-        self.log.info(f"{self.__class__.__name__} unloaded successfully")
-
     @app_commands.command(name="info")
     @app_commands.describe(type="Type of info to retrieve")
     @app_commands.choices(type=[
