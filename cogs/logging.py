@@ -5,13 +5,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.app_commands import Choice
+import logging
 
 class LoggingCog(commands.Cog):
     """Cog for managing logging settings and viewing logs"""
     
     def __init__(self, bot):
         self.bot = bot
-        self.log = bot.get_logger("LoggingCog")
+        self.log = logging.getLogger("cogs.logging")  # Use standard logging
 
     async def _check_manage_server(self, interaction: discord.Interaction) -> bool:
         """Check if user has manage server permissions"""

@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.app_commands import Choice, command
+import logging
 
 class InfoCog(commands.Cog):
     """Cog for various information commands"""
@@ -10,7 +11,7 @@ class InfoCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.version = "1.0.0"
-        self.log = bot.get_logger("InfoCog")  # Use cog name for logger
+        self.log = logging.getLogger("cogs.info")  # Use standard logging
 
     async def cog_load(self) -> None:
         """Called when the cog is loaded."""

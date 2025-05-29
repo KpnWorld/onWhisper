@@ -3,13 +3,14 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional
 from datetime import datetime, timedelta
+import logging
 
 class ModerationCog(commands.Cog):
     """Cog for moderation commands"""
     
     def __init__(self, bot):
         self.bot = bot
-        self.log = bot.get_logger("ModerationCog")  # Get logger from bot
+        self.log = logging.getLogger("cogs.moderation")  # Use standard logging
     
     async def _check_mod_permissions(self, ctx_or_interaction) -> bool:
         """Check if user has mod permissions"""

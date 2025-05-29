@@ -3,13 +3,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.app_commands import Choice, command
+import logging
 
 class ConfigCog(commands.Cog):
     """Cog for managing bot and server settings"""
     
     def __init__(self, bot):
         self.bot = bot
-        self.log = bot.get_logger("ConfigCog")  # Get logger from bot
+        self.log = logging.getLogger("cogs.config")  # Use standard logging
 
     @app_commands.command(name="config", description="Configure server settings.")
     @app_commands.guild_only()

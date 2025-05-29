@@ -44,6 +44,10 @@ class WhisperBot(commands.Bot):
         self.session: Optional[aiohttp.ClientSession] = None
         self.db: Optional[DBManager] = None
 
+    def get_logger(self, name: str) -> logging.Logger:
+        """Get a logger instance with the given name."""
+        return logging.getLogger(name)
+
     async def setup_hook(self):
         """Called when the bot is starting up"""
         # Create aiohttp session

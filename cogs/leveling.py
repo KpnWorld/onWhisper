@@ -5,6 +5,7 @@ from typing import Optional, cast, Union
 import math
 import random
 import time
+import logging
 
 class LeaderboardView(discord.ui.View):
     def __init__(self, cog, page: int, has_next: bool):
@@ -44,7 +45,7 @@ class LevelingCog(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
-        self.log = bot.get_logger("LevelingCog")
+        self.log = logging.getLogger("cogs.leveling")  # Use standard logging
         self.xp_cooldowns = {}
         
     def _calculate_level(self, xp: int) -> int:
