@@ -77,6 +77,19 @@ class DBManager:
 
     async def _create_tables(self):
         """Create all required database tables"""
+        # Drop and recreate XP table with correct schema
+        await self.connection.execute("DROP TABLE IF EXISTS xp")
+        await self.connection.execute("""
+        CREATE TABLE xp (
+            guild_id INTEGER,
+            user_id INTEGER,
+            xp INTEGER DEFAULT 0,
+            level INTEGER DEFAULT 0,
+            last_message_ts REAL DEFAULT 0,
+            last_xp_gain INTEGER DEFAULT 0,
+            last_message TEXT,
+            PRIMARY KEY (guild_id, user_id)
+        )""")
         await self.connection.executescript("""
         -- Config Tables
         CREATE TABLE IF NOT EXISTS guild_settings (
@@ -275,8 +288,8 @@ class DBManager:
             """, (guild_id, user_id, xp, level))
 
     async def update_user_xp_with_message(self, guild_id: int, user_id: int, xp: int, level: int, xp_gain: int, message: str) -> None:
-        """Update XP with message tracking"""
-        current_time = time.time()  # Get current timestamp
+        """Update user's XP with message tracking"""
+        current_time = time.time()
         async with self.transaction() as tr:
             await tr.execute("""
                 INSERT INTO xp (

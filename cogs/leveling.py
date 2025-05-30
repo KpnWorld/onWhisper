@@ -366,45 +366,41 @@ class LevelingCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Only process messages in guilds, from non-bots, in text channels
-        if (not message.guild or 
-            message.author.bot or 
-            not isinstance(message.author, discord.Member) or
-            not isinstance(message.channel, (discord.TextChannel, discord.Thread))):
+        if not self._should_track_xp(message):
             return
 
         try:
+            guild_id = message.guild.id
+            user_id = message.author.id
+            
             # Get XP data and config
-            xp_data = await self.bot.db.get_user_xp(message.guild.id, message.author.id)
-            config = await self.bot.db.get_level_config(message.guild.id)
-
-            # Use default config values if none exist
-            if not config:
-                config = {
-                    'cooldown': 60,
-                    'min_xp': 15,
-                    'max_xp': 25
-                }
+            xp_data = await self.bot.db.get_user_xp_data(guild_id, user_id) or {
+                'xp': 0,
+                'level': 0,
+                'last_message_ts': 0
+            }
+            
+            config = await self.bot.db.get_level_config(guild_id) or {
+                'cooldown': 60,
+                'min_xp': 15,
+                'max_xp': 25
+            }
 
             # Check cooldown
             current_time = time.time()
-            if xp_data and xp_data.get('last_message_ts'):
-                last_time = float(xp_data['last_message_ts'])
-                if current_time - last_time < config['cooldown']:
-                    return
+            last_time = float(xp_data.get('last_message_ts', 0))
+            if current_time - last_time < config['cooldown']:
+                return
 
             # Calculate XP gain and new totals
             xp_gain = random.randint(config['min_xp'], config['max_xp'])
-            current_xp = xp_data['xp'] if xp_data else 0
-            current_level = xp_data['level'] if xp_data else 0
-            
-            new_xp = current_xp + xp_gain
+            new_xp = xp_data['xp'] + xp_gain
             new_level = self._calculate_level(new_xp)
             
-            # Update the database with new values including last message
+            # Update database with new values and message info
             await self.bot.db.update_user_xp_with_message(
-                message.guild.id,
-                message.author.id,
+                guild_id,
+                user_id,
                 new_xp,
                 new_level,
                 xp_gain,
@@ -412,11 +408,20 @@ class LevelingCog(commands.Cog):
             )
             
             # Handle level up if needed
-            if new_level > current_level:
+            if new_level > xp_data['level']:
                 await self._handle_level_up(message.guild, message.author, new_level)
                 
         except Exception as e:
             self.log.error(f"Error handling XP gain: {e}", exc_info=True)
+
+    def _should_track_xp(self, message: discord.Message) -> bool:
+        """Check if message should award XP"""
+        return (
+            message.guild and 
+            not message.author.bot and 
+            isinstance(message.author, discord.Member) and
+            isinstance(message.channel, (discord.TextChannel, discord.Thread))
+        )
 
     async def _handle_level_up(self, guild: discord.Guild, member: discord.Member, new_level: int):
         """Handle level up rewards and notifications."""
