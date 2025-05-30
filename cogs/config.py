@@ -179,9 +179,32 @@ class ConfigCog(commands.Cog):
         """Helper method to fetch all settings"""
         settings = {}
         try:
+            # Basic settings
             settings['prefix'] = await self.bot.db.get_guild_setting(guild_id, "prefix") or "!"
             settings['language'] = await self.bot.db.get_guild_setting(guild_id, "language") or "en"
             settings['mod_role_id'] = await self.bot.db.get_guild_setting(guild_id, "mod_role")
+
+            # Get whisper settings
+            whisper_settings = await self.bot.db.get_whisper_settings(guild_id)
+            settings['whisper_enabled'] = bool(whisper_settings)
+            if whisper_settings:
+                settings['whisper_channel_id'] = whisper_settings['channel_id']
+                settings['whisper_role_id'] = whisper_settings['staff_role_id']
+
+            # Get logging settings
+            logging_settings = await self.bot.db.get_logging_settings(guild_id)
+            settings['logging_enabled'] = bool(logging_settings)
+            if logging_settings:
+                settings['logging_channel_id'] = logging_settings['log_channel_id']
+
+            # Get leveling settings
+            level_config = await self.bot.db.get_level_config(guild_id)
+            settings['leveling_enabled'] = bool(level_config)
+            if level_config:
+                settings['level_cooldown'] = level_config['cooldown']
+                settings['level_min_xp'] = level_config['min_xp']
+                settings['level_max_xp'] = level_config['max_xp']
+
         except Exception as e:
             self.log.error(f"Error fetching settings: {str(e)}", exc_info=True)
             raise
@@ -193,32 +216,88 @@ class ConfigCog(commands.Cog):
             title=f"⚙️ Settings for {guild.name}",
             color=discord.Color.blue()
         )
-        
+
+        # Basic Settings
         embed.add_field(
-            name="Prefix",
-            value=f"`{settings['prefix']}`",
-            inline=True
+            name="🔧 Basic Settings",
+            value=(
+                f"Prefix: `{settings['prefix']}`\n"
+                f"Language: `{settings['language'].upper()}`"
+            ),
+            inline=False
         )
-        
+
+        # Feature Status Section
+        status_field = ""
+
+        # Whisper System Status
+        whisper_status = "✅ Enabled" if settings.get('whisper_enabled') else "❌ Not Configured"
+        whisper_hint = ""
+        if not settings.get('whisper_enabled'):
+            whisper_hint = "\n↳ Use `/config setting:Set Whisper Channel` to set up"
+        status_field += f"**Whisper System**: {whisper_status}{whisper_hint}\n"
+
+        # Logging System Status
+        logging_status = "✅ Enabled" if settings.get('logging_enabled') else "❌ Not Configured"
+        logging_hint = ""
+        if not settings.get('logging_enabled'):
+            logging_hint = "\n↳ Use `/logging type:Set Channel` to set up"
+        status_field += f"**Logging System**: {logging_status}{logging_hint}\n"
+
+        # Leveling System Status
+        leveling_status = "✅ Enabled" if settings.get('leveling_enabled') else "❌ Not Configured"
+        leveling_hint = ""
+        if not settings.get('leveling_enabled'):
+            leveling_hint = "\n↳ Configure with `/levelconfig` commands"
+        status_field += f"**Leveling System**: {leveling_status}{leveling_hint}"
+
         embed.add_field(
-            name="Language",
-            value=settings['language'].upper(),
-            inline=True
+            name="🔌 Feature Status",
+            value=status_field,
+            inline=False
         )
-        
-        # Handle mod role
+
+        # Active Channels Section
+        channels_field = ""
+        if settings.get('whisper_enabled'):
+            channel = guild.get_channel(settings['whisper_channel_id'])
+            if channel:
+                channels_field += f"Whisper Channel: {channel.mention}\n"
+
+        if settings.get('logging_enabled'):
+            channel = guild.get_channel(settings['logging_channel_id'])
+            if channel:
+                channels_field += f"Logging Channel: {channel.mention}\n"
+
+        if channels_field:
+            embed.add_field(
+                name="📋 Active Channels",
+                value=channels_field,
+                inline=False
+            )
+
+        # Configured Roles Section
+        roles_field = ""
+        if settings.get('whisper_role_id'):
+            role = guild.get_role(settings['whisper_role_id'])
+            if role:
+                roles_field += f"Whisper Staff: {role.mention}\n"
+
         if settings.get('mod_role_id'):
-            mod_role = guild.get_role(int(settings['mod_role_id']))
-            if mod_role and not mod_role.managed and mod_role < guild.me.top_role:
-                embed.add_field(name="Mod Role", value=mod_role.mention, inline=True)
-            else:
-                embed.add_field(name="Mod Role", value="Not set", inline=True)
-        else:
-            embed.add_field(name="Mod Role", value="Not set", inline=True)
-        
+            role = guild.get_role(int(settings['mod_role_id']))
+            if role:
+                roles_field += f"Moderator Role: {role.mention}"
+
+        if roles_field:
+            embed.add_field(
+                name="👥 Configured Roles",
+                value=roles_field,
+                inline=False
+            )
+
         if guild.icon:
             embed.set_thumbnail(url=guild.icon.url)
-            
+
         return embed
 
 async def setup(bot):
