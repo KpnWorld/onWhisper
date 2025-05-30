@@ -133,6 +133,8 @@ class DBManager:
             xp INTEGER DEFAULT 0,
             level INTEGER DEFAULT 0,
             last_message_ts TIMESTAMP,
+            last_xp_gain INTEGER DEFAULT 0,
+            last_message TEXT,
             PRIMARY KEY (guild_id, user_id)
         );
 
@@ -280,8 +282,7 @@ class DBManager:
                 ON CONFLICT(guild_id, user_id) DO UPDATE 
                 SET xp = ?, level = ?, last_message_ts = CURRENT_TIMESTAMP,
                     last_xp_gain = ?, last_message = ?
-            """, (guild_id, user_id, xp, level, xp_gain, message, 
-                  xp, level, xp_gain, message))
+            """, (guild_id, user_id, xp, level, xp_gain, message, xp, level, xp_gain, message))
 
     async def get_user_xp(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
         """Get a user's XP and level information"""
