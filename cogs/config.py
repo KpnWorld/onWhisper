@@ -17,15 +17,15 @@ class ConfigCog(commands.Cog):
     @app_commands.choices(setting=[
         Choice(name="Set Prefix", value="prefix"),
         Choice(name="Set Language", value="language"),
-        Choice(name="Set Mod Role", value="mod_role"),
+        Choice(name="Set Whisper Staff Role", value="staff_role"),  # Changed from mod_role
         Choice(name="Set Whisper Channel", value="whisper_channel")
     ])
     @app_commands.describe(
         setting="The setting to configure",
-        value="For whisper channel: Mention the channel (#channel)"
+        value="For channels/roles: Mention them (#channel or @role)"
     )
     async def config(self, interaction: discord.Interaction, 
-                    setting: Literal["prefix", "language", "mod_role", "whisper_channel"],
+                    setting: Literal["prefix", "language", "staff_role", "whisper_channel"],
                     value: str):
         """Configure server settings."""
         
@@ -58,11 +58,10 @@ class ConfigCog(commands.Cog):
                 await self.bot.db.set_guild_setting(interaction.guild.id, "language", value.lower())
                 await interaction.followup.send(f"✅ Server language has been set to: `{value.lower()}`", ephemeral=True)
                 
-            elif setting == "mod_role":
+            elif setting == "staff_role":
                 # Try to find the role by mention, ID, or name
                 role = None
                 try:
-                    # First try to convert from mention or ID
                     value = value.strip()
                     if value.startswith('<@&') and value.endswith('>'):
                         role_id = int(value[3:-1])
@@ -70,22 +69,29 @@ class ConfigCog(commands.Cog):
                         role_id = int(value)
                     role = interaction.guild.get_role(role_id)
                 except (ValueError, AttributeError):
-                    # If that fails, try to find by name
                     role = discord.utils.get(interaction.guild.roles, name=value)
                 
                 if not role:
                     return await interaction.followup.send("Could not find that role! Please provide a valid role mention, ID, or name.", ephemeral=True)
                 
-                # Check if the role is manageable
                 if role >= interaction.guild.me.top_role:
-                    return await interaction.followup.send("I cannot manage this role as it is higher than or equal to my highest role!", ephemeral=True)
+                    return await interaction.followup.send("I cannot manage this role as it is higher than my highest role!", ephemeral=True)
                 
                 if role.managed:
-                    return await interaction.followup.send("This role is managed by an integration and cannot be used as a mod role!", ephemeral=True)
+                    return await interaction.followup.send("This role is managed by an integration and cannot be used!", ephemeral=True)
                 
+                # Save both whisper staff role and mod role settings
+                await self.bot.db.set_whisper_channel(interaction.guild.id, 
+                    (await self.bot.db.get_whisper_settings(interaction.guild.id) or {}).get('channel_id', 0), 
+                    role.id)
                 await self.bot.db.set_guild_setting(interaction.guild.id, "mod_role", str(role.id))
-                await interaction.followup.send(f"✅ Moderator role has been set to: {role.mention}", ephemeral=True)
                 
+                await interaction.followup.send(
+                    f"✅ Whisper Staff role has been set to: {role.mention}\n"
+                    "This role will be used for managing whisper threads.", 
+                    ephemeral=True
+                )
+
             elif setting == "whisper_channel":
                 # Parse channel mention
                 if not value.startswith('<#') or not value.endswith('>'):
