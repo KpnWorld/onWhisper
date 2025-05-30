@@ -20,7 +20,10 @@ class ConfigCog(commands.Cog):
         Choice(name="Set Mod Role", value="mod_role"),
         Choice(name="Set Whisper Channel", value="whisper_channel")
     ])
-    @app_commands.describe(value="The new value for the setting")
+    @app_commands.describe(
+        setting="The setting to configure",
+        value="For whisper channel: Mention the channel (#channel)"
+    )
     async def config(self, interaction: discord.Interaction, 
                     setting: Literal["prefix", "language", "mod_role", "whisper_channel"],
                     value: str):
@@ -84,59 +87,50 @@ class ConfigCog(commands.Cog):
                 await interaction.followup.send(f"✅ Moderator role has been set to: {role.mention}", ephemeral=True)
                 
             elif setting == "whisper_channel":
-                # Try to get channel and role from the value (expects format: #channel @role)
+                # Parse channel mention
+                if not value.startswith('<#') or not value.endswith('>'):
+                    return await interaction.followup.send("Please mention a valid channel (#channel)", ephemeral=True)
+                
                 try:
-                    parts = value.split()
-                    if len(parts) != 2:
-                        return await interaction.followup.send("Please provide both channel and role in format: #channel @role", ephemeral=True)
-                    
-                    # Parse channel
-                    channel_str = parts[0]
-                    if channel_str.startswith('<#') and channel_str.endswith('>'):
-                        channel_id = int(channel_str[2:-1])
-                        channel = interaction.guild.get_channel(channel_id)
-                    else:
-                        return await interaction.followup.send("Please mention a valid channel (#channel)", ephemeral=True)
-                    
-                    # Parse role
-                    role_str = parts[1]
-                    if role_str.startswith('<@&') and role_str.endswith('>'):
-                        role_id = int(role_str[3:-1])
-                        role = interaction.guild.get_role(role_id)
-                    else:
-                        return await interaction.followup.send("Please mention a valid role (@role)", ephemeral=True)
+                    channel_id = int(value[2:-1])
+                    channel = interaction.guild.get_channel(channel_id)
                     
                     if not isinstance(channel, discord.TextChannel):
                         return await interaction.followup.send("The channel must be a text channel!", ephemeral=True)
-                    
-                    if not role:
-                        return await interaction.followup.send("Could not find the specified role!", ephemeral=True)
 
                     # Check bot permissions in the channel
                     bot_perms = channel.permissions_for(interaction.guild.me)
                     if not (bot_perms.send_messages and bot_perms.create_private_threads):
                         return await interaction.followup.send("I need permissions to send messages and create private threads in that channel!", ephemeral=True)
                     
-                    # Use centralized method to save whisper settings
+                    # Get or create staff role
+                    staff_role = discord.utils.get(interaction.guild.roles, name="Whisper Staff")
+                    if not staff_role:
+                        staff_role = await interaction.guild.create_role(
+                            name="Whisper Staff",
+                            reason="Automatically created for whisper functionality"
+                        )
+                    
+                    # Save settings
                     await self._save_whisper_settings(
                         interaction.guild.id,
                         channel.id,
-                        role.id
+                        staff_role.id
                     )
-
+                    
                     # Also save the mod role for consistency
-                    await self.bot.db.set_guild_setting(interaction.guild.id, "mod_role", str(role.id))
+                    await self.bot.db.set_guild_setting(interaction.guild.id, "mod_role", str(staff_role.id))
                     
                     await interaction.followup.send(
                         f"✅ Whisper configuration updated:\n"
                         f"Channel: {channel.mention}\n"
-                        f"Staff Role: {role.mention}",
+                        f"Staff Role: {staff_role.mention}\n\n"
+                        f"Note: I've created/set the 'Whisper Staff' role for managing whispers.",
                         ephemeral=True
                     )
                     
-                except ValueError as ve:
-                    self.log.warning(f"Invalid whisper config format: {str(ve)}")
-                    await interaction.followup.send("Invalid format! Use: #channel @role", ephemeral=True)
+                except ValueError:
+                    await interaction.followup.send("Invalid channel format! Please use a channel mention (#channel)", ephemeral=True)
                 except Exception as e:
                     self.log.error(f"Error setting whisper config: {str(e)}", exc_info=True)
                     await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
