@@ -278,7 +278,7 @@ class LevelingCog(commands.Cog):
 
         try:
             guild_id = interaction.guild.id
-            current = await self.bot.db.get_guild_setting(guild_id, "level_up_dm")
+            current = await self.bot.db.get_guild_setting(guild_id, "level_up_dm") or "false"
             new_value = "false" if current == "true" else "true"
             
             # Update setting
@@ -370,23 +370,28 @@ class LevelingCog(commands.Cog):
             return
 
         try:
+            if not message.guild:
+                return
             guild_id = message.guild.id
             user_id = message.author.id
             
-            # Get XP data and config
-            xp_data = await self.bot.db.get_user_xp_data(guild_id, user_id) or {
+            # Get XP data using get_user_xp
+            xp_data = await self.bot.db.get_user_xp(guild_id, user_id) or {
                 'xp': 0,
                 'level': 0,
-                'last_message_ts': 0
+                'last_message_ts': 0,
+                'last_xp_gain': 0,
+                'last_message': ''
             }
             
+            # Get level config
             config = await self.bot.db.get_level_config(guild_id) or {
                 'cooldown': 60,
                 'min_xp': 15,
                 'max_xp': 25
             }
 
-            # Check cooldown
+            # Check cooldown using timestamp from DB
             current_time = time.time()
             last_time = float(xp_data.get('last_message_ts', 0))
             if current_time - last_time < config['cooldown']:
@@ -397,7 +402,7 @@ class LevelingCog(commands.Cog):
             new_xp = xp_data['xp'] + xp_gain
             new_level = self._calculate_level(new_xp)
             
-            # Update database with new values and message info
+            # Update database with new XP, level, and message
             await self.bot.db.update_user_xp_with_message(
                 guild_id,
                 user_id,
@@ -407,8 +412,8 @@ class LevelingCog(commands.Cog):
                 message.content[:100]  # Store first 100 chars of message
             )
             
-            # Handle level up if needed
-            if new_level > xp_data['level']:
+            # Handle level up
+            if new_level > xp_data['level'] and isinstance(message.author, discord.Member):
                 await self._handle_level_up(message.guild, message.author, new_level)
                 
         except Exception as e:
@@ -416,12 +421,13 @@ class LevelingCog(commands.Cog):
 
     def _should_track_xp(self, message: discord.Message) -> bool:
         """Check if message should award XP"""
-        return (
-            message.guild and 
-            not message.author.bot and 
-            isinstance(message.author, discord.Member) and
-            isinstance(message.channel, (discord.TextChannel, discord.Thread))
-        )
+        if not message.guild:
+            return False
+        if not isinstance(message.author, discord.Member):
+            return False
+        if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+            return False
+        return not message.author.bot
 
     async def _handle_level_up(self, guild: discord.Guild, member: discord.Member, new_level: int):
         """Handle level up rewards and notifications."""
@@ -429,11 +435,12 @@ class LevelingCog(commands.Cog):
             return
 
         try:
-            guild_id = guild.id  # Safe to access after null check
-            user_id = member.id
-
-            # Check for role rewards
+            guild_id = guild.id
+            
+            # Get level roles using dedicated method
             reward_roles = await self.bot.db.get_level_roles_for_level(guild_id, new_level)
+            
+            # Add role rewards
             for role_id in reward_roles:
                 role = guild.get_role(role_id)
                 if role and role not in member.roles:
@@ -442,7 +449,7 @@ class LevelingCog(commands.Cog):
                     except discord.Forbidden:
                         continue
 
-            # Send DM if enabled
+            # Check notification setting using dedicated method
             if await self.bot.db.get_level_notification_setting(guild_id):
                 try:
                     embed = discord.Embed(
