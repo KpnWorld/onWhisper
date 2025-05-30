@@ -3,6 +3,7 @@ from __future__ import annotations
 import aiosqlite
 import logging
 import random
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, List, Optional, Any, TypeVar, cast
 
@@ -132,7 +133,7 @@ class DBManager:
             user_id INTEGER,
             xp INTEGER DEFAULT 0,
             level INTEGER DEFAULT 0,
-            last_message_ts TIMESTAMP,
+            last_message_ts REAL DEFAULT 0,
             last_xp_gain INTEGER DEFAULT 0,
             last_message TEXT,
             PRIMARY KEY (guild_id, user_id)
@@ -263,26 +264,33 @@ class DBManager:
                 ON CONFLICT(guild_id, user_id) DO UPDATE SET level = ?
             """, (guild_id, user_id, level, level))
 
-    async def update_user_xp(self, guild_id: int, user_id: int, xp: int, level: int):
-        """Update user's XP and level"""
+    async def update_user_xp(self, guild_id: int, user_id: int, xp: int, level: int) -> None:
+        """Basic XP update without message tracking"""
         async with self.transaction() as tr:
             await tr.execute("""
-                INSERT INTO xp (guild_id, user_id, xp, level, last_message_ts)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO xp (guild_id, user_id, xp, level)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(guild_id, user_id) DO UPDATE 
-                SET xp = ?, level = ?, last_message_ts = CURRENT_TIMESTAMP
-            """, (guild_id, user_id, xp, level, xp, level))
-            
-    async def update_user_xp_with_message(self, guild_id: int, user_id: int, xp: int, level: int, xp_gain: int, message: str):
-        """Update user's XP and level with last message info"""
+                SET xp = excluded.xp, level = excluded.level
+            """, (guild_id, user_id, xp, level))
+
+    async def update_user_xp_with_message(self, guild_id: int, user_id: int, xp: int, level: int, xp_gain: int, message: str) -> None:
+        """Update XP with message tracking"""
+        current_time = time.time()  # Get current timestamp
         async with self.transaction() as tr:
             await tr.execute("""
-                INSERT INTO xp (guild_id, user_id, xp, level, last_message_ts, last_xp_gain, last_message)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+                INSERT INTO xp (
+                    guild_id, user_id, xp, level, 
+                    last_message_ts, last_xp_gain, last_message
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(guild_id, user_id) DO UPDATE 
-                SET xp = ?, level = ?, last_message_ts = CURRENT_TIMESTAMP,
-                    last_xp_gain = ?, last_message = ?
-            """, (guild_id, user_id, xp, level, xp_gain, message, xp, level, xp_gain, message))
+                SET xp = excluded.xp,
+                    level = excluded.level,
+                    last_message_ts = excluded.last_message_ts,
+                    last_xp_gain = excluded.last_xp_gain,
+                    last_message = excluded.last_message
+            """, (guild_id, user_id, xp, level, current_time, xp_gain, message))
 
     async def get_user_xp(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
         """Get a user's XP and level information"""
@@ -605,7 +613,9 @@ class DBManager:
             (guild_id, user_id)
         ) as cursor:
             row = await cursor.fetchone()
-            return float(row[0]) if row and row[0] else None
+            if row and row[0]:
+                return float(row[0])
+            return None
 
     async def update_user_level(self, guild_id: int, user_id: int, level: int):
         """Update user's level only"""
