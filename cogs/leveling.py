@@ -368,32 +368,11 @@ class LevelingCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.checks.has_permissions(manage_guild=True)
     async def toggle_leveling(self, interaction: discord.Interaction):
-        """Toggle the leveling system on/off."""
-        if not interaction.guild:
-            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
-
-        try:
-            # Get current settings
-            settings = await self.bot.db.get_leveling_settings(interaction.guild.id)
-            is_enabled = bool(settings)
-            
-            if is_enabled:
-                # Disable leveling
-                await self.bot.db.set_leveling_settings(interaction.guild.id, False)
-                await interaction.response.send_message("✅ Leveling system has been disabled.")
-            else:
-                # Enable leveling with default settings
-                default_options = {
-                    'cooldown': 60,
-                    'min_xp': 15,
-                    'max_xp': 25,
-                    'dm_notifications': True
-                }
-                await self.bot.db.set_leveling_settings(interaction.guild.id, True, default_options)
-                await interaction.response.send_message("✅ Leveling system has been enabled with default settings.")
-                
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+        """Toggle command moved to /config"""
+        await interaction.response.send_message(
+            "❌ This command has been moved to `/config setting:Toggle Leveling`",
+            ephemeral=True
+        )
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

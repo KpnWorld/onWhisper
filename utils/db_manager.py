@@ -374,6 +374,33 @@ class DBManager:
             row = await cursor.fetchone()
             return row[0] if row else None
 
+    async def get_level_config(self, guild_id: int) -> Optional[Dict[str, Any]]:
+        """Get level configuration for a guild"""
+        async with self.connection.execute(
+            "SELECT cooldown, min_xp, max_xp FROM level_config WHERE guild_id = ?",
+            (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    'cooldown': row[0],
+                    'min_xp': row[1],
+                    'max_xp': row[2]
+                }
+            return None
+
+    async def set_level_config(self, guild_id: int, cooldown: int, min_xp: int, max_xp: int):
+        """Set level configuration for a guild"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO level_config (guild_id, cooldown, min_xp, max_xp)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                cooldown = excluded.cooldown,
+                min_xp = excluded.min_xp,
+                max_xp = excluded.max_xp
+            """, (guild_id, cooldown, min_xp, max_xp))
+
     # -------------------- Role Management Methods --------------------
 
     async def add_autorole(self, guild_id: int, role_id: int):
@@ -508,6 +535,14 @@ class DBManager:
         async with self.transaction() as tr:
             await tr.execute(
                 "UPDATE whispers SET is_closed = 1, closed_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND whisper_id = ?",
+                (guild_id, whisper_id)
+            )
+
+    async def delete_whisper(self, guild_id: int, whisper_id: str):
+        """Delete a whisper thread from database"""
+        async with self.transaction() as tr:
+            await tr.execute(
+                "DELETE FROM whispers WHERE guild_id = ? AND whisper_id = ?",
                 (guild_id, whisper_id)
             )
 
@@ -692,34 +727,4 @@ class DBManager:
                 ON CONFLICT(guild_id, feature) DO UPDATE 
                 SET enabled = ?, options_json = ?
             """, (guild_id, feature, enabled, options_json, enabled, options_json))
-
-    # Remove these duplicated methods
-    async def get_logging_settings(self, guild_id: int) -> Optional[Dict[str, Any]]:
-        """Get logging settings for a guild"""
-        settings = await self.get_feature_settings(guild_id, "logging")
-        if settings and settings['enabled'] and settings['options']:
-            return {
-                'log_channel_id': settings['options'].get('channel_id'),
-                'enabled_events': settings['options'].get('events', [])
-            }
-        return None
-
-    async def set_logging_settings(self, guild_id: int, channel_id: int, events: List[str] = []):
-        """Set logging settings for a guild"""
-        options = {
-            'channel_id': channel_id,
-            'events': events
-        }
-        await self.set_feature_settings(guild_id, "logging", True, options)
-
-    async def get_leveling_settings(self, guild_id: int) -> Optional[Dict[str, Any]]:
-        """Get leveling settings for a guild"""
-        settings = await self.get_feature_settings(guild_id, "leveling")
-        if settings and settings['enabled']:
-            return settings['options'] or {}
-        return None
-
-    async def set_leveling_settings(self, guild_id: int, enabled: bool, options: Dict[str, Any] = {}):
-        """Set leveling settings for a guild"""
-        await self.set_feature_settings(guild_id, "leveling", enabled, options)
 

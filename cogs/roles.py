@@ -75,11 +75,15 @@ class RolesCog(commands.Cog):
     @app_commands.checks.has_permissions(manage_roles=True)
     async def autorole_remove(self, interaction: discord.Interaction, role: discord.Role):
         """Remove an auto role."""
+        if not interaction.guild:
+            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
+            
         if not await self._check_permissions(interaction):
             return await interaction.response.send_message("You need the Manage Roles permission to use this command!", ephemeral=True)
             
         try:
-            await self.bot.db.remove_autorole(interaction.guild, role.id)
+            # Fix: Pass guild.id instead of guild object
+            await self.bot.db.remove_autorole(interaction.guild.id, role.id)
             await interaction.response.send_message(f"✅ Removed {role.mention} from auto roles.")
         except Exception as e:
             await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)

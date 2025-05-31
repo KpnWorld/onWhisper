@@ -17,16 +17,20 @@ class ConfigCog(commands.Cog):
     @app_commands.choices(setting=[
         Choice(name="Set Prefix", value="prefix"),
         Choice(name="Set Language", value="language"),
-        Choice(name="Set Whisper Staff Role", value="staff_role"),  # Changed from mod_role
-        Choice(name="Set Whisper Channel", value="whisper_channel")
+        Choice(name="Set Whisper Staff Role", value="staff_role"),
+        Choice(name="Set Whisper Channel", value="whisper_channel"),
+        Choice(name="Toggle Whispers", value="toggle_whispers"),
+        Choice(name="Toggle Logging", value="toggle_logging"),
+        Choice(name="Toggle Leveling", value="toggle_leveling")
     ])
     @app_commands.describe(
         setting="The setting to configure",
         value="For channels/roles: Mention them (#channel or @role)"
     )
     async def config(self, interaction: discord.Interaction, 
-                    setting: Literal["prefix", "language", "staff_role", "whisper_channel"],
-                    value: str):
+                    setting: Literal["prefix", "language", "staff_role", "whisper_channel", 
+                                   "toggle_whispers", "toggle_logging", "toggle_leveling"],
+                    value: Optional[str] = None):
         """Configure server settings."""
         
         if not interaction.guild:
@@ -40,9 +44,53 @@ class ConfigCog(commands.Cog):
         # Defer the response since we'll be doing database operations
         await interaction.response.defer(ephemeral=True)
         
-        try:            
+        try:
+            if setting.startswith("toggle_"):
+                feature = setting.replace("toggle_", "")
+                feature_settings = await self.bot.db.get_feature_settings(interaction.guild.id, feature)
+                is_enabled = feature_settings['enabled'] if feature_settings else False
+                
+                if is_enabled:
+                    await self.bot.db.set_feature_settings(interaction.guild.id, feature, False)
+                    await interaction.followup.send(f"✅ {feature.title()} system has been disabled.")
+                else:
+                    # Default settings for each feature
+                    default_options = {
+                        'whispers': {
+                            'channel_id': None,
+                            'staff_role_id': None
+                        },
+                        'logging': {
+                            'channel_id': None,
+                            'events': ["message_delete", "message_edit", "member_join", "member_leave"]
+                        },
+                        'leveling': {
+                            'cooldown': 60,
+                            'min_xp': 15,
+                            'max_xp': 25,
+                            'dm_notifications': True
+                        }
+                    }
+                    
+                    await self.bot.db.set_feature_settings(
+                        interaction.guild.id, 
+                        feature, 
+                        True, 
+                        default_options.get(feature, {})
+                    )
+                    await interaction.followup.send(
+                        f"✅ {feature.title()} system has been enabled with default settings.\n"
+                        f"Use `/config` to configure additional settings."
+                    )
+                return
+
             if setting == "prefix":
-                # Validate prefix
+                # Validate prefix 
+                if not value:
+                    return await interaction.followup.send("Please provide a prefix value!", ephemeral=True)
+                
+                # Strip whitespace
+                value = value.strip()
                 if not value or len(value) > 5:
                     return await interaction.followup.send("Prefix must be between 1 and 5 characters!", ephemeral=True)
                 if ' ' in value:
@@ -52,13 +100,22 @@ class ConfigCog(commands.Cog):
                 await interaction.followup.send(f"✅ Server prefix has been set to: `{value}`", ephemeral=True)
                 
             elif setting == "language":
+                if not value:
+                    return await interaction.followup.send("Please provide a language code!", ephemeral=True)
+                
+                # Convert to lowercase and strip whitespace
+                value = value.strip().lower()
                 valid_languages = ["en", "es", "fr", "de"]  # Add more as needed
-                if value.lower() not in valid_languages:
+                if value not in valid_languages:
                     return await interaction.followup.send(f"Invalid language! Valid options: {', '.join(valid_languages)}", ephemeral=True)
-                await self.bot.db.set_guild_setting(interaction.guild.id, "language", value.lower())
-                await interaction.followup.send(f"✅ Server language has been set to: `{value.lower()}`", ephemeral=True)
+                    
+                await self.bot.db.set_guild_setting(interaction.guild.id, "language", value)
+                await interaction.followup.send(f"✅ Server language has been set to: `{value}`", ephemeral=True)
                 
             elif setting == "staff_role":
+                if not value:
+                    return await interaction.followup.send("Please provide a role!", ephemeral=True)
+                    
                 # Try to find the role by mention, ID, or name
                 role = None
                 try:
@@ -69,7 +126,8 @@ class ConfigCog(commands.Cog):
                         role_id = int(value)
                     role = interaction.guild.get_role(role_id)
                 except (ValueError, AttributeError):
-                    role = discord.utils.get(interaction.guild.roles, name=value)
+                    if value:  # Only try name lookup if value is not empty
+                        role = discord.utils.get(interaction.guild.roles, name=value)
                 
                 if not role:
                     return await interaction.followup.send("Could not find that role! Please provide a valid role mention, ID, or name.", ephemeral=True)
@@ -94,6 +152,8 @@ class ConfigCog(commands.Cog):
 
             elif setting == "whisper_channel":
                 # Parse channel mention
+                if not value:
+                    return await interaction.followup.send("Please mention a valid channel (#channel)", ephemeral=True)
                 if not value.startswith('<#') or not value.endswith('>'):
                     return await interaction.followup.send("Please mention a valid channel (#channel)", ephemeral=True)
                 
@@ -173,7 +233,16 @@ class ConfigCog(commands.Cog):
 
     async def _save_whisper_settings(self, guild_id: int, channel_id: int, role_id: int) -> None:
         """Helper method to save whisper settings consistently"""
-        await self.bot.db.set_whisper_channel(guild_id, channel_id, role_id)
+        # Update to use feature settings instead of direct whisper_settings table
+        await self.bot.db.set_feature_settings(
+            guild_id,
+            "whispers",
+            True,
+            {
+                'channel_id': channel_id,
+                'staff_role_id': role_id
+            }
+        )
 
     async def _fetch_all_settings(self, guild_id: int) -> dict:
         """Helper method to fetch all settings"""

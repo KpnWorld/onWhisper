@@ -94,13 +94,20 @@ class LoggingCog(commands.Cog):
     @app_commands.command(name="logging")
     @app_commands.guild_only()
     @app_commands.choices(type=[
-        Choice(name="Toggle System", value="toggle"),
         Choice(name="Set Channel", value="channel"),
         Choice(name="Enable Events", value="enable"),
         Choice(name="Disable Events", value="disable")
     ])
     async def logging(self, interaction: discord.Interaction, type: str, channel: Optional[discord.TextChannel] = None):
         """Configure logging settings."""
+        # Remove toggle option and keep only channel and event settings
+        if type == "toggle":
+            await interaction.response.send_message(
+                "❌ The toggle command has been moved to `/config setting:Toggle Logging`",
+                ephemeral=True
+            )
+            return
+
         if not interaction.guild:
             return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
 
@@ -108,39 +115,7 @@ class LoggingCog(commands.Cog):
             return await interaction.response.send_message("You need Manage Server permission!", ephemeral=True)
 
         try:
-            if type == "toggle":
-                try:
-                    # Get current feature settings
-                    settings = await self.bot.db.get_feature_settings(interaction.guild.id, "logging")
-                    is_enabled = settings['enabled'] if settings else False
-
-                    if is_enabled:
-                        # Disable logging
-                        await self.bot.db.set_feature_settings(interaction.guild.id, "logging", False)
-                        await interaction.response.send_message("✅ Logging system has been disabled.")
-                    else:
-                        # Enable logging with default options
-                        default_options = {
-                            'channel_id': interaction.channel.id if isinstance(interaction.channel, discord.TextChannel) else None,
-                            'events': [
-                                "message_delete", "message_edit",
-                                "member_join", "member_leave",
-                                "whisper_create", "whisper_close"
-                            ]
-                        }
-                        await self.bot.db.set_feature_settings(
-                            interaction.guild.id,
-                            "logging",
-                            True,
-                            default_options
-                        )
-                        await interaction.response.send_message("✅ Logging system has been enabled with default settings.\n"
-                                                                "Use `/logging channel` to set a specific logging channel.")
-                except Exception as e:
-                    await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
-                    return
-
-            elif type == "channel":
+            if type == "channel":
                 try:
                     if not channel:
                         return await interaction.response.send_message("Please specify a channel!", ephemeral=True)
@@ -205,10 +180,16 @@ class LoggingCog(commands.Cog):
                     current_events = settings.get('options', {}).get('events', []) if settings else []
                     channel_id = settings.get('options', {}).get('channel_id') if settings else 0
                     
+                    # Ensure current_events is a list
+                    if isinstance(current_events, str):
+                        current_events = [current_events]
+                    
                     # Update events list
                     if type == "enable":
-                        new_events = list(set(current_events + view.selected_events))
+                        # Combine lists and remove duplicates using set
+                        new_events = list(set(current_events + list(view.selected_events)))
                     else:
+                        # Remove selected events from current events
                         new_events = [e for e in current_events if e not in view.selected_events]
                     
                     # Save updated settings
