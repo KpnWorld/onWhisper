@@ -20,24 +20,34 @@ class WhisperCog(commands.Cog):
             return False
         return interaction.user.guild_permissions.manage_threads
     
+    async def _check_whisper_enabled(self, guild_id: int) -> bool:
+        """Check if whisper feature is enabled"""
+        feature_settings = await self.bot.db.get_feature_settings(guild_id, "whispers")
+        return bool(feature_settings and feature_settings['enabled'])
+
     @app_commands.command(name="whisper")
     @commands.guild_only()
     @app_commands.guild_only()
     async def whisper(self, interaction: discord.Interaction, action: str, user: Optional[discord.User] = None):
-        """Manage whisper threads."""
         if not interaction.guild:
             return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
 
-        # Check if whisper feature is enabled
+        # Check if whispers are enabled and get settings in one step
         feature_settings = await self.bot.db.get_feature_settings(interaction.guild.id, "whispers")
         if not feature_settings or not feature_settings['enabled']:
             return await interaction.response.send_message(
-                "❌ Whisper system is not enabled. An admin must enable it first.",
+                "❌ Whisper system is currently disabled. An admin can enable it with `/config`.",
                 ephemeral=True
             )
 
         # Get whisper options from feature settings
         options = feature_settings['options']
+        if not options:
+            return await interaction.response.send_message(
+                "❌ Whisper system is not properly configured. Use `/config` to set it up.",
+                ephemeral=True
+            )
+
         channel_id = options.get('channel_id')
         staff_role_id = options.get('staff_role_id')
 

@@ -64,21 +64,23 @@ class LoggingCog(commands.Cog):
             self.log.error(f"Error checking server permissions: {e}", exc_info=True)
             return False
 
+    async def _check_logging_enabled(self, guild_id: int) -> bool:
+        """Check if logging feature is enabled"""
+        feature_settings = await self.bot.db.get_feature_settings(guild_id, "logging")
+        return bool(feature_settings and feature_settings['enabled'])
+
     async def _log_event(self, guild_id: int, event_type: str, description: str):
         """Log an event if logging is enabled and event type is configured"""
         try:
-            # Check if logging feature is enabled
-            feature_settings = await self.bot.db.get_feature_settings(guild_id, "logging")
-            if not feature_settings or not feature_settings['enabled']:
+            if not await self._check_logging_enabled(guild_id):
                 return
 
-            # Check if this event type is enabled
+            feature_settings = await self.bot.db.get_feature_settings(guild_id, "logging")
             options = feature_settings['options']
             enabled_events = options.get('events', [])
             if event_type not in enabled_events:
                 return
 
-            # Get the logging channel
             channel_id = options.get('channel_id')
             if not channel_id:
                 return
@@ -89,7 +91,7 @@ class LoggingCog(commands.Cog):
         except Exception as e:
             self.log.error(f"Error logging event: {e}", exc_info=True)
 
-    @app_commands.command(name="logging", description="Configure logging settings.")
+    @app_commands.command(name="logging")
     @app_commands.guild_only()
     @app_commands.choices(type=[
         Choice(name="Toggle System", value="toggle"),

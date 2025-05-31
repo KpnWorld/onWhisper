@@ -183,25 +183,20 @@ class ConfigCog(commands.Cog):
             settings['prefix'] = await self.bot.db.get_guild_setting(guild_id, "prefix") or "!"
             settings['language'] = await self.bot.db.get_guild_setting(guild_id, "language") or "en"
 
-            # Get logging settings
-            logging_settings = await self.bot.db.get_logging_settings(guild_id)
-            settings['logging_enabled'] = bool(logging_settings)
-            if logging_settings:
-                settings['logging_channel_id'] = logging_settings['log_channel_id']
-                settings['logging_events'] = logging_settings['enabled_events']
-
-            # Get leveling settings
-            leveling_settings = await self.bot.db.get_leveling_settings(guild_id)
-            settings['leveling_enabled'] = bool(leveling_settings)
-            if leveling_settings:
-                settings.update(leveling_settings)
-
-            # Get whisper settings
-            whisper_settings = await self.bot.db.get_whisper_settings(guild_id)
-            settings['whisper_enabled'] = bool(whisper_settings)
-            if whisper_settings:
-                settings['whisper_channel_id'] = whisper_settings['channel_id']
-                settings['whisper_role_id'] = whisper_settings['staff_role_id']
+            # Get all feature settings
+            for feature in ["whispers", "logging", "leveling"]:
+                feature_settings = await self.bot.db.get_feature_settings(guild_id, feature)
+                settings[f'{feature}_enabled'] = feature_settings['enabled'] if feature_settings else False
+                if feature_settings and feature_settings['enabled']:
+                    options = feature_settings['options']
+                    if feature == "whispers":
+                        settings['whisper_channel_id'] = options.get('channel_id')
+                        settings['whisper_role_id'] = options.get('staff_role_id')
+                    elif feature == "logging":
+                        settings['logging_channel_id'] = options.get('channel_id')
+                        settings['logging_events'] = options.get('events', [])
+                    elif feature == "leveling":
+                        settings.update(options)
 
         except Exception as e:
             self.log.error(f"Error fetching settings: {str(e)}", exc_info=True)
@@ -228,26 +223,18 @@ class ConfigCog(commands.Cog):
         # Feature Status Section
         status_field = ""
 
-        # Whisper System Status
-        whisper_status = "✅ Enabled" if settings.get('whisper_enabled') else "❌ Not Configured"
-        whisper_hint = ""
-        if not settings.get('whisper_enabled'):
-            whisper_hint = "\n↳ Use `/config setting:Set Whisper Channel` to set up"
-        status_field += f"**Whisper System**: {whisper_status}{whisper_hint}\n"
+        # Show status for each feature with enable/disable hints
+        features = [
+            ("Whisper System", "whispers", "/config setting:Set Whisper Channel"),
+            ("Logging System", "logging", "/logging type:Toggle System"),
+            ("Leveling System", "leveling", "/levelconfig toggle")
+        ]
 
-        # Logging System Status
-        logging_status = "✅ Enabled" if settings.get('logging_enabled') else "❌ Not Configured"
-        logging_hint = ""
-        if not settings.get('logging_enabled'):
-            logging_hint = "\n↳ Use `/logging type:Set Channel` to set up"
-        status_field += f"**Logging System**: {logging_status}{logging_hint}\n"
-
-        # Leveling System Status
-        leveling_status = "✅ Enabled" if settings.get('leveling_enabled') else "❌ Not Configured"
-        leveling_hint = ""
-        if not settings.get('leveling_enabled'):
-            leveling_hint = "\n↳ Configure with `/levelconfig` commands"
-        status_field += f"**Leveling System**: {leveling_status}{leveling_hint}"
+        for feature_name, feature_key, command in features:
+            enabled = settings.get(f'{feature_key}_enabled', False)
+            status = "✅ Enabled" if enabled else "❌ Disabled"
+            hint = f"\n↳ Use `{command}` to {'disable' if enabled else 'enable'}"
+            status_field += f"**{feature_name}**: {status}{hint}\n"
 
         embed.add_field(
             name="🔌 Feature Status",

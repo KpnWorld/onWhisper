@@ -693,3 +693,33 @@ class DBManager:
                 SET enabled = ?, options_json = ?
             """, (guild_id, feature, enabled, options_json, enabled, options_json))
 
+    # Remove these duplicated methods
+    async def get_logging_settings(self, guild_id: int) -> Optional[Dict[str, Any]]:
+        """Get logging settings for a guild"""
+        settings = await self.get_feature_settings(guild_id, "logging")
+        if settings and settings['enabled'] and settings['options']:
+            return {
+                'log_channel_id': settings['options'].get('channel_id'),
+                'enabled_events': settings['options'].get('events', [])
+            }
+        return None
+
+    async def set_logging_settings(self, guild_id: int, channel_id: int, events: List[str] = []):
+        """Set logging settings for a guild"""
+        options = {
+            'channel_id': channel_id,
+            'events': events
+        }
+        await self.set_feature_settings(guild_id, "logging", True, options)
+
+    async def get_leveling_settings(self, guild_id: int) -> Optional[Dict[str, Any]]:
+        """Get leveling settings for a guild"""
+        settings = await self.get_feature_settings(guild_id, "leveling")
+        if settings and settings['enabled']:
+            return settings['options'] or {}
+        return None
+
+    async def set_leveling_settings(self, guild_id: int, enabled: bool, options: Dict[str, Any] = {}):
+        """Set leveling settings for a guild"""
+        await self.set_feature_settings(guild_id, "leveling", enabled, options)
+
