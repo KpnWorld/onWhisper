@@ -182,7 +182,19 @@ class ConfigCog(commands.Cog):
             # Basic settings
             settings['prefix'] = await self.bot.db.get_guild_setting(guild_id, "prefix") or "!"
             settings['language'] = await self.bot.db.get_guild_setting(guild_id, "language") or "en"
-            settings['mod_role_id'] = await self.bot.db.get_guild_setting(guild_id, "mod_role")
+
+            # Get logging settings
+            logging_settings = await self.bot.db.get_logging_settings(guild_id)
+            settings['logging_enabled'] = bool(logging_settings)
+            if logging_settings:
+                settings['logging_channel_id'] = logging_settings['log_channel_id']
+                settings['logging_events'] = logging_settings['enabled_events']
+
+            # Get leveling settings
+            leveling_settings = await self.bot.db.get_leveling_settings(guild_id)
+            settings['leveling_enabled'] = bool(leveling_settings)
+            if leveling_settings:
+                settings.update(leveling_settings)
 
             # Get whisper settings
             whisper_settings = await self.bot.db.get_whisper_settings(guild_id)
@@ -190,20 +202,6 @@ class ConfigCog(commands.Cog):
             if whisper_settings:
                 settings['whisper_channel_id'] = whisper_settings['channel_id']
                 settings['whisper_role_id'] = whisper_settings['staff_role_id']
-
-            # Get logging settings
-            logging_settings = await self.bot.db.get_logging_settings(guild_id)
-            settings['logging_enabled'] = bool(logging_settings)
-            if logging_settings:
-                settings['logging_channel_id'] = logging_settings['log_channel_id']
-
-            # Get leveling settings
-            level_config = await self.bot.db.get_level_config(guild_id)
-            settings['leveling_enabled'] = bool(level_config)
-            if level_config:
-                settings['level_cooldown'] = level_config['cooldown']
-                settings['level_min_xp'] = level_config['min_xp']
-                settings['level_max_xp'] = level_config['max_xp']
 
         except Exception as e:
             self.log.error(f"Error fetching settings: {str(e)}", exc_info=True)

@@ -6,6 +6,7 @@ import random
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, List, Optional, Any, TypeVar, cast
+import json
 
 from aiosqlite import Connection, Cursor
 
@@ -189,6 +190,15 @@ class DBManager:
             closed_at TIMESTAMP,
             PRIMARY KEY (guild_id, whisper_id)
         );
+
+        -- Feature Settings Table
+        CREATE TABLE IF NOT EXISTS feature_settings (
+            guild_id INTEGER,
+            feature TEXT,
+            enabled BOOLEAN DEFAULT FALSE,
+            options_json TEXT,
+            PRIMARY KEY (guild_id, feature)
+        );
         """)
         await self.connection.commit()
         self.log.info("Database tables created.")
@@ -364,24 +374,6 @@ class DBManager:
             row = await cursor.fetchone()
             return row[0] if row else None
 
-    async def get_level_config(self, guild_id: int) -> Optional[Dict[str, Any]]:
-        """Get the level configuration for a guild"""
-        async with self.connection.execute(
-            "SELECT * FROM level_config WHERE guild_id = ?",
-            (guild_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            return dict(zip([column[0] for column in cursor.description], row)) if row else None
-
-    async def set_level_config(self, guild_id: int, cooldown: int, min_xp: int, max_xp: int):
-        """Set the level configuration for a guild"""
-        async with self.transaction() as tr:
-            await tr.execute("""
-                INSERT INTO level_config (guild_id, cooldown, min_xp, max_xp)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET cooldown = ?, min_xp = ?, max_xp = ?
-            """, (guild_id, cooldown, min_xp, max_xp, cooldown, min_xp, max_xp))
-
     # -------------------- Role Management Methods --------------------
 
     async def add_autorole(self, guild_id: int, role_id: int):
@@ -454,15 +446,6 @@ class DBManager:
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else None
-
-    async def set_logging_settings(self, guild_id: int, log_channel_id: int, options_json: str):
-        """Set logging configuration for a guild"""
-        async with self.transaction() as tr:
-            await tr.execute("""
-                INSERT INTO logging_settings (guild_id, log_channel_id, options_json)
-                VALUES (?, ?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET log_channel_id = ?, options_json = ?
-            """, (guild_id, log_channel_id, options_json, log_channel_id, options_json))
 
     # -------------------- Logging & Mod Actions --------------------
 
@@ -682,4 +665,31 @@ class DBManager:
             if row:
                 return {"channel_id": row[0], "staff_role_id": row[1]}
             return None
+
+    # -------------------- Feature Settings Methods --------------------
+
+    async def get_feature_settings(self, guild_id: int, feature: str) -> Optional[Dict[str, Any]]:
+        """Get settings for a specific feature"""
+        async with self.connection.execute(
+            "SELECT enabled, options_json FROM feature_settings WHERE guild_id = ? AND feature = ?",
+            (guild_id, feature)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    'enabled': bool(row[0]),
+                    'options': json.loads(row[1]) if row[1] else {}
+                }
+            return None
+
+    async def set_feature_settings(self, guild_id: int, feature: str, enabled: bool, options: Optional[Dict[str, Any]] = None):
+        """Set settings for a specific feature"""
+        options_json = json.dumps(options) if options else None
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO feature_settings (guild_id, feature, enabled, options_json)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(guild_id, feature) DO UPDATE 
+                SET enabled = ?, options_json = ?
+            """, (guild_id, feature, enabled, options_json, enabled, options_json))
 

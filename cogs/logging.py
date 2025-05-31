@@ -7,12 +7,52 @@ from discord.ext import commands
 from discord.app_commands import Choice
 import logging
 
+# Define EventSelect and EventView outside the command
+class EventSelect(discord.ui.Select):
+    def __init__(self, options: List[str], placeholder: str):
+        super().__init__(
+            placeholder=placeholder,
+            min_values=1,
+            max_values=len(options),
+            options=[
+                discord.SelectOption(label=event.replace("_", " ").title(), value=event)
+                for event in options
+            ]
+        )
+
+class EventView(discord.ui.View):
+    def __init__(self, all_events: List[str], type: str):
+        super().__init__(timeout=180)
+        self.selected_events = []
+        
+        select = EventSelect(
+            all_events,
+            f"Select events to {'enable' if type == 'enable' else 'disable'}"
+        )
+        
+        async def select_callback(interaction: discord.Interaction):
+            self.selected_events = select.values
+            await interaction.response.defer()
+            self.stop()
+            
+        select.callback = select_callback
+        self.add_item(select)
+
 class LoggingCog(commands.Cog):
     """Cog for managing logging settings and viewing logs"""
     
     def __init__(self, bot):
         self.bot = bot
-        self.log = logging.getLogger("cogs.logging")  # Use standard logging
+        self.log = logging.getLogger("cogs.logging")
+        self.all_events = [
+            "message_delete", "message_edit",
+            "member_join", "member_leave",
+            "member_ban", "member_unban",
+            "role_create", "role_delete",
+            "channel_create", "channel_delete",
+            "whisper_create", "whisper_close",
+            "whisper_delete"
+        ]
 
     async def _check_manage_server(self, interaction: discord.Interaction) -> bool:
         """Check if user has manage server permissions"""
@@ -24,140 +64,160 @@ class LoggingCog(commands.Cog):
             self.log.error(f"Error checking server permissions: {e}", exc_info=True)
             return False
 
+    async def _log_event(self, guild_id: int, event_type: str, description: str):
+        """Log an event if logging is enabled and event type is configured"""
+        try:
+            # Check if logging feature is enabled
+            feature_settings = await self.bot.db.get_feature_settings(guild_id, "logging")
+            if not feature_settings or not feature_settings['enabled']:
+                return
+
+            # Check if this event type is enabled
+            options = feature_settings['options']
+            enabled_events = options.get('events', [])
+            if event_type not in enabled_events:
+                return
+
+            # Get the logging channel
+            channel_id = options.get('channel_id')
+            if not channel_id:
+                return
+
+            # Insert the log entry
+            await self.bot.db.insert_log(guild_id, event_type, description)
+            
+        except Exception as e:
+            self.log.error(f"Error logging event: {e}", exc_info=True)
+
     @app_commands.command(name="logging", description="Configure logging settings.")
     @app_commands.guild_only()
     @app_commands.choices(type=[
+        Choice(name="Toggle System", value="toggle"),
         Choice(name="Set Channel", value="channel"),
         Choice(name="Enable Events", value="enable"),
         Choice(name="Disable Events", value="disable")
     ])
     async def logging(self, interaction: discord.Interaction, type: str, channel: Optional[discord.TextChannel] = None):
         """Configure logging settings."""
-        
+        if not interaction.guild:
+            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
+
+        if not await self._check_manage_server(interaction):
+            return await interaction.response.send_message("You need Manage Server permission!", ephemeral=True)
+
         try:
-            if not await self._check_manage_server(interaction):
-                return await interaction.response.send_message("You need the Manage Server permission to use this command!", ephemeral=True)
-                
-            if type == "channel":
-                if not channel:
-                    return await interaction.response.send_message("Please specify a channel!", ephemeral=True)
-                    
+            if type == "toggle":
                 try:
-                    # Test if bot can send messages in the channel
-                    await channel.send("🔍 Testing logging channel permissions...", delete_after=0)
-                    
-                    # Get current settings or create default with whisper events
-                    current_settings = {
-                        "events": [
-                            "message_delete", "message_edit", 
-                            "member_join", "member_leave", 
-                            "member_ban", "member_unban",
-                            "whisper_create", "whisper_close",  # Added whisper events
-                            "whisper_delete"
-                        ]
-                    }
-                    
-                    if not interaction.guild:
-                        return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
-                    
-                    # Save settings using proper method
-                    await self.bot.db.set_logging_settings(
-                        interaction.guild.id,
-                        channel.id,
-                        json.dumps(current_settings)
-                    )
-                    
-                    await interaction.response.send_message(f"✅ Logging channel set to {channel.mention}")
-                    
-                except discord.Forbidden as e:
-                    self.log.warning(f"Permission error in logging command: {e}")
-                    await interaction.response.send_message("❌ I don't have permission to send messages in that channel!", ephemeral=True)
-                except Exception as e:
-                    self.log.error(f"Error in logging command: {e}", exc_info=True)
-                    await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
-                    
-            elif type == "enable" or type == "disable":
-                # Create select menu for events
-                class EventSelect(discord.ui.Select):
-                    def __init__(self, options: List[str], placeholder: str):
-                        super().__init__(
-                            placeholder=placeholder,
-                            min_values=1,
-                            max_values=len(options),
-                            options=[
-                                discord.SelectOption(label=event.replace("_", " ").title(), value=event)
-                                for event in options
+                    # Get current feature settings
+                    settings = await self.bot.db.get_feature_settings(interaction.guild.id, "logging")
+                    is_enabled = settings['enabled'] if settings else False
+
+                    if is_enabled:
+                        # Disable logging
+                        await self.bot.db.set_feature_settings(interaction.guild.id, "logging", False)
+                        await interaction.response.send_message("✅ Logging system has been disabled.")
+                    else:
+                        # Enable logging with default options
+                        default_options = {
+                            'channel_id': interaction.channel.id if isinstance(interaction.channel, discord.TextChannel) else None,
+                            'events': [
+                                "message_delete", "message_edit",
+                                "member_join", "member_leave",
+                                "whisper_create", "whisper_close"
                             ]
+                        }
+                        await self.bot.db.set_feature_settings(
+                            interaction.guild.id,
+                            "logging",
+                            True,
+                            default_options
                         )
-                
-                class EventView(discord.ui.View):
-                    def __init__(self, timeout = 180):
-                        super().__init__(timeout=timeout)
-                        self.selected_events = []
+                        await interaction.response.send_message("✅ Logging system has been enabled with default settings.\n"
+                                                                "Use `/logging channel` to set a specific logging channel.")
+                except Exception as e:
+                    await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+                    return
+
+            elif type == "channel":
+                try:
+                    if not channel:
+                        return await interaction.response.send_message("Please specify a channel!", ephemeral=True)
                         
-                        all_events = [
-                            # Server Events
-                            "message_delete",
-                            "message_edit",
-                            "member_join",
-                            "member_leave",
-                            "member_ban",
-                            "member_unban",
-                            "role_create",
-                            "role_delete",
-                            "channel_create",
-                            "channel_delete",
-                            # Whisper Events
-                            "whisper_create",
-                            "whisper_close",
-                            "whisper_delete"
-                        ]
+                    try:
+                        # Test if bot can send messages in the channel
+                        await channel.send("🔍 Testing logging channel permissions...", delete_after=0)
                         
-                        select = EventSelect(
-                            all_events,
-                            f"Select events to {'enable' if type == 'enable' else 'disable'}"
+                        # Get current settings or create default with whisper events
+                        current_settings = {
+                            "events": [
+                                "message_delete", "message_edit", 
+                                "member_join", "member_leave", 
+                                "member_ban", "member_unban",
+                                "whisper_create", "whisper_close",  # Added whisper events
+                                "whisper_delete"
+                            ]
+                        }
+                        
+                        if not interaction.guild:
+                            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
+                        
+                        # Save settings using proper method
+                        await self.bot.db.set_logging_settings(
+                            interaction.guild.id,
+                            channel.id,
+                            json.dumps(current_settings)
                         )
                         
-                        async def select_callback(interaction: discord.Interaction):
-                            self.selected_events = select.values
-                            self.stop()
-                            
-                        select.callback = select_callback
-                        self.add_item(select)
-                
-                view = EventView()
+                        await interaction.response.send_message(f"✅ Logging channel set to {channel.mention}")
+                        
+                    except discord.Forbidden as e:
+                        self.log.warning(f"Permission error in logging command: {e}")
+                        await interaction.response.send_message("❌ I don't have permission to send messages in that channel!", ephemeral=True)
+                    except Exception as e:
+                        self.log.error(f"Error in logging command: {e}", exc_info=True)
+                        await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
+                        
+                except Exception as e:
+                    self.log.error(f"Unexpected error in logging command: {e}", exc_info=True)
+                    await interaction.response.send_message("❌ An unexpected error occurred.", ephemeral=True)
+
+            elif type == "enable" or type == "disable":
+                # Create event selection view
+                view = EventView(self.all_events, type)
                 await interaction.response.send_message(
-                    f"Please select the events you want to {'enable' if type == 'enable' else 'disable'}:",
+                    f"Please select the events you want to {type}:",
                     view=view,
                     ephemeral=True
                 )
                 
-                timeout = await view.wait()
-                if timeout:
-                    await interaction.followup.send("Selection timed out!", ephemeral=True)
-                    return
+                # Wait for selection
+                timed_out = await view.wait()
+                if timed_out:
+                    return await interaction.followup.send("Selection timed out!", ephemeral=True)
+                
+                if not view.selected_events:
+                    return await interaction.followup.send("No events selected!", ephemeral=True)
                     
                 try:
-                    # Get current settings from logging_settings table
-                    if not interaction.guild:
-                        return await interaction.followup.send("This command can only be used in a server!", ephemeral=True)
-                    settings = await self.bot.db.get_logging_settings(interaction.guild.id)
-                    if settings:
-                        options = json.loads(settings['options_json'])
-                    else:
-                        options = {"events": []}
+                    settings = await self.bot.db.get_feature_settings(interaction.guild.id, "logging")
+                    current_events = settings.get('options', {}).get('events', []) if settings else []
+                    channel_id = settings.get('options', {}).get('channel_id') if settings else 0
                     
-                    # Update events
+                    # Update events list
                     if type == "enable":
-                        options["events"] = list(set(options["events"] + view.selected_events))
+                        new_events = list(set(current_events + view.selected_events))
                     else:
-                        options["events"] = [e for e in options["events"] if e not in view.selected_events]
+                        new_events = [e for e in current_events if e not in view.selected_events]
                     
-                    # Save updated settings using proper method
-                    await self.bot.db.set_logging_settings(
+                    # Save updated settings
+                    await self.bot.db.set_feature_settings(
                         interaction.guild.id,
-                        settings['log_channel_id'] if settings else 0,  # Keep existing channel or use 0
-                        json.dumps(options)
+                        "logging",
+                        True,
+                        {
+                            'channel_id': channel_id,
+                            'events': new_events
+                        }
                     )
                     
                     events_str = ", ".join(e.replace("_", " ").title() for e in view.selected_events)
@@ -168,9 +228,10 @@ class LoggingCog(commands.Cog):
                     
                 except Exception as e:
                     await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+                    self.log.error(f"Error updating logging events: {e}", exc_info=True)
 
         except Exception as e:
-            self.log.error(f"Unexpected error in logging command: {e}", exc_info=True)
+            self.log.error(f"Error in logging command: {e}", exc_info=True)
             await interaction.response.send_message("❌ An unexpected error occurred.", ephemeral=True)
 
     @app_commands.command(name="viewlogs", description="View event logs with filters.")

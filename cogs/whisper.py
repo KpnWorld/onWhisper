@@ -20,26 +20,39 @@ class WhisperCog(commands.Cog):
             return False
         return interaction.user.guild_permissions.manage_threads
     
-    @app_commands.command(name="whisper", description="Manage whisper threads.")
+    @app_commands.command(name="whisper")
     @commands.guild_only()
     @app_commands.guild_only()
     async def whisper(self, interaction: discord.Interaction, action: str, user: Optional[discord.User] = None):
         """Manage whisper threads."""
-        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+        if not interaction.guild:
             return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
-            
+
+        # Check if whisper feature is enabled
+        feature_settings = await self.bot.db.get_feature_settings(interaction.guild.id, "whispers")
+        if not feature_settings or not feature_settings['enabled']:
+            return await interaction.response.send_message(
+                "❌ Whisper system is not enabled. An admin must enable it first.",
+                ephemeral=True
+            )
+
+        # Get whisper options from feature settings
+        options = feature_settings['options']
+        channel_id = options.get('channel_id')
+        staff_role_id = options.get('staff_role_id')
+
+        if not channel_id or not staff_role_id:
+            return await interaction.response.send_message(
+                "❌ Whisper system is not properly configured. Use `/config` to set it up.",
+                ephemeral=True
+            )
+
+        # Use configured channel instead of current channel
+        channel_to_use = interaction.guild.get_channel(channel_id)
+        if not isinstance(channel_to_use, discord.TextChannel):
+            return await interaction.response.send_message("❌ The configured channel must be a text channel!", ephemeral=True)
+
         if action == "create":
-            # Get configured channel
-            whisper_channel = await self._get_whisper_channel(interaction.guild.id)
-            if not whisper_channel:
-                return await interaction.response.send_message(
-                    "No whisper channel configured! An admin must use `/whisperconfig` first.", 
-                    ephemeral=True
-                )
-
-            # Use configured channel instead of current channel
-            channel_to_use = whisper_channel
-
             if not user:
                 return await interaction.response.send_message("Please specify a user to create a whisper for!", ephemeral=True)
                 
