@@ -54,6 +54,82 @@ class LoggingCog(commands.Cog):
             "whisper_delete"
         ]
 
+    # Message Events    @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message):
+        """Called when a message is deleted"""
+        if not message.guild or message.author.bot:
+            return
+        channel_ref = f"#{message.channel.name}" if isinstance(message.channel, discord.TextChannel) else "a channel"
+        description = f"Message by {message.author.mention} deleted in {channel_ref}"
+        if message.content:
+            description += f"\nContent: {message.content[:1900]}"  # Truncate long messages        await self._log_event(message.guild.id, "message_delete", description)
+        
+    @commands.Cog.listener()
+    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        """Called when a message is edited"""
+        if not before.guild or before.author.bot or before.content == after.content:
+            return
+        channel_ref = f"#{before.channel.name}" if isinstance(before.channel, discord.TextChannel) else "a channel"
+        description = (f"Message by {before.author.mention} edited in {channel_ref}\n"
+                      f"Before: {before.content[:900]}\nAfter: {after.content[:900]}")  # Truncate long messages
+        await self._log_event(before.guild.id, "message_edit", description)
+
+    # Member Events
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        """Called when a member joins the server"""
+        if member.bot:
+            return
+        description = f"{member.mention} joined the server"
+        await self._log_event(member.guild.id, "member_join", description)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        """Called when a member leaves the server"""
+        if member.bot:
+            return
+        description = f"{member.mention} left the server"
+        await self._log_event(member.guild.id, "member_leave", description)
+
+    # Ban Events
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, user: discord.User):
+        """Called when a member is banned"""
+        description = f"{user.mention} was banned from the server"
+        await self._log_event(guild.id, "member_ban", description)
+
+    @commands.Cog.listener()
+    async def on_member_unban(self, guild: discord.Guild, user: discord.User):
+        """Called when a member is unbanned"""
+        description = f"{user.mention} was unbanned from the server"
+        await self._log_event(guild.id, "member_unban", description)
+
+    # Role Events
+    @commands.Cog.listener()
+    async def on_guild_role_create(self, role: discord.Role):
+        """Called when a role is created"""
+        description = f"Role created: {role.mention}"
+        await self._log_event(role.guild.id, "role_create", description)
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role: discord.Role):
+        """Called when a role is deleted"""
+        description = f"Role deleted: {role.name}"
+        await self._log_event(role.guild.id, "role_delete", description)
+
+    # Channel Events
+    @commands.Cog.listener()
+    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+        """Called when a channel is created"""
+        description = f"Channel created: {channel.mention}"
+        await self._log_event(channel.guild.id, "channel_create", description)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        """Called when a channel is deleted"""
+        description = f"Channel deleted: #{channel.name}"
+        await self._log_event(channel.guild.id, "channel_delete", description)
+
     async def _check_manage_server(self, interaction: discord.Interaction) -> bool:
         """Check if user has manage server permissions"""
         try:

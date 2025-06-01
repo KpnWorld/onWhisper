@@ -4,6 +4,7 @@ from discord.ext import commands
 from typing import Optional
 from datetime import datetime, timedelta
 import logging
+import asyncio
 
 class ModerationCog(commands.Cog):
     """Cog for moderation commands"""
@@ -31,10 +32,73 @@ class ModerationCog(commands.Cog):
             
         # Check for mod role
         mod_role_id = await self.bot.db.get_guild_setting(guild.id, "mod_role")
-        if mod_role_id:
-            return discord.utils.get(user.roles, id=int(mod_role_id)) is not None
+        if mod_role_id:            return discord.utils.get(user.roles, id=int(mod_role_id)) is not None
             
         return False
+    
+    async def _chunked_purge(self, channel: discord.TextChannel, amount: int) -> int:
+        """Delete messages in chunks to handle rate limits better.
+        Returns the number of messages actually deleted."""
+        total_deleted = 0
+        messages = []
+        
+        try:
+            # Collect messages to delete
+            async for message in channel.history(limit=amount):
+                messages.append(message)
+                
+            if not messages:
+                return 0
+                
+            # Process in chunks of 100 messages for bulk deletion
+            chunk_size = 100 if amount > 100 else amount
+            
+            for i in range(0, len(messages), chunk_size):
+                chunk = messages[i:i + chunk_size]
+                
+                try:
+                    # For single messages, delete individually
+                    if len(chunk) == 1:
+                        await chunk[0].delete()
+                        total_deleted += 1
+                    else:
+                        # Try bulk deletion first
+                        await channel.delete_messages(chunk)
+                        total_deleted += len(chunk)
+                        
+                except discord.HTTPException as e:
+                    if e.code == 50034:  # Messages too old
+                        # Fall back to individual deletion with delay
+                        for msg in chunk:
+                            try:
+                                await msg.delete()
+                                total_deleted += 1
+                                await asyncio.sleep(0.5)  # Rate limit prevention
+                            except (discord.NotFound, discord.Forbidden):
+                                continue
+                            except discord.HTTPException as e:
+                                if e.code == 429:  # Rate limited
+                                    retry_after = getattr(e, 'retry_after', 5)  # Default to 5s if not provided
+                                    await asyncio.sleep(retry_after)
+                                    continue
+                                else:
+                                    raise
+                    elif e.code == 429:  # Rate limited
+                        retry_after = getattr(e, 'retry_after', 5)  # Default to 5s if not provided
+                        await asyncio.sleep(retry_after)
+                        # Retry this chunk
+                        i -= chunk_size
+                    else:
+                        raise
+                        
+                # Add delay between chunks to prevent rate limits
+                if i + chunk_size < len(messages):
+                    await asyncio.sleep(1)
+                    
+        except discord.Forbidden:
+            raise
+            
+        return total_deleted
 
     @commands.guild_only()
     @commands.hybrid_command(name="ban", description="Ban a member from the server.")
@@ -214,10 +278,9 @@ class ModerationCog(commands.Cog):
     
     @commands.guild_only()
     @commands.hybrid_command(name="purge", description="Delete a number of messages.")
-    @app_commands.describe(amount="Number of messages to delete (1-1000)")
+    @app_commands.describe(amount="Number of messages to delete (1-200)")
     async def purge(self, ctx: commands.Context, amount: int):
-        """Delete a number of messages."""
-        
+        """Delete a number of messages from the channel."""
         if not await self._check_mod_permissions(ctx.interaction if hasattr(ctx, 'interaction') else ctx):
             return await ctx.send("You don't have permission to use this command!", ephemeral=True)
             
@@ -225,24 +288,54 @@ class ModerationCog(commands.Cog):
             return await ctx.send("This command can only be used in text channels!", ephemeral=True)
             
         # Add bounds checking for amount
-        if amount < 1 or amount > 1000:
-            return await ctx.send("Please provide a number between 1 and 1000.", ephemeral=True)
+        if amount < 1 or amount > 200:
+            return await ctx.send("Please provide a number between 1 and 200.", ephemeral=True)
 
+        # Defer the response since this might take a while
+        if ctx.interaction:
+            await ctx.defer(ephemeral=True)
+        
         try:
-            deleted = await ctx.channel.purge(limit=amount + 1)  # +1 to include command message
-            await ctx.send(f"✨ Deleted {len(deleted) - 1} messages.", ephemeral=True)
+            # Delete command message first
+            try:
+                await ctx.message.delete()
+            except (discord.NotFound, AttributeError):
+                pass  # Message might be already deleted or not exist (slash command)
             
-            await self.bot.db.insert_mod_action(
-                ctx.guild,
-                ctx.author.id,
-                "purge",
-                f"Purged {len(deleted) - 1} messages in #{ctx.channel.name}",
-                ctx.author.id
-            )
+            deleted_count = await self._chunked_purge(ctx.channel, amount)
+              # Log the action if we have a valid guild
+            if ctx.guild:
+                await self.bot.db.insert_mod_action(
+                    ctx.guild.id,
+                    ctx.author.id,
+                    "purge",
+                    f"Purged {deleted_count} messages in #{ctx.channel.name}",
+                    ctx.author.id
+                )
             
+            response = f"✨ Successfully deleted {deleted_count} message{'s' if deleted_count != 1 else ''}."
+            if deleted_count < amount:
+                response += f"\nNote: Could not delete {amount - deleted_count} messages (they might be too old)."
+            
+            # Send response based on context
+            if hasattr(ctx, 'interaction') and ctx.interaction:
+                if hasattr(ctx.interaction, 'response') and ctx.interaction.response.is_done():
+                    await ctx.interaction.followup.send(response, ephemeral=True)
+                else:
+                    await ctx.interaction.response.send_message(response, ephemeral=True)
+            else:
+                # For text command, send and then delete after 5 seconds
+                msg = await ctx.send(response)
+                await asyncio.sleep(5)
+                try:
+                    await msg.delete()
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+                    
         except discord.Forbidden:
             await ctx.send("I don't have permission to delete messages!", ephemeral=True)
         except Exception as e:
+            self.log.error(f"Error in purge command: {e}", exc_info=True)
             await ctx.send(f"An error occurred: {str(e)}", ephemeral=True)
     
     @commands.guild_only()
