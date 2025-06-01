@@ -690,41 +690,93 @@ class DBManager:
                 ON CONFLICT(guild_id) DO UPDATE SET channel_id = ?, staff_role_id = ?
             """, (guild_id, channel_id, staff_role_id, channel_id, staff_role_id))
 
-    async def get_whisper_settings(self, guild_id: int) -> Optional[Dict[str, int]]:
-        """Get the whisper settings for a guild"""
-        async with self.connection.execute(
-            "SELECT channel_id, staff_role_id FROM whisper_settings WHERE guild_id = ?",
-            (guild_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return {"channel_id": row[0], "staff_role_id": row[1]}
+    async def get_whisper_settings(self, guild_id: int) -> Optional[Dict[str, Any]]:
+        """Get the whisper settings for a guild.
+        
+        Args:
+            guild_id: The Discord guild ID
+            
+        Returns:
+            Dict containing channel_id and staff_role_id, or None if not configured
+            
+        Note:
+            Returns None if either channel_id or staff_role_id is missing
+        """
+        try:
+            feature_settings = await self.get_feature_settings(guild_id, "whispers")
+            if not feature_settings or not feature_settings['enabled']:
+                return None
+                
+            options = feature_settings['options']
+            if not options.get('channel_id') or not options.get('staff_role_id'):
+                return None
+                
+            return {
+                "channel_id": int(options['channel_id']),
+                "staff_role_id": int(options['staff_role_id'])
+            }
+        except (ValueError, KeyError) as e:
+            self.log.error(f"Invalid whisper settings for guild {guild_id}: {e}")
             return None
 
     # -------------------- Feature Settings Methods --------------------
 
     async def get_feature_settings(self, guild_id: int, feature: str) -> Optional[Dict[str, Any]]:
-        """Get settings for a specific feature"""
-        async with self.connection.execute(
-            "SELECT enabled, options_json FROM feature_settings WHERE guild_id = ? AND feature = ?",
-            (guild_id, feature)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return {
-                    'enabled': bool(row[0]),
-                    'options': json.loads(row[1]) if row[1] else {}
-                }
+        """Get settings for a specific feature.
+        
+        Args:
+            guild_id: The Discord guild ID
+            feature: Feature name (e.g., 'whispers', 'logging', 'leveling')
+            
+        Returns:
+            Dict containing 'enabled' status and feature options, or None if not found
+        """
+        try:
+            async with self.connection.execute(
+                "SELECT enabled, options_json FROM feature_settings WHERE guild_id = ? AND feature = ?",
+                (guild_id, feature)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return {
+                        'enabled': bool(row[0]),
+                        'options': json.loads(row[1]) if row[1] else {}
+                    }
+                return None
+        except json.JSONDecodeError:
+            self.log.error(f"Invalid JSON in feature settings for guild {guild_id}, feature {feature}")
             return None
 
-    async def set_feature_settings(self, guild_id: int, feature: str, enabled: bool, options: Optional[Dict[str, Any]] = None):
-        """Set settings for a specific feature"""
-        options_json = json.dumps(options) if options else None
-        async with self.transaction() as tr:
-            await tr.execute("""
-                INSERT INTO feature_settings (guild_id, feature, enabled, options_json)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(guild_id, feature) DO UPDATE 
-                SET enabled = ?, options_json = ?
-            """, (guild_id, feature, enabled, options_json, enabled, options_json))
+    async def set_feature_settings(self, guild_id: int, feature: str, enabled: bool, 
+                                 options: Optional[Dict[str, Any]] = None) -> bool:
+        """Set settings for a specific feature.
+        
+        Args:
+            guild_id: The Discord guild ID
+            feature: Feature name (e.g., 'whispers', 'logging', 'leveling')
+            enabled: Whether the feature is enabled
+            options: Optional dictionary of feature-specific settings
+            
+        Returns:
+            bool: True if successful, False if error occurred
+            
+        Raises:
+            ValueError: If options is invalid
+        """
+        if options is not None and not isinstance(options, dict):
+            raise ValueError("Options must be a dictionary or None")
+            
+        try:
+            options_json = json.dumps(options) if options else None
+            async with self.transaction() as tr:
+                await tr.execute("""
+                    INSERT INTO feature_settings (guild_id, feature, enabled, options_json)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(guild_id, feature) DO UPDATE 
+                    SET enabled = ?, options_json = ?
+                """, (guild_id, feature, enabled, options_json, enabled, options_json))
+            return True
+        except Exception as e:
+            self.log.error(f"Failed to set feature settings: {e}")
+            return False
 
