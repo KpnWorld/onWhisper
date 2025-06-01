@@ -24,6 +24,22 @@ class RolesCog(commands.Cog):
             
         return user.guild_permissions.manage_roles
     
+    async def _get_role_settings(self, guild_id: int) -> Optional[dict]:
+        """Get role management settings"""
+        feature_settings = await self.bot.db.get_feature_settings(guild_id, "roles")
+        if not feature_settings or not feature_settings['enabled']:
+            return None
+        return feature_settings['options']
+
+    async def _save_role_settings(self, guild_id: int, options: dict):
+        """Save role management settings"""
+        await self.bot.db.set_feature_settings(
+            guild_id,
+            "roles",
+            True,
+            options
+        )
+
     roles = Group(name="roles", description="Manage server roles.")
     
     @roles.command(name="info", description="Get information about a role.")

@@ -202,22 +202,20 @@ class LevelingCog(commands.Cog):
             return await interaction.response.send_message("Cooldown must be between 0 and 3600 seconds!", ephemeral=True)
             
         try:
-            # Get current config
-            config = await self.bot.db.get_level_config(interaction.guild.id)
-            if not config:
-                min_xp = 15
-                max_xp = 25
-            else:
-                min_xp = config['min_xp']
-                max_xp = config['max_xp']
-            
-            # Update config
-            await self.bot.db.set_level_config(
-                interaction.guild.id,
-                seconds,
-                min_xp,
-                max_xp
-            )
+            # Get current feature settings
+            feature_settings = await self.bot.db.get_feature_settings(interaction.guild.id, "leveling")
+            if not feature_settings or not feature_settings['enabled']:
+                return await interaction.response.send_message("The leveling system is currently disabled!", ephemeral=True)
+
+            # Get current options or use defaults
+            options = feature_settings.get('options', {})
+            options['cooldown'] = seconds
+            options['min_xp'] = options.get('min_xp', 15)
+            options['max_xp'] = options.get('max_xp', 25)
+            options['dm_notifications'] = options.get('dm_notifications', True)
+
+            # Update feature settings
+            await self.bot.db.set_feature_settings(interaction.guild.id, "leveling", True, options)
             
             await interaction.response.send_message(f"✅ XP cooldown set to {seconds} seconds.")
             
@@ -231,7 +229,6 @@ class LevelingCog(commands.Cog):
     )
     async def set_xprange(self, interaction: discord.Interaction, min_xp: int, max_xp: int):
         """Set the XP range for messages."""
-        
         if not interaction.guild:
             return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
 
@@ -246,17 +243,20 @@ class LevelingCog(commands.Cog):
             return await interaction.response.send_message("Minimum XP cannot be greater than maximum XP!", ephemeral=True)
             
         try:
-            # Get current config
-            config = await self.bot.db.get_level_config(interaction.guild.id)
-            cooldown = config['cooldown'] if config else 60
+            # Get current feature settings
+            feature_settings = await self.bot.db.get_feature_settings(interaction.guild.id, "leveling")
+            if not feature_settings or not feature_settings['enabled']:
+                return await interaction.response.send_message("The leveling system is currently disabled!", ephemeral=True)
+                
+            # Get current options or use defaults
+            options = feature_settings.get('options', {})
+            options['min_xp'] = min_xp
+            options['max_xp'] = max_xp
+            options['cooldown'] = options.get('cooldown', 60)
+            options['dm_notifications'] = options.get('dm_notifications', True)
             
-            # Update config
-            await self.bot.db.set_level_config(
-                interaction.guild.id,
-                cooldown,
-                min_xp,
-                max_xp
-            )
+            # Update feature settings
+            await self.bot.db.set_feature_settings(interaction.guild.id, "leveling", True, options)
             
             await interaction.response.send_message(f"✅ XP range set to {min_xp}-{max_xp} per message.")
             
@@ -268,7 +268,6 @@ class LevelingCog(commands.Cog):
     @app_commands.checks.has_permissions(manage_guild=True)
     async def toggle_notifications(self, interaction: discord.Interaction):
         """Toggle level-up DM notifications."""
-        
         if not interaction.guild:
             return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
 
@@ -277,14 +276,22 @@ class LevelingCog(commands.Cog):
             return await interaction.response.send_message("You need the Manage Server permission to use this command!", ephemeral=True)
 
         try:
-            guild_id = interaction.guild.id
-            current = await self.bot.db.get_guild_setting(guild_id, "level_up_dm") or "false"
-            new_value = "false" if current == "true" else "true"
+            # Get current feature settings
+            feature_settings = await self.bot.db.get_feature_settings(interaction.guild.id, "leveling")
+            if not feature_settings or not feature_settings['enabled']:
+                return await interaction.response.send_message("The leveling system is currently disabled!", ephemeral=True)
             
-            # Update setting
-            await self.bot.db.set_guild_setting(interaction.guild.id, "level_up_dm", new_value)
+            # Get current options or use defaults
+            options = feature_settings.get('options', {})
+            options['dm_notifications'] = not options.get('dm_notifications', True)
+            options['cooldown'] = options.get('cooldown', 60)
+            options['min_xp'] = options.get('min_xp', 15)
+            options['max_xp'] = options.get('max_xp', 25)
             
-            status = "enabled" if new_value == "true" else "disabled"
+            # Update feature settings
+            await self.bot.db.set_feature_settings(interaction.guild.id, "leveling", True, options)
+            
+            status = "enabled" if options['dm_notifications'] else "disabled"
             await interaction.response.send_message(f"✅ Level-up DM notifications have been {status}.")
             
         except Exception as e:
@@ -383,18 +390,17 @@ class LevelingCog(commands.Cog):
             if not message.guild:
                 return
 
-            # Check if leveling feature is enabled
+            # Check if leveling feature is enabled and get settings
             feature_settings = await self.bot.db.get_feature_settings(message.guild.id, "leveling")
             if not feature_settings or not feature_settings['enabled']:
                 return
 
-            # Use the options from feature settings
-            options = feature_settings['options']
+            # Get settings from feature options
+            options = feature_settings.get('options', {})
             cooldown = options.get('cooldown', 60)
             min_xp = options.get('min_xp', 15)
             max_xp = options.get('max_xp', 25)
 
-            # Continue with existing XP logic using the settings
             guild_id = message.guild.id
             user_id = message.author.id
             
@@ -406,13 +412,13 @@ class LevelingCog(commands.Cog):
                 'last_message': ''
             }
             
-            # Check cooldown using timestamp from DB
+            # Check cooldown using timestamp
             current_time = time.time()
             last_time = float(xp_data.get('last_message_ts', 0))
             if current_time - last_time < cooldown:
                 return
 
-            # Calculate XP gain using feature settings
+            # Calculate XP gain
             xp_gain = random.randint(min_xp, max_xp)
             new_xp = xp_data['xp'] + xp_gain
             new_level = self._calculate_level(new_xp)
@@ -464,17 +470,20 @@ class LevelingCog(commands.Cog):
                     except discord.Forbidden:
                         continue
 
-            # Check notification setting using dedicated method
-            if await self.bot.db.get_level_notification_setting(guild_id):
-                try:
-                    embed = discord.Embed(
-                        title="🎉 Level Up!",
-                        description=f"You reached level {new_level} in {guild.name}!",
-                        color=discord.Color.green()
-                    )
-                    await member.send(embed=embed)
-                except discord.Forbidden:
-                    pass
+            # Check notification setting in feature settings
+            feature_settings = await self.bot.db.get_feature_settings(guild_id, "leveling")
+            if feature_settings and feature_settings['enabled']:
+                options = feature_settings.get('options', {})
+                if options.get('dm_notifications', True):
+                    try:
+                        embed = discord.Embed(
+                            title="🎉 Level Up!",
+                            description=f"You reached level {new_level} in {guild.name}!",
+                            color=discord.Color.green()
+                        )
+                        await member.send(embed=embed)
+                    except discord.Forbidden:
+                        pass
                     
         except Exception as e:
             self.log.error(f"Error handling level up: {e}", exc_info=True)

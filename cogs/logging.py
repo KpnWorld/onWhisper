@@ -54,7 +54,8 @@ class LoggingCog(commands.Cog):
             "whisper_delete"
         ]
 
-    # Message Events    @commands.Cog.listener()
+    # Message Events    
+    @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         """Called when a message is deleted"""
         if not message.guild or message.author.bot:
@@ -148,10 +149,10 @@ class LoggingCog(commands.Cog):
     async def _log_event(self, guild_id: int, event_type: str, description: str):
         """Log an event if logging is enabled and event type is configured"""
         try:
-            if not await self._check_logging_enabled(guild_id):
+            feature_settings = await self.bot.db.get_feature_settings(guild_id, "logging")
+            if not feature_settings or not feature_settings['enabled']:
                 return
 
-            feature_settings = await self.bot.db.get_feature_settings(guild_id, "logging")
             options = feature_settings['options']
             enabled_events = options.get('events', [])
             if event_type not in enabled_events:
@@ -200,25 +201,28 @@ class LoggingCog(commands.Cog):
                         # Test if bot can send messages in the channel
                         await channel.send("🔍 Testing logging channel permissions...", delete_after=0)
                         
-                        # Get current settings or create default with whisper events
-                        current_settings = {
-                            "events": [
-                                "message_delete", "message_edit", 
-                                "member_join", "member_leave", 
-                                "member_ban", "member_unban",
-                                "whisper_create", "whisper_close",  # Added whisper events
-                                "whisper_delete"
-                            ]
-                        }
+                        # Get current feature settings
+                        settings = await self.bot.db.get_feature_settings(interaction.guild.id, "logging")
+                        current_events = settings.get('options', {}).get('events', []) if settings else [
+                            "message_delete", "message_edit", 
+                            "member_join", "member_leave", 
+                            "member_ban", "member_unban",
+                            "whisper_create", "whisper_close",
+                            "whisper_delete"
+                        ]
                         
                         if not interaction.guild:
                             return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
                         
-                        # Save settings using proper method
-                        await self.bot.db.set_logging_settings(
+                        # Save settings using feature settings method
+                        await self.bot.db.set_feature_settings(
                             interaction.guild.id,
-                            channel.id,
-                            json.dumps(current_settings)
+                            "logging",
+                            True,
+                            {
+                                'channel_id': channel.id,
+                                'events': current_events
+                            }
                         )
                         
                         await interaction.response.send_message(f"✅ Logging channel set to {channel.mention}")

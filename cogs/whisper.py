@@ -20,10 +20,18 @@ class WhisperCog(commands.Cog):
             return False
         return interaction.user.guild_permissions.manage_threads
     
-    async def _check_whisper_enabled(self, guild_id: int) -> bool:
-        """Check if whisper feature is enabled"""
+    async def _get_whisper_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
+        """Get the configured whisper channel"""
         feature_settings = await self.bot.db.get_feature_settings(guild_id, "whispers")
-        return bool(feature_settings and feature_settings['enabled'])
+        if not feature_settings or not feature_settings['enabled']:
+            return None
+        
+        channel_id = feature_settings['options'].get('channel_id')
+        if not channel_id:
+            return None
+            
+        channel = self.bot.get_channel(channel_id)
+        return channel if isinstance(channel, discord.TextChannel) else None
 
     @app_commands.command(name="whisper")
     @commands.guild_only()
@@ -214,15 +222,3 @@ class WhisperCog(commands.Cog):
             
         except Exception as e:
             await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
-    
-    async def _get_whisper_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
-        """Get the configured whisper channel"""
-        settings = await self.bot.db.get_whisper_settings(guild_id)
-        if not settings:
-            return None
-        
-        channel = self.bot.get_channel(settings['channel_id'])
-        return channel if isinstance(channel, discord.TextChannel) else None
-
-async def setup(bot):
-    await bot.add_cog(WhisperCog(bot))

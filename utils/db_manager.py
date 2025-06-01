@@ -1,25 +1,16 @@
 from __future__ import annotations
-
-import aiosqlite
-import logging
-import random
-import time
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, List, Optional, Any, TypeVar, cast
+from typing import AsyncIterator, Dict, List, Optional, Any, TypeVar
 import json
-
+import time
+import logging
+import aiosqlite
 from aiosqlite import Connection, Cursor
 
 T = TypeVar('T')
 
 class DBManager:    
-    def __init__(self, db_path: str, logger: Optional[logging.Logger] = None):
-        """Initialize the database manager.
-        
-        Args:
-            db_path: Path to the SQLite database file
-            logger: Optional logger instance. If not provided, creates a new one
-        """
+    def __init__(self, db_path: str, logger: Optional[logging.Logger] = None) -> None:
         self.db_path = db_path
         self._conn: Optional[Connection] = None
         self.log = logger or logging.getLogger("DBManager")
@@ -34,30 +25,20 @@ class DBManager:
         Raises:
             RuntimeError: If the connection hasn't been initialized
         """
-        if self._conn is None:
-            raise RuntimeError("Database connection has not been initialized. Call init() first.")
-        return self._conn
-
+        if not self._conn:
+            raise RuntimeError("Database connection not initialized. Call init() first.")
+        return self._conn    
+        
     async def init(self) -> None:
-        """Initialize the database connection and create tables.
-        
-        This method must be called before any other database operations.
-        
-        Raises:
-            aiosqlite.Error: If database connection or initialization fails
-        """
+        """Initialize database connection and create tables"""
         try:
-            self._conn = await aiosqlite.connect(
-                self.db_path,
-                isolation_level=None  # Enable autocommit mode
-            )
-            await self.connection.execute("PRAGMA journal_mode=WAL")  # Enable Write-Ahead Logging
-            await self.connection.execute("PRAGMA foreign_keys=ON")
+            self._conn = await aiosqlite.connect(self.db_path)
+            self._conn.row_factory = aiosqlite.Row
             await self._create_tables()
             await self._create_indexes()
-            self.log.info("Database initialized successfully.")
-        except aiosqlite.Error as e:
-            self.log.error(f"Failed to initialize database: {e}")
+            self.log.info("Database initialization complete")
+        except Exception as e:
+            self.log.error(f"Error initializing database: {e}", exc_info=True)
             raise
 
     async def close(self) -> None:
@@ -78,21 +59,8 @@ class DBManager:
 
     async def _create_tables(self):
         """Create all required database tables"""
-        # Drop and recreate XP table with correct schema
-        await self.connection.execute("DROP TABLE IF EXISTS xp")
         await self.connection.execute("""
-        CREATE TABLE xp (
-            guild_id INTEGER,
-            user_id INTEGER,
-            xp INTEGER DEFAULT 0,
-            level INTEGER DEFAULT 0,
-            last_message_ts REAL DEFAULT 0,
-            last_xp_gain INTEGER DEFAULT 0,
-            last_message TEXT,
-            PRIMARY KEY (guild_id, user_id)
-        )""")
-        await self.connection.executescript("""
-        -- Config Tables
+        -- Guild Settings Table
         CREATE TABLE IF NOT EXISTS guild_settings (
             guild_id INTEGER,
             setting TEXT,
@@ -100,64 +68,16 @@ class DBManager:
             PRIMARY KEY (guild_id, setting)
         );
 
-        CREATE TABLE IF NOT EXISTS whisper_settings (
-            guild_id INTEGER PRIMARY KEY,
-            channel_id INTEGER NOT NULL,
-            staff_role_id INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS logging_settings (
-            guild_id INTEGER PRIMARY KEY,
-            log_channel_id INTEGER NOT NULL,
-            options_json TEXT
-        );
-
-        -- Role Management Tables
-        CREATE TABLE IF NOT EXISTS autoroles (
-            guild_id INTEGER,
-            role_id INTEGER,
-            PRIMARY KEY (guild_id, role_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS color_roles (
-            guild_id INTEGER,
-            role_id INTEGER,
-            color_name TEXT NOT NULL,
-            PRIMARY KEY (guild_id, role_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS reaction_roles (
-            guild_id INTEGER,
-            message_id INTEGER,
-            emoji TEXT,
-            role_id INTEGER NOT NULL,
-            PRIMARY KEY (guild_id, message_id, emoji)
-        );
-
-        CREATE TABLE IF NOT EXISTS level_roles (
-            guild_id INTEGER,
-            level INTEGER,
-            role_id INTEGER NOT NULL,
-            PRIMARY KEY (guild_id, level)
-        );
-
-        -- XP/Leveling Tables
+        -- XP Table
         CREATE TABLE IF NOT EXISTS xp (
             guild_id INTEGER,
             user_id INTEGER,
             xp INTEGER DEFAULT 0,
             level INTEGER DEFAULT 0,
-            last_message_ts REAL DEFAULT 0,
-            last_xp_gain INTEGER DEFAULT 0,
+            last_message_ts TIMESTAMP,
             last_message TEXT,
+            last_xp_gain INTEGER DEFAULT 0,
             PRIMARY KEY (guild_id, user_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS level_config (
-            guild_id INTEGER PRIMARY KEY,
-            cooldown INTEGER DEFAULT 60,
-            min_xp INTEGER DEFAULT 10,
-            max_xp INTEGER DEFAULT 20
         );
 
         -- Logging & Mod Actions Tables
@@ -236,7 +156,6 @@ class DBManager:
         await self.connection.commit()
         self.log.info("Database indexes created.")    
         
-     
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[Cursor]:
         """A context manager for database transactions.
@@ -372,34 +291,38 @@ class DBManager:
             (guild_id, user_id)
         ) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else None
-
+            return row[0] if row else None    
+            
     async def get_level_config(self, guild_id: int) -> Optional[Dict[str, Any]]:
-        """Get level configuration for a guild"""
-        async with self.connection.execute(
-            "SELECT cooldown, min_xp, max_xp FROM level_config WHERE guild_id = ?",
-            (guild_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return {
-                    'cooldown': row[0],
-                    'min_xp': row[1],
-                    'max_xp': row[2]
-                }
+        """Get level configuration for a guild from feature settings"""
+        feature_settings = await self.get_feature_settings(guild_id, "leveling")
+        if not feature_settings or not feature_settings['enabled']:
             return None
 
+        options = feature_settings['options']
+        return {
+            'cooldown': options.get('cooldown', 60),
+            'min_xp': options.get('min_xp', 15),
+            'max_xp': options.get('max_xp', 25)
+        }    
+        
     async def set_level_config(self, guild_id: int, cooldown: int, min_xp: int, max_xp: int):
-        """Set level configuration for a guild"""
-        async with self.transaction() as tr:
-            await tr.execute("""
-                INSERT INTO level_config (guild_id, cooldown, min_xp, max_xp)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET
-                cooldown = excluded.cooldown,
-                min_xp = excluded.min_xp,
-                max_xp = excluded.max_xp
-            """, (guild_id, cooldown, min_xp, max_xp))
+        """Set level configuration for a guild using feature settings"""
+        feature_settings = await self.get_feature_settings(guild_id, "leveling")
+        options = feature_settings['options'] if feature_settings else {}
+        
+        options.update({
+            'cooldown': cooldown,
+            'min_xp': min_xp,
+            'max_xp': max_xp
+        })
+        
+        await self.set_feature_settings(
+            guild_id,
+            "leveling",
+            True,
+            options
+        )
 
     # -------------------- Role Management Methods --------------------
 
@@ -429,30 +352,44 @@ class DBManager:
             return [row[0] for row in rows]
 
     async def set_level_role(self, guild_id: int, level: int, role_id: int):
-        """Set a role reward for reaching a specific level"""
-        async with self.transaction() as tr:
-            await tr.execute("""
-                INSERT INTO level_roles (guild_id, level, role_id)
-                VALUES (?, ?, ?)
-                ON CONFLICT(guild_id, level) DO UPDATE SET role_id = ?
-            """, (guild_id, level, role_id, role_id))
+        """Set a role reward for a specific level using feature settings"""
+        feature_settings = await self.get_feature_settings(guild_id, "leveling")
+        options = feature_settings['options'] if feature_settings else {}
+        
+        # Initialize or get existing role rewards
+        role_rewards = options.get('role_rewards', {})
+        role_rewards[str(level)] = role_id  # Convert level to string for JSON compatibility
+        options['role_rewards'] = role_rewards
+        
+        await self.set_feature_settings(
+            guild_id,
+            "leveling",
+            True,
+            options
+        )
 
     async def delete_level_role(self, guild_id: int, level: int):
-        """Remove a level role reward"""
-        async with self.transaction() as tr:
-            await tr.execute(
-                "DELETE FROM level_roles WHERE guild_id = ? AND level = ?",
-                (guild_id, level)
-            )
+        """Remove a role reward for a specific level using feature settings"""
+        feature_settings = await self.get_feature_settings(guild_id, "leveling")
+        if not feature_settings or not feature_settings['enabled']:
+            return
+            
+        options = feature_settings['options']
+        role_rewards = options.get('role_rewards', {})
+        if str(level) in role_rewards:
+            del role_rewards[str(level)]
+            options['role_rewards'] = role_rewards
+            await self.set_feature_settings(guild_id, "leveling", True, options)
 
     async def get_level_roles(self, guild_id: int) -> List[Dict[str, Any]]:
-        """Get all level role rewards for a guild"""
-        async with self.connection.execute(
-            "SELECT level, role_id FROM level_roles WHERE guild_id = ? ORDER BY level",
-            (guild_id,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [{"level": row[0], "role_id": row[1]} for row in rows]
+        """Get all level role rewards using feature settings"""
+        feature_settings = await self.get_feature_settings(guild_id, "leveling")
+        if not feature_settings or not feature_settings['enabled']:
+            return []
+            
+        role_rewards = feature_settings['options'].get('role_rewards', {})
+        return [{'level': int(level), 'role_id': int(role_id)} 
+                for level, role_id in role_rewards.items()]
 
     # -------------------- Config Methods --------------------
 
@@ -562,14 +499,11 @@ class DBManager:
         async with self.transaction() as tr:
             queries = [
                 "DELETE FROM guild_settings WHERE guild_id = ?",
-                "DELETE FROM whisper_settings WHERE guild_id = ?",
-                "DELETE FROM logging_settings WHERE guild_id = ?",
+                "DELETE FROM feature_settings WHERE guild_id = ?",
                 "DELETE FROM autoroles WHERE guild_id = ?",
                 "DELETE FROM color_roles WHERE guild_id = ?",
                 "DELETE FROM reaction_roles WHERE guild_id = ?",
-                "DELETE FROM level_roles WHERE guild_id = ?",
                 "DELETE FROM xp WHERE guild_id = ?",
-                "DELETE FROM level_config WHERE guild_id = ?",
                 "DELETE FROM logs WHERE guild_id = ?",
                 "DELETE FROM mod_actions WHERE guild_id = ?",
                 "DELETE FROM whispers WHERE guild_id = ?"
@@ -657,126 +591,38 @@ class DBManager:
             """, (level, guild_id, user_id))
 
     async def get_level_roles_for_level(self, guild_id: int, level: int) -> List[int]:
-        """Get all role rewards for a specific level"""
-        async with self.connection.execute(
-            "SELECT role_id FROM level_roles WHERE guild_id = ? AND level <= ? ORDER BY level DESC",
-            (guild_id, level)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [row[0] for row in rows]
-
-    async def get_level_notification_setting(self, guild_id: int) -> bool:
-        """Get whether level-up notifications are enabled"""
-        setting = await self.get_guild_setting(guild_id, "level_up_dm")
-        return setting == "true" if setting is not None else False
-
-    async def reset_user_xp(self, guild_id: int, user_id: int):
-        """Reset a user's XP and level to 0"""
-        async with self.transaction() as tr:
-            await tr.execute("""
-                UPDATE xp 
-                SET xp = 0, level = 0 
-                WHERE guild_id = ? AND user_id = ?
-            """, (guild_id, user_id))
-
-    # -------------------- Whisper Settings Methods --------------------
-    
-    async def set_whisper_channel(self, guild_id: int, channel_id: int, staff_role_id: int):
-        """Set the whisper channel and staff role for a guild"""
-        async with self.transaction() as tr:
-            await tr.execute("""
-                INSERT INTO whisper_settings (guild_id, channel_id, staff_role_id)
-                VALUES (?, ?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET channel_id = ?, staff_role_id = ?
-            """, (guild_id, channel_id, staff_role_id, channel_id, staff_role_id))
-
-    async def get_whisper_settings(self, guild_id: int) -> Optional[Dict[str, Any]]:
-        """Get the whisper settings for a guild.
-        
-        Args:
-            guild_id: The Discord guild ID
+        """Get all role rewards for a specific level using feature settings"""
+        feature_settings = await self.get_feature_settings(guild_id, "leveling")
+        if not feature_settings or not feature_settings['enabled']:
+            return []
             
-        Returns:
-            Dict containing channel_id and staff_role_id, or None if not configured
-            
-        Note:
-            Returns None if either channel_id or staff_role_id is missing
-        """
-        try:
-            feature_settings = await self.get_feature_settings(guild_id, "whispers")
-            if not feature_settings or not feature_settings['enabled']:
-                return None
-                
-            options = feature_settings['options']
-            if not options.get('channel_id') or not options.get('staff_role_id'):
-                return None
-                
-            return {
-                "channel_id": int(options['channel_id']),
-                "staff_role_id": int(options['staff_role_id'])
-            }
-        except (ValueError, KeyError) as e:
-            self.log.error(f"Invalid whisper settings for guild {guild_id}: {e}")
-            return None
+        role_rewards = feature_settings['options'].get('role_rewards', {})
+        role_id = role_rewards.get(str(level))
+        return [int(role_id)] if role_id else []
 
     # -------------------- Feature Settings Methods --------------------
 
     async def get_feature_settings(self, guild_id: int, feature: str) -> Optional[Dict[str, Any]]:
-        """Get settings for a specific feature.
-        
-        Args:
-            guild_id: The Discord guild ID
-            feature: Feature name (e.g., 'whispers', 'logging', 'leveling')
-            
-        Returns:
-            Dict containing 'enabled' status and feature options, or None if not found
-        """
-        try:
-            async with self.connection.execute(
-                "SELECT enabled, options_json FROM feature_settings WHERE guild_id = ? AND feature = ?",
-                (guild_id, feature)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    return {
-                        'enabled': bool(row[0]),
-                        'options': json.loads(row[1]) if row[1] else {}
-                    }
-                return None
-        except json.JSONDecodeError:
-            self.log.error(f"Invalid JSON in feature settings for guild {guild_id}, feature {feature}")
+        """Get feature settings for a specific feature in a guild"""
+        async with self.connection.execute(
+            "SELECT enabled, options_json FROM feature_settings WHERE guild_id = ? AND feature = ?",
+            (guild_id, feature)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    'enabled': bool(row[0]),
+                    'options': json.loads(row[1]) if row[1] else {}
+                }
             return None
 
-    async def set_feature_settings(self, guild_id: int, feature: str, enabled: bool, 
-                                 options: Optional[Dict[str, Any]] = None) -> bool:
-        """Set settings for a specific feature.
-        
-        Args:
-            guild_id: The Discord guild ID
-            feature: Feature name (e.g., 'whispers', 'logging', 'leveling')
-            enabled: Whether the feature is enabled
-            options: Optional dictionary of feature-specific settings
-            
-        Returns:
-            bool: True if successful, False if error occurred
-            
-        Raises:
-            ValueError: If options is invalid
-        """
-        if options is not None and not isinstance(options, dict):
-            raise ValueError("Options must be a dictionary or None")
-            
-        try:
-            options_json = json.dumps(options) if options else None
-            async with self.transaction() as tr:
-                await tr.execute("""
-                    INSERT INTO feature_settings (guild_id, feature, enabled, options_json)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(guild_id, feature) DO UPDATE 
-                    SET enabled = ?, options_json = ?
-                """, (guild_id, feature, enabled, options_json, enabled, options_json))
-            return True
-        except Exception as e:
-            self.log.error(f"Failed to set feature settings: {e}")
-            return False
+    async def set_feature_settings(self, guild_id: int, feature: str, enabled: bool, options: Dict[str, Any]):
+        """Set feature settings for a specific feature in a guild"""
+        async with self.transaction() as tr:
+            await tr.execute("""
+                INSERT INTO feature_settings (guild_id, feature, enabled, options_json)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(guild_id, feature) DO UPDATE 
+                SET enabled = ?, options_json = ?
+            """, (guild_id, feature, enabled, json.dumps(options), enabled, json.dumps(options)))
 

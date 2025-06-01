@@ -32,7 +32,8 @@ class ModerationCog(commands.Cog):
             
         # Check for mod role
         mod_role_id = await self.bot.db.get_guild_setting(guild.id, "mod_role")
-        if mod_role_id:            return discord.utils.get(user.roles, id=int(mod_role_id)) is not None
+        if mod_role_id:            
+            return discord.utils.get(user.roles, id=int(mod_role_id)) is not None
             
         return False
     
@@ -41,6 +42,7 @@ class ModerationCog(commands.Cog):
         Returns the number of messages actually deleted."""
         total_deleted = 0
         messages = []
+        base_delay = 0.5  # Base delay between operations
         
         try:
             # Collect messages to delete
@@ -50,50 +52,75 @@ class ModerationCog(commands.Cog):
             if not messages:
                 return 0
                 
-            # Process in chunks of 100 messages for bulk deletion
-            chunk_size = 100 if amount > 100 else amount
+            # Use smaller chunks to better handle rate limits
+            bulk_chunk_size = 50  # Maximum messages per bulk delete
+            individual_chunk_size = 5  # Messages per individual deletion batch
             
-            for i in range(0, len(messages), chunk_size):
-                chunk = messages[i:i + chunk_size]
+            # First try bulk deletion in chunks
+            current_chunk = []
+            retry_delay = base_delay
+            
+            for message in messages:
+                current_chunk.append(message)
                 
+                if len(current_chunk) >= bulk_chunk_size:
+                    try:
+                        await channel.delete_messages(current_chunk)
+                        total_deleted += len(current_chunk)
+                        current_chunk = []
+                        await asyncio.sleep(1)  # Delay between bulk operations
+                        retry_delay = base_delay  # Reset delay after successful operation
+                    except discord.HTTPException as e:
+                        if e.code == 50034:  # Messages too old
+                            break  # Switch to individual deletion
+                        elif e.code == 429:  # Rate limited
+                            retry_after = getattr(e, 'retry_after', 1) + 0.5
+                            self.log.warning(f"Rate limited during bulk delete, waiting {retry_after}s")
+                            await asyncio.sleep(retry_after)
+                            retry_delay = min(retry_delay * 2, 5)  # Exponential backoff
+                            current_chunk = []  # Reset chunk after rate limit
+                        else:
+                            raise
+            
+            # Process any remaining messages in the bulk chunk
+            if current_chunk:
                 try:
-                    # For single messages, delete individually
-                    if len(chunk) == 1:
-                        await chunk[0].delete()
-                        total_deleted += 1
-                    else:
-                        # Try bulk deletion first
-                        await channel.delete_messages(chunk)
-                        total_deleted += len(chunk)
-                        
+                    await channel.delete_messages(current_chunk)
+                    total_deleted += len(current_chunk)
+                except discord.HTTPException:
+                    pass  # Will handle remaining messages individually
+            
+            # Individual deletion for remaining or old messages
+            remaining_messages = [m for m in messages if m not in current_chunk]
+            current_chunk = []
+            retry_delay = base_delay
+            
+            for message in remaining_messages:
+                try:
+                    await message.delete()
+                    total_deleted += 1
+                    await asyncio.sleep(retry_delay)  # Dynamic delay between deletions
+                    
+                except discord.NotFound:
+                    continue
                 except discord.HTTPException as e:
-                    if e.code == 50034:  # Messages too old
-                        # Fall back to individual deletion with delay
-                        for msg in chunk:
-                            try:
-                                await msg.delete()
-                                total_deleted += 1
-                                await asyncio.sleep(0.5)  # Rate limit prevention
-                            except (discord.NotFound, discord.Forbidden):
-                                continue
-                            except discord.HTTPException as e:
-                                if e.code == 429:  # Rate limited
-                                    retry_after = getattr(e, 'retry_after', 5)  # Default to 5s if not provided
-                                    await asyncio.sleep(retry_after)
-                                    continue
-                                else:
-                                    raise
-                    elif e.code == 429:  # Rate limited
-                        retry_after = getattr(e, 'retry_after', 5)  # Default to 5s if not provided
+                    if e.code == 429:  # Rate limited
+                        retry_after = getattr(e, 'retry_after', 1) + 0.5
+                        self.log.warning(f"Rate limited during individual delete, waiting {retry_after}s")
                         await asyncio.sleep(retry_after)
-                        # Retry this chunk
-                        i -= chunk_size
+                        retry_delay = min(retry_delay * 2, 5)  # Exponential backoff
+                        # Retry this message
+                        try:
+                            await message.delete()
+                            total_deleted += 1
+                        except (discord.NotFound, discord.Forbidden):
+                            continue
                     else:
                         raise
-                        
-                # Add delay between chunks to prevent rate limits
-                if i + chunk_size < len(messages):
-                    await asyncio.sleep(1)
+                
+                # Reset backoff occasionally
+                if total_deleted % 10 == 0:
+                    retry_delay = max(base_delay, retry_delay * 0.75)
                     
         except discord.Forbidden:
             raise
