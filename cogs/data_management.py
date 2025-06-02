@@ -43,6 +43,9 @@ class DataManagementCog(commands.Cog):
             if limit is None or limit <= 0 or limit > 100:
                 return await interaction.followup.send("❌ Limit must be between 1 and 100!", ephemeral=True)
 
+            if not interaction.guild:
+                return await interaction.followup.send("❌ This command can only be used in a guild!", ephemeral=True)
+
             if table == "feature_settings":
                 data = await self.bot.db.get_feature_settings(interaction.guild.id, "*")
             elif table == "guild_settings":
