@@ -40,110 +40,74 @@ class DataManagementCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            # Validate limit
             if limit is None or limit <= 0 or limit > 100:
                 return await interaction.followup.send("❌ Limit must be between 1 and 100!", ephemeral=True)
 
-            # Safe table name list with friendly names
-            table_info = {
-                "guild_settings": {"name": "Guild Settings", "timestamp_fields": []},
-                "feature_settings": {"name": "Feature Settings", "timestamp_fields": []},
-                "xp": {"name": "XP/Levels", "timestamp_fields": ["last_message_ts"]},
-                "logs": {"name": "Logs", "timestamp_fields": ["timestamp"]},
-                "mod_actions": {"name": "Mod Actions", "timestamp_fields": ["timestamp"]},
-                "whispers": {"name": "Whispers", "timestamp_fields": ["created_at", "closed_at"]},
-                "autoroles": {"name": "Auto Roles", "timestamp_fields": []},
-                "reaction_roles": {"name": "Reaction Roles", "timestamp_fields": []}
-            }
-            
-            if table not in table_info:
+            if table == "feature_settings":
+                data = await self.bot.db.get_feature_settings(interaction.guild.id, "*")
+            elif table == "guild_settings":
+                data = await self.bot.db.get_guild_settings(interaction.guild.id)
+            elif table == "xp":
+                data = await self.bot.db.get_leaderboard_page(interaction.guild.id, limit=limit)
+            elif table == "logs":
+                data = await self.bot.db.get_logs_filtered(interaction.guild.id, since_days=None)[:limit]
+            elif table == "mod_actions":
+                data = await self.bot.db.get_mod_actions_page(interaction.guild.id, limit=limit, offset=0)
+            elif table == "whispers":
+                data = await self.bot.db.get_all_whispers(interaction.guild.id)[:limit]
+            elif table == "autoroles":
+                roles = await self.bot.db.get_autoroles(interaction.guild.id)
+                data = [{"role_id": role_id} for role_id in roles]
+            else:
                 return await interaction.followup.send("❌ Invalid table selected!", ephemeral=True)
 
-            # Check if interaction is in a guild
-            if not interaction.guild:
-                return await interaction.followup.send("This command can only be used in a guild!", ephemeral=True)
+            if not data:
+                return await interaction.followup.send(f"No data found in {table}!", ephemeral=True)
 
-            # Get table data with guild filter
-            query = f"SELECT * FROM {table} WHERE guild_id = ? ORDER BY "
-            
-            # Add appropriate ordering
-            if "timestamp" in table_info[table]["timestamp_fields"]:
-                query += "timestamp DESC"
-            elif "created_at" in table_info[table]["timestamp_fields"]:
-                query += "created_at DESC"
-            else:
-                query += "rowid DESC"  # Default ordering
-                
-            query += " LIMIT ?"
+            # Create embeds from data
+            embeds = []
+            for i in range(0, len(data), 5):
+                embed = discord.Embed(
+                    title=f"📊 {table.replace('_', ' ').title()} Data",
+                    color=discord.Color.blue()
+                )
 
-            async with self.bot.db.connection.execute(query, (interaction.guild.id, limit)) as cursor:
-                rows = await cursor.fetchall()
-                if not rows:
-                    return await interaction.followup.send(f"No data found in {table}!", ephemeral=True)
-
-                # Create pages of embeds
-                embeds = []
-                for i in range(0, len(rows), 5):
-                    embed = discord.Embed(
-                        title=f"📊 {table_info[table]['name']} Data",
-                        color=discord.Color.blue()
+                chunk = data[i:i+5]
+                for idx, entry in enumerate(chunk, start=i+1):
+                    if raw:
+                        field_value = f"```json\n{json.dumps(entry, indent=2)}```"
+                    else:
+                        field_value = "\n".join(f"{k}: {v}" for k, v in entry.items() if k != "guild_id")
+                    
+                    embed.add_field(
+                        name=f"Entry {idx}",
+                        value=f"```{field_value}```",
+                        inline=False
                     )
 
-                    chunk = rows[i:i+5]
-                    for row in chunk:
-                        row_dict = dict(zip([col[0] for col in cursor.description], row))
-                        
-                        # Format field value based on data type and raw flag
-                        if raw:
-                            field_value = f"```json\n{json.dumps(row_dict, indent=2)}```"
-                        else:
-                            # Format timestamps
-                            for ts_field in table_info[table]["timestamp_fields"]:
-                                if ts_field in row_dict and row_dict[ts_field]:
-                                    if isinstance(row_dict[ts_field], (int, float)):
-                                        row_dict[ts_field] = f"<t:{int(row_dict[ts_field])}:R>"
-                            
-                            # Format special fields
-                            if table == "feature_settings":
-                                field_value = (
-                                    f"Feature: {row_dict['feature']}\n"
-                                    f"Enabled: {row_dict['enabled']}\n"
-                                    f"Options: ```json\n{row_dict['options_json']}```"
-                                )
-                            else:
-                                # Remove guild_id from display
-                                row_dict.pop('guild_id', None)
-                                field_value = "\n".join(f"{k}: {v}" for k, v in row_dict.items())
+                embed.set_footer(text=f"Page {i//5 + 1}/{(len(data)-1)//5 + 1}")
+                embeds.append(embed)
 
-                        embed.add_field(
-                            name=f"Entry {i + chunk.index(row) + 1}",
-                            value=f"```{field_value}```",
-                            inline=False
-                        )
+            # Create pagination buttons if needed
+            if len(embeds) > 1:
+                class DataPaginator(discord.ui.View):
+                    def __init__(self):
+                        super().__init__(timeout=180)
+                        self.current_page = 0
 
-                    embed.set_footer(text=f"Page {i//5 + 1}/{(len(rows)-1)//5 + 1}")
-                    embeds.append(embed)
+                    @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray)
+                    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+                        self.current_page = max(0, self.current_page - 1)
+                        await interaction.response.edit_message(embed=embeds[self.current_page])
 
-                # Create pagination buttons if needed
-                if len(embeds) > 1:
-                    class DataPaginator(discord.ui.View):
-                        def __init__(self):
-                            super().__init__(timeout=180)
-                            self.current_page = 0
+                    @discord.ui.button(label="Next", style=discord.ButtonStyle.gray)
+                    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+                        self.current_page = min(len(embeds) - 1, self.current_page + 1)
+                        await interaction.response.edit_message(embed=embeds[self.current_page])
 
-                        @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray)
-                        async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-                            self.current_page = max(0, self.current_page - 1)
-                            await interaction.response.edit_message(embed=embeds[self.current_page])
-
-                        @discord.ui.button(label="Next", style=discord.ButtonStyle.gray)
-                        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-                            self.current_page = min(len(embeds) - 1, self.current_page + 1)
-                            await interaction.response.edit_message(embed=embeds[self.current_page])
-
-                    await interaction.followup.send(embed=embeds[0], view=DataPaginator())
-                else:
-                    await interaction.followup.send(embed=embeds[0])
+                await interaction.followup.send(embed=embeds[0], view=DataPaginator())
+            else:
+                await interaction.followup.send(embed=embeds[0])
 
         except Exception as e:
             await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
@@ -165,9 +129,8 @@ class DataManagementCog(commands.Cog):
         if not await self._check_is_admin(interaction):
             return await interaction.response.send_message("❌ You need administrator permissions to use this command!", ephemeral=True)
 
-        if target == "user":
-            if not user:
-                return await interaction.response.send_message("❌ Please specify a user to delete data for!", ephemeral=True)
+        if target == "user" and not user:
+            return await interaction.response.send_message("❌ Please specify a user to delete data for!", ephemeral=True)
 
         # Ask for confirmation
         confirm_view = discord.ui.View(timeout=60)
@@ -177,21 +140,21 @@ class DataManagementCog(commands.Cog):
         async def confirm_callback(interaction: discord.Interaction):
             try:
                 if not interaction.guild:
-                    return await interaction.response.edit_message(content="❌ This command can only be used in a guild.", view=None)
-                    
-                guild_id = interaction.guild.id
+                    return await interaction.response.edit_message(
+                        content="❌ This command can only be used in a guild.",
+                        view=None
+                    )
+
                 if target == "guild":
-                    await self.bot.db.delete_guild_data(guild_id)
+                    await self.bot.db.delete_guild_data(interaction.guild.id)
                 elif target == "user" and user:
-                    await self.bot.db.delete_user_data(guild_id, user.id)
-                elif target == "user" and user:
-                    await self.bot.db.delete_user_data(guild_id, user.id)
+                    await self.bot.db.delete_user_data(interaction.guild.id, user.id)
+                elif target == "logs":
+                    await self.bot.db.purge_old_logs(0)  # 0 days means delete all
                 elif target == "xp":
-                    async with self.bot.db.transaction() as tr:
-                        await tr.execute("DELETE FROM xp WHERE guild_id = ?", (guild_id,))
+                    await self.bot.db.delete_all_xp(interaction.guild.id)
                 elif target == "whispers":
-                    async with self.bot.db.transaction() as tr:
-                        await tr.execute("DELETE FROM whispers WHERE guild_id = ?", (guild_id,))
+                    await self.bot.db.delete_all_whispers(interaction.guild.id)
 
                 await interaction.response.edit_message(
                     content="✅ Data has been deleted successfully.",

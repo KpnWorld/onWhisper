@@ -418,6 +418,15 @@ class DBManager:
             row = await cursor.fetchone()
             return row[0] if row else None
 
+    async def get_guild_settings(self, guild_id: int) -> List[Dict[str, Any]]:
+        """Get all settings for a guild"""
+        async with self.connection.execute(
+            "SELECT setting, value FROM guild_settings WHERE guild_id = ?",
+            (guild_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(zip(['setting', 'value'], row)) for row in rows]
+
     # -------------------- Logging & Mod Actions --------------------
 
     async def insert_log(self, guild_id: int, event_type: str, description: str):
@@ -495,6 +504,15 @@ class DBManager:
         async with self.connection.execute(
             "SELECT * FROM whispers WHERE guild_id = ? AND user_id = ?",
             (guild_id, user_id)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
+
+    async def get_all_whispers(self, guild_id: int) -> List[Dict[str, Any]]:
+        """Get all whispers for a guild"""
+        async with self.connection.execute(
+            "SELECT * FROM whispers WHERE guild_id = ? ORDER BY created_at DESC",
+            (guild_id,)
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
