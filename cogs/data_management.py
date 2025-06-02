@@ -19,7 +19,8 @@ class DataManagementCog(commands.Cog):
     @app_commands.command(name="viewdata")
     @app_commands.describe(
         table="Table to view data from",
-        limit="Number of entries to show (default: 10)"
+        limit="Number of entries to show (default: 10)",
+        raw="Show raw data format"
     )
     @app_commands.choices(table=[
         app_commands.Choice(name="Guild Settings", value="guild_settings"),
@@ -27,9 +28,11 @@ class DataManagementCog(commands.Cog):
         app_commands.Choice(name="XP/Levels", value="xp"),
         app_commands.Choice(name="Logs", value="logs"),
         app_commands.Choice(name="Mod Actions", value="mod_actions"),
-        app_commands.Choice(name="Whispers", value="whispers")
+        app_commands.Choice(name="Whispers", value="whispers"),
+        app_commands.Choice(name="Autoroles", value="autoroles"),
+        app_commands.Choice(name="Reaction Roles", value="reaction_roles")
     ])
-    async def viewdata(self, interaction: discord.Interaction, table: str, limit: Optional[int] = 10):
+    async def viewdata(self, interaction: discord.Interaction, table: str, limit: Optional[int] = 10, raw: bool = False):
         """View data stored in the database"""
         if not await self._check_is_admin(interaction):
             return await interaction.response.send_message("❌ You need administrator permissions to use this command!", ephemeral=True)
@@ -37,17 +40,42 @@ class DataManagementCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            # Safe table name list
-            safe_tables = {
-                "guild_settings", "feature_settings", "xp", 
-                "logs", "mod_actions", "whispers"
+            # Validate limit
+            if limit is None or limit <= 0 or limit > 100:
+                return await interaction.followup.send("❌ Limit must be between 1 and 100!", ephemeral=True)
+
+            # Safe table name list with friendly names
+            table_info = {
+                "guild_settings": {"name": "Guild Settings", "timestamp_fields": []},
+                "feature_settings": {"name": "Feature Settings", "timestamp_fields": []},
+                "xp": {"name": "XP/Levels", "timestamp_fields": ["last_message_ts"]},
+                "logs": {"name": "Logs", "timestamp_fields": ["timestamp"]},
+                "mod_actions": {"name": "Mod Actions", "timestamp_fields": ["timestamp"]},
+                "whispers": {"name": "Whispers", "timestamp_fields": ["created_at", "closed_at"]},
+                "autoroles": {"name": "Auto Roles", "timestamp_fields": []},
+                "reaction_roles": {"name": "Reaction Roles", "timestamp_fields": []}
             }
             
-            if table not in safe_tables:
+            if table not in table_info:
                 return await interaction.followup.send("❌ Invalid table selected!", ephemeral=True)
 
+            # Check if interaction is in a guild
+            if not interaction.guild:
+                return await interaction.followup.send("This command can only be used in a guild!", ephemeral=True)
+
             # Get table data with guild filter
-            query = f"SELECT * FROM {table} WHERE guild_id = ? LIMIT ?"
+            query = f"SELECT * FROM {table} WHERE guild_id = ? ORDER BY "
+            
+            # Add appropriate ordering
+            if "timestamp" in table_info[table]["timestamp_fields"]:
+                query += "timestamp DESC"
+            elif "created_at" in table_info[table]["timestamp_fields"]:
+                query += "created_at DESC"
+            else:
+                query += "rowid DESC"  # Default ordering
+                
+            query += " LIMIT ?"
+
             async with self.bot.db.connection.execute(query, (interaction.guild.id, limit)) as cursor:
                 rows = await cursor.fetchall()
                 if not rows:
@@ -57,26 +85,35 @@ class DataManagementCog(commands.Cog):
                 embeds = []
                 for i in range(0, len(rows), 5):
                     embed = discord.Embed(
-                        title=f"📊 {table.replace('_', ' ').title()} Data",
+                        title=f"📊 {table_info[table]['name']} Data",
                         color=discord.Color.blue()
                     )
 
                     chunk = rows[i:i+5]
                     for row in chunk:
-                        # Convert row to dict
                         row_dict = dict(zip([col[0] for col in cursor.description], row))
                         
-                        # Format field value based on data
-                        if table == "feature_settings":
-                            field_value = (
-                                f"Feature: {row_dict['feature']}\n"
-                                f"Enabled: {row_dict['enabled']}\n"
-                                f"Options: ```json\n{row_dict['options_json']}```"
-                            )
+                        # Format field value based on data type and raw flag
+                        if raw:
+                            field_value = f"```json\n{json.dumps(row_dict, indent=2)}```"
                         else:
-                            # Remove guild_id from display
-                            row_dict.pop('guild_id', None)
-                            field_value = "\n".join(f"{k}: {v}" for k, v in row_dict.items())
+                            # Format timestamps
+                            for ts_field in table_info[table]["timestamp_fields"]:
+                                if ts_field in row_dict and row_dict[ts_field]:
+                                    if isinstance(row_dict[ts_field], (int, float)):
+                                        row_dict[ts_field] = f"<t:{int(row_dict[ts_field])}:R>"
+                            
+                            # Format special fields
+                            if table == "feature_settings":
+                                field_value = (
+                                    f"Feature: {row_dict['feature']}\n"
+                                    f"Enabled: {row_dict['enabled']}\n"
+                                    f"Options: ```json\n{row_dict['options_json']}```"
+                                )
+                            else:
+                                # Remove guild_id from display
+                                row_dict.pop('guild_id', None)
+                                field_value = "\n".join(f"{k}: {v}" for k, v in row_dict.items())
 
                         embed.add_field(
                             name=f"Entry {i + chunk.index(row) + 1}",
@@ -128,8 +165,9 @@ class DataManagementCog(commands.Cog):
         if not await self._check_is_admin(interaction):
             return await interaction.response.send_message("❌ You need administrator permissions to use this command!", ephemeral=True)
 
-        if target == "user" and not user:
-            return await interaction.response.send_message("❌ Please specify a user to delete data for!", ephemeral=True)
+        if target == "user":
+            if not user:
+                return await interaction.response.send_message("❌ Please specify a user to delete data for!", ephemeral=True)
 
         # Ask for confirmation
         confirm_view = discord.ui.View(timeout=60)
@@ -138,18 +176,22 @@ class DataManagementCog(commands.Cog):
 
         async def confirm_callback(interaction: discord.Interaction):
             try:
+                if not interaction.guild:
+                    return await interaction.response.edit_message(content="❌ This command can only be used in a guild.", view=None)
+                    
+                guild_id = interaction.guild.id
                 if target == "guild":
-                    await self.bot.db.delete_guild_data(interaction.guild.id)
-                elif target == "user":
-                    await self.bot.db.delete_user_data(interaction.guild.id, user.id)
-                elif target == "logs":
-                    await self.bot.db.purge_old_logs(0)  # 0 days means delete all
+                    await self.bot.db.delete_guild_data(guild_id)
+                elif target == "user" and user:
+                    await self.bot.db.delete_user_data(guild_id, user.id)
+                elif target == "user" and user:
+                    await self.bot.db.delete_user_data(guild_id, user.id)
                 elif target == "xp":
                     async with self.bot.db.transaction() as tr:
-                        await tr.execute("DELETE FROM xp WHERE guild_id = ?", (interaction.guild.id,))
+                        await tr.execute("DELETE FROM xp WHERE guild_id = ?", (guild_id,))
                 elif target == "whispers":
                     async with self.bot.db.transaction() as tr:
-                        await tr.execute("DELETE FROM whispers WHERE guild_id = ?", (interaction.guild.id,))
+                        await tr.execute("DELETE FROM whispers WHERE guild_id = ?", (guild_id,))
 
                 await interaction.response.edit_message(
                     content="✅ Data has been deleted successfully.",

@@ -59,67 +59,74 @@ class DBManager:
 
     async def _create_tables(self):
         """Create all required database tables"""
-        await self.connection.execute("""
-        -- Guild Settings Table
-        CREATE TABLE IF NOT EXISTS guild_settings (
-            guild_id INTEGER,
-            setting TEXT,
-            value TEXT,
-            PRIMARY KEY (guild_id, setting)
-        );
+        tables = [
+            """CREATE TABLE IF NOT EXISTS guild_settings (
+                guild_id INTEGER,
+                setting TEXT,
+                value TEXT,
+                PRIMARY KEY (guild_id, setting)
+            )""",
+            """CREATE TABLE IF NOT EXISTS xp (
+                guild_id INTEGER,
+                user_id INTEGER,
+                xp INTEGER DEFAULT 0,
+                level INTEGER DEFAULT 0,
+                last_message_ts TIMESTAMP,
+                last_message TEXT,
+                last_xp_gain INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, user_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS mod_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT,
+                moderator_id INTEGER NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS whispers (
+                guild_id INTEGER,
+                whisper_id TEXT,
+                user_id INTEGER NOT NULL,
+                thread_id INTEGER NOT NULL,
+                is_closed BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                closed_at TIMESTAMP,
+                PRIMARY KEY (guild_id, whisper_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS feature_settings (
+                guild_id INTEGER,
+                feature TEXT,
+                enabled BOOLEAN DEFAULT FALSE,
+                options_json TEXT,
+                PRIMARY KEY (guild_id, feature)
+            )""",
+            """CREATE TABLE IF NOT EXISTS autoroles (
+                guild_id INTEGER,
+                role_id INTEGER,
+                PRIMARY KEY (guild_id, role_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS reaction_roles (
+                guild_id INTEGER,
+                message_id INTEGER,
+                emoji TEXT,
+                role_id INTEGER,
+                PRIMARY KEY (guild_id, message_id, emoji)
+            )"""
+        ]
 
-        -- XP Table
-        CREATE TABLE IF NOT EXISTS xp (
-            guild_id INTEGER,
-            user_id INTEGER,
-            xp INTEGER DEFAULT 0,
-            level INTEGER DEFAULT 0,
-            last_message_ts TIMESTAMP,
-            last_message TEXT,
-            last_xp_gain INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, user_id)
-        );
-
-        -- Logging & Mod Actions Tables
-        CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            event_type TEXT NOT NULL,
-            description TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS mod_actions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            action TEXT NOT NULL,
-            reason TEXT,
-            moderator_id INTEGER NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        -- Whispers Table
-        CREATE TABLE IF NOT EXISTS whispers (
-            guild_id INTEGER,
-            whisper_id TEXT,
-            user_id INTEGER NOT NULL,
-            thread_id INTEGER NOT NULL,
-            is_closed BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            closed_at TIMESTAMP,
-            PRIMARY KEY (guild_id, whisper_id)
-        );
-
-        -- Feature Settings Table
-        CREATE TABLE IF NOT EXISTS feature_settings (
-            guild_id INTEGER,
-            feature TEXT,
-            enabled BOOLEAN DEFAULT FALSE,
-            options_json TEXT,
-            PRIMARY KEY (guild_id, feature)
-        );
-        """)
+        async with self.transaction() as tr:
+            for table in tables:
+                await tr.execute(table)
+        
         await self.connection.commit()
         self.log.info("Database tables created.")
 
