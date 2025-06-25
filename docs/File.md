@@ -1,27 +1,29 @@
-🗂️ onWhisper File Structure
+# 📁 onWhisper File Structure Reference
+
+
 ```
 onWhisper/
 │
-├── bot.py                  # 🚀 Main bot startup file (onWhisperBot)
-├── .env                    # 🔐 Token & environment configs
-├── requirements.txt        # 📦 Python dependencies
+├── bot.py             # 🚀 Main bot startup file (onWhisperBot)
+├── .env               # 🔐 Token & environment configs
 │
-├── cogs/                   # ⚙️ All bot modules (cogs)
-│   ├── info.py             # /bot, /user, /guild, /role, /channel info
-│   ├── leveling.py         # XP system, level roles, leaderboard
-│   ├── moderation.py       # Warn, mute, kick, ban, lockdown, purge (hybrid)
-│   ├── roles.py            # Auto roles, reaction roles, color roles
-│   ├── logging.py          # Server event logging (joins, edits, deletes)
-│   └── whisper.py          # 🤫 Whisper System (thread-based private support)
+├── cogs/              # ⚙️ All bot modules (cogs)
+│ ├── info.py          # ℹ️ /bot, /user, /guild, /role, /channel info
+│ ├── leveling.py      # 📈 XP, roles, leaderboard
+│ ├── moderation.py    # 🔨 Warn, mute, kick, ban, lockdown, purge (hybrid)
+│ ├── roles.py         # 🎭 Auto, reaction, color roles
+│ ├── logging.py       # 📝 Event logs (joins, edits, deletions)
+│ └── whisper.py       # 🤫 Whisper System (thread-based tickets)
 │
-├── utils/                  # 🧠 Core logic managers
-│   ├── db_manager.py       # Handles all DB operations via aiosqlite
-│   └── config.py           # ConfigManager for dynamic guild settings
+├── utils/             # 🧠 Core logic managers
+│ ├── db_manager.py    # 🗄️ DB layer (aiosqlite)
+│ └── config.py        # ⚙️ ConfigManager for guild settings
 │
-├── data/                   # 🗂 Local data storage
-│   └── onwhisper.db        # SQLite database file
+├── data/              # 🗂 Persistent local data
+│ └── onwhisper.db     # 🗃 SQLite database file
 │
-└── docs/                   # 📚 Documentation
-    ├── File.md             # This file — file structure reference
-    └── README.md           # Optional: project overview & usage guide
+└── docs/
+├── File.md            # 🗂 File Structure reference
+├── Commands.md        # 📝 Full slash command reference with DB usage
+└── Database.md        # 🧠 Full database schema & DBManager methods documentation
 ```
