@@ -1,3 +1,5 @@
+🗂️ onWhisper File Structure
+```
 onWhisper/
 │
 ├── bot.py                  # 🚀 Main bot startup file (onWhisperBot)
@@ -6,20 +8,20 @@ onWhisper/
 │
 ├── cogs/                   # ⚙️ All bot modules (cogs)
 │   ├── info.py             # /bot, /user, /guild, /role, /channel info
-│   ├── leveling.py         # XP, roles, leaderboard
+│   ├── leveling.py         # XP system, level roles, leaderboard
 │   ├── moderation.py       # Warn, mute, kick, ban, lockdown, purge (hybrid)
-│   ├── roles.py            # Auto, reaction, color roles
-│   ├── logging.py          # Event logs (joins, edits, deletions)
-│   └── whisper.py          # 🤫 Whisper System (thread-based tickets)
+│   ├── roles.py            # Auto roles, reaction roles, color roles
+│   ├── logging.py          # Server event logging (joins, edits, deletes)
+│   └── whisper.py          # 🤫 Whisper System (thread-based private support)
 │
 ├── utils/                  # 🧠 Core logic managers
-│   ├── db_manager.py       # DB layer (aiosqlite)
-│   └── config.py           # ConfigManager for guild settings
-│    
+│   ├── db_manager.py       # Handles all DB operations via aiosqlite
+│   └── config.py           # ConfigManager for dynamic guild settings
 │
-├── data/                   # 🗂 Persistent local data
+├── data/                   # 🗂 Local data storage
 │   └── onwhisper.db        # SQLite database file
 │
-└── docs/
-    ├── File.md             # 📄File Structure
-    └── README.md           # 📄 (Optional) Bot documentation
+└── docs/                   # 📚 Documentation
+    ├── File.md             # This file — file structure reference
+    └── README.md           # Optional: project overview & usage guide
+```
