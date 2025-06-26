@@ -11,6 +11,7 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from utils.db_manager import DBManager  # Your custom async DB manager
+from utils.features import FeatureManager
 
 # Load environment variables
 load_dotenv()
@@ -43,6 +44,7 @@ class WhisperBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents, application_id=APPLICATION_ID)
         self.session: Optional[aiohttp.ClientSession] = None
         self.db: Optional[DBManager] = None
+        self.features: Optional[FeatureManager] = None
 
     def get_logger(self, name: str) -> logging.Logger:
         """Get a logger instance with the given name."""
@@ -56,9 +58,17 @@ class WhisperBot(commands.Bot):
         data_dir = Path("./data")
         data_dir.mkdir(exist_ok=True)
 
-        # Initialize database
+        # Initialize database first
         self.db = DBManager("data/database.db", logger=log)
         await self.db.init()
+        
+        # Then initialize feature manager with initialized db
+        self.features = FeatureManager(self.db)
+
+        # Initialize features for all guilds
+        for guild in self.guilds:
+            await self.db.add_guild(guild.id)
+            await self.features.init_guild_features(guild.id)
 
         # Load all cogs
         await self.load_all_cogs()
@@ -141,6 +151,13 @@ class WhisperBot(commands.Bot):
             import traceback
             traceback.print_exception(type(error), error, error.__traceback__)
             await ctx.send("⚠️ An unexpected error occurred.")
+
+    async def on_guild_join(self, guild: discord.Guild):
+        """Initialize features when bot joins a new guild"""
+        if self.db is not None:
+            await self.db.add_guild(guild.id)
+            if self.features is not None:
+                await self.features.init_guild_features(guild.id)
 
 # Instantiate the bot
 bot = WhisperBot()

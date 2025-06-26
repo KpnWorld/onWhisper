@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional, List
 from discord.app_commands import Choice, Group
+from utils.features import FeatureType
 
 class RolesCog(commands.Cog):
     """Cog for role management commands"""
@@ -26,17 +27,14 @@ class RolesCog(commands.Cog):
     
     async def _get_role_settings(self, guild_id: int) -> Optional[dict]:
         """Get role management settings"""
-        feature_settings = await self.bot.db.get_feature_settings(guild_id, "roles")
-        if not feature_settings or not feature_settings['enabled']:
-            return None
-        return feature_settings['options']
+        settings = await self.bot.features.get_feature_settings(guild_id, FeatureType.REACTION_ROLES)
+        return settings['options'] if settings and settings['enabled'] else None
 
     async def _save_role_settings(self, guild_id: int, options: dict):
         """Save role management settings"""
-        await self.bot.db.set_feature_settings(
+        await self.bot.features.update_feature_settings(
             guild_id,
-            "roles",
-            True,
+            FeatureType.REACTION_ROLES,
             options
         )
 
@@ -80,8 +78,22 @@ class RolesCog(commands.Cog):
             return await interaction.response.send_message("I can't manage this role as it's higher than my highest role!", ephemeral=True)
             
         try:
-            await self.bot.db.add_autorole(interaction.guild.id, role.id)
+            settings = await self.bot.features.get_feature_settings(
+                interaction.guild.id, 
+                FeatureType.AUTOROLES
+            )
+            
+            roles = settings['options'].get('roles', [])
+            roles.append(role.id)
+            
+            await self.bot.features.update_feature_settings(
+                interaction.guild.id,
+                FeatureType.AUTOROLES,
+                {'roles': roles}
+            )
+            
             await interaction.response.send_message(f"✅ Added {role.mention} as an auto role.")
+            
         except Exception as e:
             await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
     
@@ -187,39 +199,43 @@ class RolesCog(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
     
-    @reactionrole.command(name="remove", description="Remove a reaction role")
-    @app_commands.describe(
-        message_id="ID of the message to remove the reaction role from",
-        emoji="Emoji of the reaction role to remove"
-    )
-    @app_commands.guild_only()
-    @app_commands.checks.has_permissions(manage_roles=True)
+    @reactionrole.command(name="remove")
     async def reactionrole_remove(self, interaction: discord.Interaction, message_id: int, emoji: str):
         """Remove a reaction role."""
         if not await self._check_permissions(interaction):
-            return await interaction.response.send_message("You need the Manage Roles permission to use this command!", ephemeral=True)
+            return await interaction.response.send_message(
+                "You need the Manage Roles permission to use this command!", 
+                ephemeral=True
+            )
             
         try:
-            message_id = int(message_id)
-            channel = interaction.channel
-            if not channel or not isinstance(channel, (discord.TextChannel, discord.Thread, discord.VoiceChannel)):
-                return await interaction.response.send_message("This command can only be used in text channels, threads, or voice channels!", ephemeral=True)
+            if not interaction.guild:
+                return await interaction.response.send_message(
+                    "This command can only be used in a server!", 
+                    ephemeral=True
+                )
+
+            # Use proper database method
+            await self.bot.db.remove_reaction_role(
+                interaction.guild.id,
+                message_id,
+                str(emoji)
+            )
             
+            # Try to remove the reaction from message if we can find it
             try:
-                message = await channel.fetch_message(message_id)
-                # Remove the reaction from the message
-                await message.clear_reaction(emoji)
-            except AttributeError:
-                return await interaction.response.send_message("Cannot fetch messages in this type of channel!", ephemeral=True)
+                channel = interaction.channel
+                if isinstance(channel, (discord.TextChannel, discord.Thread)):
+                    message = await channel.fetch_message(message_id)
+                    await message.clear_reaction(emoji)
+            except (discord.NotFound, discord.Forbidden):
+                pass  # Ignore if we can't find/modify the message
             
-            # Remove from database
-            await self.bot.db.remove_reaction_role(interaction.guild, message.id, str(emoji))
+            await interaction.response.send_message(
+                f"✅ Removed reaction role with emoji {emoji}",
+                ephemeral=True
+            )
             
-            await interaction.response.send_message(f"✅ Removed reaction role from {message.jump_url}")
-        except ValueError:
-            await interaction.response.send_message("Invalid message ID!", ephemeral=True)
-        except discord.NotFound:
-            await interaction.response.send_message("Message not found! Make sure you're using this command in the same channel as the message.", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
 

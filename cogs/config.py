@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.app_commands import Choice, command
 import logging
+from utils.features import FeatureType
 
 class ConfigCog(commands.Cog):
     """Cog for managing bot and server settings"""
@@ -46,42 +47,28 @@ class ConfigCog(commands.Cog):
         
         try:
             if setting.startswith("toggle_"):
-                feature = setting.replace("toggle_", "")
-                feature_settings = await self.bot.db.get_feature_settings(interaction.guild.id, feature)
-                is_enabled = feature_settings['enabled'] if feature_settings else False
+                feature_name = setting.replace("toggle_", "")
+                feature_type = FeatureType(feature_name)
                 
-                if is_enabled:
-                    await self.bot.db.set_feature_settings(interaction.guild.id, feature, False)
-                    await interaction.followup.send(f"✅ {feature.title()} system has been disabled.")
+                settings = await self.bot.features.get_feature_settings(
+                    interaction.guild.id, 
+                    feature_type
+                )
+                
+                if settings['enabled']:
+                    await self.bot.features.disable_feature(
+                        interaction.guild.id,
+                        feature_type
+                    )
                 else:
-                    # Default settings for each feature
-                    default_options = {
-                        'whispers': {
-                            'channel_id': None,
-                            'staff_role_id': None
-                        },
-                        'logging': {
-                            'channel_id': None,
-                            'events': ["message_delete", "message_edit", "member_join", "member_leave"]
-                        },
-                        'leveling': {
-                            'cooldown': 60,
-                            'min_xp': 15,
-                            'max_xp': 25,
-                            'dm_notifications': True
-                        }
-                    }
+                    await self.bot.features.enable_feature(
+                        interaction.guild.id,
+                        feature_type
+                    )
                     
-                    await self.bot.db.set_feature_settings(
-                        interaction.guild.id, 
-                        feature, 
-                        True, 
-                        default_options.get(feature, {})
-                    )
-                    await interaction.followup.send(
-                        f"✅ {feature.title()} system has been enabled with default settings.\n"
-                        f"Use `/config` to configure additional settings."
-                    )
+                await interaction.followup.send(
+                    f"✅ {feature_name.title()} has been {'disabled' if settings['enabled'] else 'enabled'}."
+                )
                 return
 
             if setting == "prefix":

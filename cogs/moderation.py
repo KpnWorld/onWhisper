@@ -15,7 +15,6 @@ class ModerationCog(commands.Cog):
     
     async def _check_mod_permissions(self, ctx_or_interaction) -> bool:
         """Check if user has mod permissions"""
-        # Handle both Context and Interaction
         if isinstance(ctx_or_interaction, discord.Interaction):
             guild = ctx_or_interaction.guild
             user = ctx_or_interaction.user
@@ -30,7 +29,7 @@ class ModerationCog(commands.Cog):
         if user.guild_permissions.administrator or user.guild_permissions.manage_guild:
             return True
             
-        # Check for mod role
+        # Use proper database method
         mod_role_id = await self.bot.db.get_guild_setting(guild.id, "mod_role")
         if mod_role_id:            
             return discord.utils.get(user.roles, id=int(mod_role_id)) is not None
