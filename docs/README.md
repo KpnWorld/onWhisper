@@ -1,6 +1,6 @@
 # onWhisperBot
 
-A feature-rich Discord bot built with py-cord that includes leveling, whispers, moderation, autoroles, and logging functionalities.
+A feature-rich Discord bot built with discord.py that includes leveling, whispers, moderation, autoroles, and logging functionalities.
 
 ## Features
 
