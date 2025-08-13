@@ -1,82 +1,41 @@
-# onWhisperBot  
-*A feature-rich Discord bot built with `discord.py` and SQLite.*
+# onWhisper Bot Manual
 
-## 📌 Overview  
-onWhisper is a multi-purpose Discord bot that brings together **leveling**, **moderation**, **role management**, and a **private whisper system** — all backed by a powerful SQLite database for reliability and speed.
+**Version:** Development Build 2025  
+**Platform:** discord.py | SQLite | Replit Hosting  
 
-## ✨ Features  
-- **Leveling System** — Earn XP, level up, and unlock role rewards.  
-- **Moderation Tools** — Kick, ban, mute, and log server events.  
-- **Role Management** — Autoroles, reaction roles, and color roles.  
-- **Whisper System** — Send private anonymous messages via commands.  
-- **Customizable Server Settings** — Prefix, XP rates, log channels, and more.  
-- **Slash Commands** — Fully integrated with Discord’s modern command system.
+> **This "Manual Overview" serves as a foundational guide for expanding upon the current version of onWhisper.**  
+> It details the bot's core components, including its file structure, database organization, command system, and coding standards.  
+> The aim is to provide a clear blueprint for future development efforts, ensuring consistency and maintainability across all contributions.  
+> By understanding these established patterns, new developers can easily integrate their work while adhering to the project's design principles.
+
 ---
 
-## ⚙️ Setup Instructions  
-### 1. Clone the Repository:  
-```bash
-git clone https://github.com/yourusername/onWhisper.git
-cd onWhisper
-```
+## 📚 Table of Contents
 
-### 2. Install Dependencies:
-```bash
-pip install -r requirements.txt
-```
+1. [File Structure](./FileStructure.md)  
+2. [Database Structure](./Database.md)  
+3. [Command System](./Commands.md)  
+4. [Code Style & Structure Guide](./CodeStyle.md)  
+5. [Development & Hosting](./Development.md)  
 
-### 3. Configure Environment Variables:
-```env
-DISCORD_TOKEN=your_token_here
-BOT_OWNER=your_id_here
-```
-
-### 4. Run the bot:
-```bash
-python bot.py
-```
-
-## 💬 Commands Overview
-
-| Category | Commands & Description |
-|---|---|
-| **Info** | `/bot` — Bot stats and meta info |
-| | `/user [member]` — View user profile and XP/level |
-| | `/guild` — Server information |
-| | `/role [role], /channel [channel]` — Details |
-| **Leveling** | `/level [user]` — Show XP and levels |
-| | `/leaderboard [page]` — Server XP leaderboard |
-| | `/levelrole` — Manage level-based role rewards |
-| **Moderation** | `/warn, /mute, /kick, /ban, /unban, /purge` |
-| | `/lock, /unlock` — Channel moderation |
-| **Roles** | `/autorole` — Set or disable auto role assignment |
-| | `/reactionrole` — Add/remove reaction roles |
-| | `/color` — Set or clear color role |
-| **Whisper System** | `/whisper open/close/list` — Manage private whisper threads |
-| **Configuration** | `/config view/set` — Manage guild settings |
-| **Debug** | `/debug key/resetdb/version` — Admin debugging tools |
 ---
 
-## 🗄 Database Structure (SQLite)
+### 📌 About onWhisper
 
-The bot uses `aiosqlite` with the following key tables:
+onWhisper is a feature-rich Discord bot built with **discord.py** and **SQLite**, offering:
 
-| Table           | Purpose                                     |
-| :-------------- | :------------------------------------------ |
-| `guild_settings`  | Stores configuration per guild              |
-| `leveling_users`  | Tracks XP, levels, and message counts per user |
-| `leveling_roles`  | Level-based role rewards                    |
-| `autoroles`       | Roles auto-assigned to new members          |
-| `reaction_roles`  | Emoji-to-role mappings for reaction roles   |
-| `color_roles`     | Custom user color roles                     |
-| `whispers`        | Active and closed whisper threads           |
+- Leveling system with XP gain, cooldowns, and configurable rates  
+- Role rewards for reaching levels  
+- Whispers (private, staff-viewable anonymous messages)  
+- Autoroles, reaction roles, and color roles  
+- Logging and moderation tools  
+- Fully slash command-based interface  
+
 ---
-## 📚 Developer Notes
 
-*   All database access is done asynchronously through the `DBManager` class (`utils/db_manager.py`).
-*   Commands are modularized in cogs within the `cogs/` directory.
-*   The bot is designed for multi-guild scalability and performance.
-
-## 📝 License
-
-This project is licensed under the MIT License — free to use, modify, and distribute.
+### 🔹 Development Goals
+- Maintain a clean, modular codebase  
+- Keep database structure consistent and scalable  
+- Ensure commands follow a standard format  
+- Host on Replit with SQLite persistence  
+- Document everything for future contributors
