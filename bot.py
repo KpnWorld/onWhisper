@@ -1,212 +1,193 @@
+# bot.py
+"""
+onWhisper main startup file.
+
+Follows Persistent Developer Instructions for onWhisperBot:
+- Loads environment variables from .env
+- Creates a discord.py commands.Bot instance with required intents
+- Instantiates DBManager (self.db) and initializes tables
+- Auto-loads all cogs from ./cogs
+- Structured logging with timestamps
+- Graceful shutdown on SIGINT/SIGTERM
+- Basic error handling for startup and cog loading
+- Prints bot info on ready
+"""
+
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import signal
+import sys
 from pathlib import Path
 from typing import Optional
 
-import aiohttp
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from dotenv import load_dotenv
 
-from utils.db_manager import DBManager  # Your custom async DB manager
-from utils.features import FeatureManager
+# --- Logging Setup ------------------------------------------------------------
 
-# Load environment variables
-load_dotenv()
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-APPLICATION_ID = os.getenv("APPLICATION_ID")
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("onWhisper")
 
-if not DISCORD_TOKEN:
-    raise ValueError("DISCORD_TOKEN is not set in the environment variables.")
-if not APPLICATION_ID:
-    raise ValueError("APPLICATION_ID is not set in the environment variables.")
+# --- DB Manager ---------------------------------------------------------------
+from utils.db_manager import DBManager  # Must follow Persistent Developer Instructions
 
-# Convert APPLICATION_ID to integer
-APPLICATION_ID = int(APPLICATION_ID)
 
-# Configure intents
-intents = discord.Intents.all()
+# --- Bot Class ----------------------------------------------------------------
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("WhisperBot")
+class OnWhisperBot(commands.Bot):
+    """Custom Bot that wires up database and auto-loads cogs."""
 
-# Global shutdown task variable
-shutdown_task: Optional[asyncio.Task] = None
+    def __init__(self, *, application_id: int) -> None:
+        # Intents per developer instructions
+        intents = discord.Intents.default()
+        intents.members = True
+        intents.guilds = True
+        intents.message_content = True
 
-class WhisperBot(commands.Bot):
-    """Base bot class with database integration."""
-    
-    def __init__(self):
-        super().__init__(command_prefix="!", intents=intents, application_id=APPLICATION_ID)
-        self.session: Optional[aiohttp.ClientSession] = None
+        super().__init__(
+            command_prefix=commands.when_mentioned_or("!"),
+            intents=intents,
+            application_id=application_id,
+        )
+
+        # DB Manager will be initialized in setup_hook
         self.db: Optional[DBManager] = None
-        self.features: Optional[FeatureManager] = None
 
-    def get_logger(self, name: str) -> logging.Logger:
-        """Get a logger instance with the given name."""
-        return logging.getLogger(name)
+        # Paths
+        self.base_dir: Path = Path(__file__).parent.resolve()
+        self.cogs_dir: Path = self.base_dir / "cogs"
+        self.data_dir: Path = self.base_dir / "data"
+        self.db_path: Path = self.data_dir / "onwhisper.db"
 
-    async def setup_hook(self):
-        """Called when the bot is starting up"""
-        # Create aiohttp session
-        self.session = aiohttp.ClientSession()
-        
-        data_dir = Path("./data")
-        data_dir.mkdir(exist_ok=True)
+    async def setup_hook(self) -> None:
+        """Initialize database and load cogs before bot connects."""
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            self.db = DBManager(str(self.db_path))
+            await self.db.init()  # Changed from init_tables() to init()
+            logger.info("Database initialized at %s", self.db_path)
+        except Exception:
+            logger.exception("Failed to initialize database")
+            raise
 
-        # Initialize database first
-        self.db = DBManager("data/database.db", logger=log)
-        await self.db.init()
-        
-        # Then initialize feature manager with initialized db
-        self.features = FeatureManager(self.db)
+        await self._load_all_cogs()
 
-        # Initialize features for all guilds
-        for guild in self.guilds:
-            await self.db.add_guild(guild.id)
-            await self.features.init_guild_features(guild.id)
-
-        # Load all cogs
-        await self.load_all_cogs()
-
-        # Start the status task
-        self.status_task.start()
-
-    async def load_all_cogs(self):
-        """Load all cogs from the cogs directory"""
-        cogs_path = Path("./cogs")
-        for cog_file in cogs_path.glob("*.py"):
-            if cog_file.name.startswith("_"):
-                continue
-            cog_name = f"cogs.{cog_file.stem}"
-            try:
-                await self.load_extension(cog_name)
-                log.info(f"Loaded cog {cog_name}")
-            except Exception as e:
-                log.error(f"Failed to load cog {cog_name}: {e}")
-
-    async def on_ready(self):
-        guild_count = len(self.guilds)
-        cog_count = len(self.cogs)
-        assert self.user is not None  # for static type checkers like Pylance
-        log.info(f"Bot is ready. Logged in as {self.user} (ID: {self.user.id})")
-        log.info(f"Connected to {guild_count} guild(s)")
-        log.info(f"Loaded {cog_count} cog(s): {', '.join(self.cogs.keys())}")
-
-        # Sync application commands
+        # Sync application commands globally
         try:
             synced = await self.tree.sync()
-            log.info(f"Synced {len(synced)} global application command(s) with Discord")
-        except Exception as e:
-            log.error(f"Failed to sync application commands: {e}")
+            logger.info("Slash commands synced: %d", len(synced))
+        except Exception:
+            logger.exception("Failed to sync slash commands")
 
-    @tasks.loop(minutes=10)
-    async def status_task(self):
-        await self.change_presence(activity=discord.Game(name="Keeping Whisper running!"))
+    async def _load_all_cogs(self) -> None:
+        """Dynamically load all cogs in ./cogs."""
+        if not self.cogs_dir.exists():
+            logger.warning("Cogs directory not found at %s", self.cogs_dir)
+            return
 
-    @status_task.before_loop
-    async def before_status_task(self):
-        await self.wait_until_ready()
+        loaded, failed = 0, 0
+        for filename in os.listdir(self.cogs_dir):
+            if filename.endswith(".py"):
+                ext = f"cogs.{filename[:-3]}"
+                try:
+                    await self.load_extension(ext)
+                    loaded += 1
+                    logger.info("Loaded cog: %s", ext)
+                except Exception as e:
+                    failed += 1
+                    logger.exception("Failed to load cog %s: %s", ext, e)
 
-    async def close(self):
-        """Cleanup and close the bot."""
-        log.info("Shutting down bot...")
-        self.status_task.cancel()
+        logger.info("Cog load summary: loaded=%d failed=%d", loaded, failed)
 
-        if self.db:
-            await self.db.close()
+    async def close(self) -> None:
+        """Close DB connection before shutting down."""
+        try:
+            if self.db:
+                await self.db.close()
+                logger.info("Database connection closed")
+        except Exception:
+            logger.exception("Error while closing database")
+        finally:
+            await super().close()
 
-        # Close aiohttp session if exists and open
-        if self.session is not None and not self.session.closed:
-            await self.session.close()
+    async def on_ready(self) -> None:
+        """Print bot info when ready."""
+        try:
+            if self.user:
+                logger.info(
+                    "Bot is ready! Name: %s | ID: %s | Guilds: %d",
+                    self.user.name,
+                    self.user.id,
+                    len(self.guilds),
+                )
+                print(
+                    f"[READY] {self.user.name} ({self.user.id}) connected to {len(self.guilds)} guild(s)."
+                )
+            else:
+                logger.warning("Bot ready but self.user is None")
+        except Exception:
+            logger.exception("Error in on_ready event")
 
-        # Wait for all pending tasks to complete (optional)
-        pending = asyncio.all_tasks()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
 
-        await super().close()
+# --- Signal Handling ----------------------------------------------------------
 
-    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
-        """Global error handler for prefix commands."""
-        if hasattr(ctx.command, 'on_error'):
-            return  # Skip if the command has its own error handler
-
-        if isinstance(error, commands.CommandNotFound):
-            await ctx.send("❌ Command not found.")
-        elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f"⚠️ Missing argument: `{error.param.name}`.")
-        elif isinstance(error, commands.BadArgument):
-            await ctx.send("⚠️ Invalid argument provided.")
-        elif isinstance(error, commands.CommandOnCooldown):
-            await ctx.send(f"⏳ This command is on cooldown. Try again in {error.retry_after:.2f} seconds.")
-        elif isinstance(error, commands.CheckFailure):
-            await ctx.send("🚫 You do not have permission to use this command.")
-        else:
-            # Log unexpected errors
-            import traceback
-            traceback.print_exception(type(error), error, error.__traceback__)
-            await ctx.send("⚠️ An unexpected error occurred.")
-
-    async def on_guild_join(self, guild: discord.Guild):
-        """Initialize features when bot joins a new guild"""
-        if self.db is not None:
-            await self.db.add_guild(guild.id)
-            if self.features is not None:
-                await self.features.init_guild_features(guild.id)
-
-# Instantiate the bot
-bot = WhisperBot()
-
-@bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-    """Global error handler for slash commands."""
-    if isinstance(error, discord.app_commands.CommandOnCooldown):
-        await interaction.response.send_message(f"⏳ This command is on cooldown. Try again in {error.retry_after:.2f} seconds.", ephemeral=True)
-    elif isinstance(error, discord.app_commands.MissingPermissions):
-        await interaction.response.send_message("🚫 You do not have the required permissions to use this command.", ephemeral=True)
-    elif isinstance(error, discord.app_commands.CommandNotFound):
-        await interaction.response.send_message("❌ Command not found.", ephemeral=True)
-    else:
-        # Log unexpected errors
-        import traceback
-        traceback.print_exception(type(error), error, error.__traceback__)
-        await interaction.response.send_message("⚠️ An unexpected error occurred.", ephemeral=True)
-
-def shutdown_handler(*_):
-    global shutdown_task
-    log.info("Received shutdown signal.")
-    shutdown_task = asyncio.create_task(bot.close())
-
-def main():
-    if not DISCORD_TOKEN:
-        raise ValueError("DISCORD_TOKEN is not set in the environment variables.")
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    bot = WhisperBot()
+def install_signal_handlers(loop: asyncio.AbstractEventLoop, bot: OnWhisperBot) -> None:
+    """Install signal handlers for clean shutdown."""
+    def _handle_signal(sig: signal.Signals) -> None:
+        logger.warning("Received signal %s; shutting down...", sig.name)
+        loop.create_task(bot.close())
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, shutdown_handler)
+            loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s))
         except NotImplementedError:
-            signal.signal(sig, lambda s, f: asyncio.create_task(bot.close()))
+            logger.debug("Signal handler for %s not supported", sig.name)
+
+
+# --- Entry Point --------------------------------------------------------------
+
+def main() -> None:
+    load_dotenv()
+
+    token = os.getenv("DISCORD_TOKEN")
+    app_id_raw = os.getenv("APPLICATION_ID", "").strip()
+    if not app_id_raw.isdigit():
+        logger.error("Missing or invalid APPLICATION_ID in .env")
+        sys.exit(1)
+    application_id = int(app_id_raw)
+
+    if not token:
+        logger.error("Missing DISCORD_TOKEN in .env")
+        sys.exit(1)
+
+    bot = OnWhisperBot(application_id=application_id)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    install_signal_handlers(loop, bot)
 
     try:
-        loop.run_until_complete(bot.start(DISCORD_TOKEN))
+        logger.info("Starting onWhisper bot...")
+        bot.run(token, log_handler=None)
     except KeyboardInterrupt:
-        log.info("Keyboard interrupt received.")
+        logger.warning("KeyboardInterrupt received; shutting down...")
+    except Exception:
+        logger.exception("Unhandled exception in bot.run()")
     finally:
-        log.info("Closing loop.")
         if not loop.is_closed():
-            loop.run_until_complete(bot.close())
-            tasks = asyncio.all_tasks(loop)
-            if tasks:
-                loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
             loop.close()
+        logger.info("onWhisper bot shut down.")
+
 
 if __name__ == "__main__":
     main()
