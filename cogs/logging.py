@@ -1,389 +1,306 @@
-import json
-from datetime import datetime, timedelta
-from typing import Optional, List
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.app_commands import Choice
+from typing import Optional, List
 import logging
-
-# Define EventSelect and EventView outside the command
-class EventSelect(discord.ui.Select):
-    def __init__(self, options: List[str], placeholder: str):
-        super().__init__(
-            placeholder=placeholder,
-            min_values=1,
-            max_values=len(options),
-            options=[
-                discord.SelectOption(label=event.replace("_", " ").title(), value=event)
-                for event in options
-            ]
-        )
-
-class EventView(discord.ui.View):
-    def __init__(self, all_events: List[str], type: str):
-        super().__init__(timeout=180)
-        self.selected_events = []
-        
-        select = EventSelect(
-            all_events,
-            f"Select events to {'enable' if type == 'enable' else 'disable'}"
-        )
-        
-        async def select_callback(interaction: discord.Interaction):
-            self.selected_events = select.values
-            await interaction.response.defer()
-            self.stop()
-            
-        select.callback = select_callback
-        self.add_item(select)
+from datetime import datetime, timedelta
 
 class LoggingCog(commands.Cog):
-    """Cog for managing logging settings and viewing logs"""
-    
+    """Server event logging system"""
+
     def __init__(self, bot):
         self.bot = bot
         self.log = logging.getLogger("cogs.logging")
-        self.all_events = [
-            "message_delete", "message_edit",
-            "member_join", "member_leave",
-            "member_ban", "member_unban",
-            "role_create", "role_delete",
-            "channel_create", "channel_delete",
-            "whisper_create", "whisper_close",
-            "whisper_delete"
+        self.server_events = [
+            "channel_create", "channel_delete", "channel_update",
+            "role_create", "role_delete", "role_update",
+            "member_join", "member_leave", "member_ban",
+            "member_unban", "member_roles", "server_update",
+            "emoji_update", "invite_create", "invite_delete"
         ]
 
-    # Message Events    
-    @commands.Cog.listener()
-    async def on_message_delete(self, message: discord.Message):
-        """Called when a message is deleted"""
-        if not message.guild or message.author.bot:
-            return
-        channel_ref = f"#{message.channel.name}" if isinstance(message.channel, discord.TextChannel) else "a channel"
-        description = f"Message by {message.author.mention} deleted in {channel_ref}"
-        if message.content:
-            description += f"\nContent: {message.content[:1900]}"  # Truncate long messages        await self._log_event(message.guild.id, "message_delete", description)
-        
-    @commands.Cog.listener()
-    async def on_message_edit(self, before: discord.Message, after: discord.Message):
-        """Called when a message is edited"""
-        if not before.guild or before.author.bot or before.content == after.content:
-            return
-        channel_ref = f"#{before.channel.name}" if isinstance(before.channel, discord.TextChannel) else "a channel"
-        description = (f"Message by {before.author.mention} edited in {channel_ref}\n"
-                      f"Before: {before.content[:900]}\nAfter: {after.content[:900]}")  # Truncate long messages
-        await self._log_event(before.guild.id, "message_edit", description)
-
-    # Member Events
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member):
-        """Called when a member joins the server"""
-        if member.bot:
-            return
-        description = f"{member.mention} joined the server"
-        await self._log_event(member.guild.id, "member_join", description)
-
-    @commands.Cog.listener()
-    async def on_member_remove(self, member: discord.Member):
-        """Called when a member leaves the server"""
-        if member.bot:
-            return
-        description = f"{member.mention} left the server"
-        await self._log_event(member.guild.id, "member_leave", description)
-
-    # Ban Events
-    @commands.Cog.listener()
-    async def on_member_ban(self, guild: discord.Guild, user: discord.User):
-        """Called when a member is banned"""
-        description = f"{user.mention} was banned from the server"
-        await self._log_event(guild.id, "member_ban", description)
-
-    @commands.Cog.listener()
-    async def on_member_unban(self, guild: discord.Guild, user: discord.User):
-        """Called when a member is unbanned"""
-        description = f"{user.mention} was unbanned from the server"
-        await self._log_event(guild.id, "member_unban", description)
-
-    # Role Events
-    @commands.Cog.listener()
-    async def on_guild_role_create(self, role: discord.Role):
-        """Called when a role is created"""
-        description = f"Role created: {role.mention}"
-        await self._log_event(role.guild.id, "role_create", description)
-
-    @commands.Cog.listener()
-    async def on_guild_role_delete(self, role: discord.Role):
-        """Called when a role is deleted"""
-        description = f"Role deleted: {role.name}"
-        await self._log_event(role.guild.id, "role_delete", description)
-
-    # Channel Events
-    @commands.Cog.listener()
-    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
-        """Called when a channel is created"""
-        description = f"Channel created: {channel.mention}"
-        await self._log_event(channel.guild.id, "channel_create", description)
-
-    @commands.Cog.listener()
-    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
-        """Called when a channel is deleted"""
-        description = f"Channel deleted: #{channel.name}"
-        await self._log_event(channel.guild.id, "channel_delete", description)
-
-    async def _check_manage_server(self, interaction: discord.Interaction) -> bool:
-        """Check if user has manage server permissions"""
+    async def _log_event(self, guild_id: int, event_type: str, description: str) -> None:
+        """Log a server event to the database and configured channel"""
         try:
-            if not interaction.guild:
-                return False
-            return interaction.user.guild_permissions.manage_guild if isinstance(interaction.user, discord.Member) else False
-        except Exception as e:
-            self.log.error(f"Error checking server permissions: {e}", exc_info=True)
-            return False
-
-    async def _check_logging_enabled(self, guild_id: int) -> bool:
-        """Check if logging feature is enabled"""
-        feature_settings = await self.bot.db.get_feature_settings(guild_id, "logging")
-        return bool(feature_settings and feature_settings['enabled'])
-
-    async def _log_event(self, guild_id: int, event_type: str, description: str):
-        """Log an event if logging is enabled and event type is configured"""
-        try:
-            feature_settings = await self.bot.db.get_feature_settings(guild_id, "logging")
-            if not feature_settings or not feature_settings['enabled']:
+            # Get logging settings from feature_settings table
+            settings = await self.bot.db.get_feature_settings(guild_id, "logging")
+            if not settings or not settings.get('enabled'):
                 return
 
-            options = feature_settings['options']
-            enabled_events = options.get('events', [])
-            if event_type not in enabled_events:
-                return
+            # Add log entry to the logs table
+            await self.bot.db.execute(
+                """INSERT INTO logs (guild_id, event_type, description, timestamp)
+                   VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
+                (guild_id, event_type, description)
+            )
 
-            channel_id = options.get('channel_id')
-            if not channel_id:
-                return
+            # If log channel is configured, send embed
+            if channel_id := settings.get('log_channel_id'):
+                channel = self.bot.get_channel(int(channel_id))
+                if channel:
+                    embed = discord.Embed(
+                        title=f"🔍 {event_type.replace('_', ' ').title()}",
+                        description=description,
+                        color=discord.Color.blue(),
+                        timestamp=datetime.utcnow()
+                    )
+                    await channel.send(embed=embed)
 
-            # Insert the log entry
-            await self.bot.db.insert_log(guild_id, event_type, description)
-            
         except Exception as e:
             self.log.error(f"Error logging event: {e}", exc_info=True)
 
-    @app_commands.command(name="logging")
-    @app_commands.guild_only()
-    @app_commands.choices(type=[
-        Choice(name="Set Channel", value="channel"),
-        Choice(name="Enable Events", value="enable"),
-        Choice(name="Disable Events", value="disable")
-    ])
-    async def logging(self, interaction: discord.Interaction, type: str, channel: Optional[discord.TextChannel] = None):
-        """Configure logging settings."""
-        # Remove toggle option and keep only channel and event settings
-        if type == "toggle":
-            await interaction.response.send_message(
-                "❌ The toggle command has been moved to `/config setting:Toggle Logging`",
-                ephemeral=True
-            )
+    # Server Event Listeners
+    @commands.Cog.listener()
+    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+        """Log channel creation"""
+        await self._log_event(
+            channel.guild.id,
+            "channel_create",
+            f"Channel {channel.mention} was created\n" +
+            f"Type: {str(channel.type)}\n" +
+            f"Category: {channel.category.name if channel.category else 'None'}"
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        """Log channel deletion"""
+        await self._log_event(
+            channel.guild.id,
+            "channel_delete",
+            f"Channel #{channel.name} was deleted\n" +
+            f"Type: {str(channel.type)}\n" +
+            f"Category: {channel.category.name if channel.category else 'None'}"
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_role_create(self, role: discord.Role):
+        """Log role creation"""
+        await self._log_event(
+            role.guild.id,
+            "role_create",
+            f"Role {role.mention} was created\n" +
+            f"Color: {str(role.color)}\n" +
+            f"Hoisted: {role.hoist}\n" +
+            f"Mentionable: {role.mentionable}"
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role: discord.Role):
+        """Log role deletion"""
+        await self._log_event(
+            role.guild.id,
+            "role_delete",
+            f"Role @{role.name} was deleted\n" +
+            f"Color: {str(role.color)}\n" +
+            f"Members affected: {len(role.members)}"
+        )
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        """Log member joins"""
+        if member.bot:
             return
 
-        if not interaction.guild:
-            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
+        account_age = datetime.utcnow() - member.created_at
+        await self._log_event(
+            member.guild.id,
+            "member_join",
+            f"{member.mention} joined the server\n" +
+            f"Account age: {account_age.days} days\n" +
+            f"ID: {member.id}"
+        )
 
-        if not await self._check_manage_server(interaction):
-            return await interaction.response.send_message("You need Manage Server permission!", ephemeral=True)
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        """Log member leaves"""
+        if member.bot:
+            return
 
-        try:
-            if type == "channel":
-                try:
-                    if not channel:
-                        return await interaction.response.send_message("Please specify a channel!", ephemeral=True)
-                        
-                    try:
-                        # Test if bot can send messages in the channel
-                        await channel.send("🔍 Testing logging channel permissions...", delete_after=0)
-                        
-                        # Get current feature settings
-                        settings = await self.bot.db.get_feature_settings(interaction.guild.id, "logging")
-                        current_events = settings.get('options', {}).get('events', []) if settings else [
-                            "message_delete", "message_edit", 
-                            "member_join", "member_leave", 
-                            "member_ban", "member_unban",
-                            "whisper_create", "whisper_close",
-                            "whisper_delete"
-                        ]
-                        
-                        if not interaction.guild:
-                            return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
-                        
-                        # Save settings using feature settings method
-                        await self.bot.db.set_feature_settings(
-                            interaction.guild.id,
-                            "logging",
-                            True,
-                            {
-                                'channel_id': channel.id,
-                                'events': current_events
-                            }
-                        )
-                        
-                        await interaction.response.send_message(f"✅ Logging channel set to {channel.mention}")
-                        
-                    except discord.Forbidden as e:
-                        self.log.warning(f"Permission error in logging command: {e}")
-                        await interaction.response.send_message("❌ I don't have permission to send messages in that channel!", ephemeral=True)
-                    except Exception as e:
-                        self.log.error(f"Error in logging command: {e}", exc_info=True)
-                        await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
-                        
-                except Exception as e:
-                    self.log.error(f"Unexpected error in logging command: {e}", exc_info=True)
-                    await interaction.response.send_message("❌ An unexpected error occurred.", ephemeral=True)
+        roles = [role.name for role in member.roles[1:]]  # Exclude @everyone
+        await self._log_event(
+            member.guild.id,
+            "member_leave",
+            f"{member.mention} left the server\n" +
+            f"Joined: {discord.utils.format_dt(member.joined_at) if member.joined_at else 'Unknown'}\n" +
+            f"Roles: {', '.join(roles) if roles else 'None'}"
+        )
 
-            elif type == "enable" or type == "disable":
-                # Create event selection view
-                view = EventView(self.all_events, type)
-                await interaction.response.send_message(
-                    f"Please select the events you want to {type}:",
-                    view=view,
-                    ephemeral=True
-                )
-                
-                # Wait for selection
-                timed_out = await view.wait()
-                if timed_out:
-                    return await interaction.followup.send("Selection timed out!", ephemeral=True)
-                
-                if not view.selected_events:
-                    return await interaction.followup.send("No events selected!", ephemeral=True)
-                    
-                try:
-                    settings = await self.bot.db.get_feature_settings(interaction.guild.id, "logging")
-                    current_events = settings.get('options', {}).get('events', []) if settings else []
-                    channel_id = settings.get('options', {}).get('channel_id') if settings else 0
-                    
-                    # Ensure current_events is a list
-                    if isinstance(current_events, str):
-                        current_events = [current_events]
-                    
-                    # Update events list
-                    if type == "enable":
-                        # Combine lists and remove duplicates using set
-                        new_events = list(set(current_events + list(view.selected_events)))
-                    else:
-                        # Remove selected events from current events
-                        new_events = [e for e in current_events if e not in view.selected_events]
-                    
-                    # Save updated settings
-                    await self.bot.db.set_feature_settings(
-                        interaction.guild.id,
-                        "logging",
-                        True,
-                        {
-                            'channel_id': channel_id,
-                            'events': new_events
-                        }
-                    )
-                    
-                    events_str = ", ".join(e.replace("_", " ").title() for e in view.selected_events)
-                    await interaction.followup.send(
-                        f"✅ Successfully {'enabled' if type == 'enable' else 'disabled'} the following events: {events_str}",
-                        ephemeral=True
-                    )
-                    
-                except Exception as e:
-                    await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
-                    self.log.error(f"Error updating logging events: {e}", exc_info=True)
+    @commands.Cog.listener()
+    async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
+        """Log server setting changes"""
+        changes = []
 
-        except Exception as e:
-            self.log.error(f"Error in logging command: {e}", exc_info=True)
-            await interaction.response.send_message("❌ An unexpected error occurred.", ephemeral=True)
+        if before.name != after.name:
+            changes.append(f"Name: {before.name} → {after.name}")
+        if before.description != after.description:
+            changes.append("Description updated")
+        if before.icon != after.icon:
+            changes.append("Server icon changed")
+        if before.banner != after.banner:
+            changes.append("Server banner changed")
+        if before.verification_level != after.verification_level:
+            changes.append(f"Verification Level: {before.verification_level} → {after.verification_level}")
 
-    @app_commands.command(name="viewlogs", description="View event logs with filters.")
-    @app_commands.guild_only()
+        if changes:
+            await self._log_event(
+                after.id,
+                "server_update",
+                "Server settings updated:\n" + "\n".join(f"• {change}" for change in changes)
+            )
+
+    # Logging Configuration Commands
+    @app_commands.command(name="logging")
     @app_commands.describe(
-        type="Type of log to view",
-        limit="Number of entries to show (default: 10)",
-        user="Filter by user",
-        days="Number of days to look back (default: 7)"
+        channel="Channel to send server logs to",
+        enabled="Enable or disable logging"
     )
-    async def viewlogs(
+    async def logging_setup(
         self,
         interaction: discord.Interaction,
-        type: Optional[str] = None,
+        channel: Optional[discord.TextChannel] = None,
+        enabled: Optional[bool] = None
+    ):
+        """Configure server logging settings"""
+        if not interaction.guild:
+            return await interaction.response.send_message(
+                "This command can only be used in a server!",
+                ephemeral=True
+            )
+
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message(
+                "You need Manage Server permission to use this command!",
+                ephemeral=True
+            )
+
+        try:
+            # Get current settings
+            settings = await self.bot.db.get_feature_settings(interaction.guild.id, "logging") or {}
+
+            if channel:
+                # Test permissions in the channel
+                permissions = channel.permissions_for(interaction.guild.me)
+                if not (permissions.send_messages and permissions.embed_links):
+                    return await interaction.response.send_message(
+                        f"I need Send Messages and Embed Links permissions in {channel.mention}!",
+                        ephemeral=True
+                    )
+                settings['log_channel_id'] = channel.id
+
+            if enabled is not None:
+                settings['enabled'] = enabled
+
+            # Update settings in database
+            await self.bot.db.update_feature_settings(
+                interaction.guild.id,
+                "logging",
+                settings
+            )
+
+            # Create response embed
+            embed = discord.Embed(
+                title="⚙️ Server Logging Settings",
+                color=discord.Color.green(),
+                timestamp=datetime.utcnow()
+            )
+
+            embed.add_field(
+                name="Status",
+                value="✅ Enabled" if settings.get('enabled') else "❌ Disabled",
+                inline=True
+            )
+
+            if channel_id := settings.get('log_channel_id'):
+                embed.add_field(
+                    name="Log Channel",
+                    value=f"<#{channel_id}>",
+                    inline=True
+                )
+
+            embed.add_field(
+                name="Logged Events",
+                value="\n".join(f"• {e.replace('_', ' ').title()}" for e in self.server_events),
+                inline=False
+            )
+
+            await interaction.response.send_message(embed=embed)
+
+        except Exception as e:
+            self.log.error(f"Error updating log settings: {e}", exc_info=True)
+            await interaction.response.send_message(
+                f"❌ An error occurred while updating settings: {str(e)}",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="viewlogs")
+    @app_commands.describe(
+        event_type="Type of logs to view",
+        limit="Number of entries to show (default: 10)",
+        days="Number of days to look back (default: 7)"
+    )
+    async def view_logs(
+        self,
+        interaction: discord.Interaction,
+        event_type: Optional[str] = None,
         limit: Optional[int] = 10,
-        user: Optional[discord.User] = None,
         days: Optional[int] = 7
     ):
-        """View event logs with filters."""
-        
-        try:
-            if not await self._check_manage_server(interaction):
-                return await interaction.response.send_message("You need the Manage Server permission to use this command!", ephemeral=True)
-                
-            if not interaction.guild:
-                return await interaction.response.send_message("This command can only be used in a server!", ephemeral=True)
-            
-            # Use the proper get_logs_filtered method
-            logs = await self.bot.db.get_logs_filtered(
-                interaction.guild.id,
-                type,  # event_type
-                days   # since_days
+        """View server event logs"""
+        if not interaction.guild:
+            return await interaction.response.send_message(
+                "This command can only be used in a server!",
+                ephemeral=True
             )
-            
+
+        if not interaction.user.guild_permissions.view_audit_log:
+            return await interaction.response.send_message(
+                "You need View Audit Log permission to use this command!",
+                ephemeral=True
+            )
+
+        try:
+            # Get logs from database
+            logs = await self.bot.db.get_logs(
+                interaction.guild.id,
+                event_type,
+                limit,
+                days
+            )
+
             if not logs:
-                return await interaction.response.send_message("No logs found matching the filters!", ephemeral=True)
-            
-            # Filter by user if specified
-            if user:
-                logs = [log for log in logs if str(user.id) in log['description']]
-            
-            # Limit results
-            logs = logs[:limit]
-            
-            # Create embed pages
+                return await interaction.response.send_message(
+                    "No logs found matching the criteria!",
+                    ephemeral=True
+                )
+
+            # Create paginated embeds
             embeds = []
             for i in range(0, len(logs), 5):
                 embed = discord.Embed(
-                    title=f"📋 Logs for {interaction.guild.name}",
-                    color=discord.Color.blue()
+                    title=f"📋 Server Logs",
+                    color=discord.Color.blue(),
+                    timestamp=datetime.utcnow()
                 )
-                
-                chunk = logs[i:i+5]
-                for log in chunk:
+
+                for log in logs[i:i+5]:
                     embed.add_field(
                         name=f"{log['event_type']} • {discord.utils.format_dt(log['timestamp'], 'R')}",
                         value=log['description'],
                         inline=False
                     )
-                
+
                 embed.set_footer(text=f"Page {i//5 + 1}/{(len(logs)-1)//5 + 1}")
                 embeds.append(embed)
-            
-            # Create pagination view
-            class LogPaginator(discord.ui.View):
-                def __init__(self, embeds: List[discord.Embed]):
-                    super().__init__(timeout=180)
-                    self.embeds = embeds
-                    self.current = 0
-                    
-                @discord.ui.button(label="◀️", style=discord.ButtonStyle.gray)
-                async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    self.current = max(0, self.current - 1)
-                    await interaction.response.edit_message(embed=self.embeds[self.current])
-                    
-                @discord.ui.button(label="▶️", style=discord.ButtonStyle.gray)
-                async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    self.current = min(len(self.embeds) - 1, self.current + 1)
-                    await interaction.response.edit_message(embed=self.embeds[self.current])
-            
-            # Send first page with pagination if needed
-            if len(embeds) > 1:
-                await interaction.response.send_message(embed=embeds[0], view=LogPaginator(embeds))
-            else:
-                await interaction.response.send_message(embed=embeds[0])
-                
+
+            # Send first page
+            await interaction.response.send_message(embed=embeds[0])
+
         except Exception as e:
             self.log.error(f"Error viewing logs: {e}", exc_info=True)
-            await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
+            await interaction.response.send_message(
+                f"❌ An error occurred while fetching logs: {str(e)}",
+                ephemeral=True
+            )
 
 async def setup(bot):
     await bot.add_cog(LoggingCog(bot))
