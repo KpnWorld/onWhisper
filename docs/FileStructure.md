@@ -52,16 +52,16 @@ onWhisper/
 > Located in: `cogs/`  
 > Each cog is a separate feature module, loaded dynamically at runtime.
 
-| File | Purpose |
-|------|---------|
-| `info.py` | General info commands (server, bot, user, roles, channels) |
-| `leveling.py` | XP gain, level tracking, leaderboard, level config |
-| `moderation.py` | Kick, ban, mute, and moderation utilities |
-| `roles.py` | Autoroles, reaction roles, and color roles |
-| `logging.py` | Server logging for joins, leaves, message deletes, edits |
-| `whisper.py` | Anonymous whispers, staff view, and whisper settings |
-| `config.py` | Guild-specific configuration commands |
-
+| File          | Purpose                                                   |  
+|---------------|-----------------------------------------------------------|  
+| info.py       | General info commands (server, bot, user, roles, channels) |  
+| leveling.py   | XP gain, level tracking, leaderboard, level config         |  
+| moderation.py | Kick, ban, mute, and moderation utilities                  |  
+| roles.py      | Autoroles, reaction roles, and color roles                 |  
+| logging.py    | Server logging for joins, leaves, message deletes, edits   |  
+| whisper.py    | Anonymous whispers, staff view, and whisper settings       |  
+| config.py     | Guild-specific configuration commands                      |  
+| help.py       | Interactive help system with categories and command guide  |  
 ---
 
 ## 🛠 Utils (Core Utilities)
