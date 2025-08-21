@@ -8,33 +8,40 @@ Understanding this structure ensures consistent organization and faster onboardi
 ## 🗂 Root Directory
 
 ```
-onWhisper/
-│
-├── bot.py               # 🚀 Main bot startup file (onWhisperBot)
-├── .env                 # 🔐 Token & environment configs
-│
-├── cogs/                # ⚙️ All bot modules (cogs)
-│ ├── info.py            # ℹ️ /bot, /user, /guild, /role, /channel info
-│ ├── leveling.py        # 📈 XP, roles, leaderboard
-│ ├── moderation.py      # 🔨 Warn, mute, kick, ban, lockdown, purge (hybrid)
-│ ├── roles.py           # 🎭 Auto, reaction, color roles
-│ ├── logging.py         # 📝 Event logs (joins, edits, deletions)
-│ └── whisper.py         # 🤫 Whisper System (thread-based tickets)
-│
-├── utils/               # 🧠 Core logic managers
-│ ├── db_manager.py      # 🗄️ DB layer (aiosqlite)
-│ └── config.py          # ⚙️ ConfigManager for guild settings
-│
-├── data/                # 🗂 Persistent local data
-│ └── onwhisper.db       # 🗃 SQLite database file
-│
-├── docs/
-│ ├── README.md          # 📝 Full slash command reference with DB usage
-│ ├── FileStructure.md   # 🗂 File Structure reference
-│ ├── Database.md        # 💿 Full database schema & DBManager methods documentation
-│ ├── Commands.md        # 🧑‍💻 Full slash command reference with DB usage
-│ ├── CodeStyle.md       # 🎨 Universal code style & structure guide
-│ └── Development.md     # 🛠️ Instructions for Setup, contribution, and hosting
+📂 onWhisper File Structure  
+This page documents the full file and folder layout for onWhisper.  
+Understanding this structure ensures consistent organization and faster onboarding for new developers.  
+
+🗂 Root Directory  
+onWhisper/  
+│  
+├── bot.py               # 🚀 Main bot startup file (onWhisperBot)  
+├── .env                 # 🔐 Token & environment configs  
+│  
+├── cogs/                # ⚙️ All bot modules (cogs)  
+│ ├── info.py            # ℹ️ /bot, /user, /guild, /role, /channel info  
+│ ├── leveling.py        # 📈 XP, roles, leaderboard  
+│ ├── moderation.py      # 🔨 Warn, mute, kick, ban, lockdown, purge (hybrid)  
+│ ├── roles.py           # 🎭 Auto, reaction, color roles  
+│ ├── logging.py         # 📝 Event logs (joins, edits, deletions)  
+│ ├── whisper.py         # 🤫 Whisper System (thread-based tickets)  
+│ └── help.py            # 📖 Interactive help command & command categories  
+│  
+├── utils/               # 🧠 Core logic managers  
+│ ├── db_manager.py      # 🗄️ DB layer (aiosqlite)  
+│ └── config.py          # ⚙️ ConfigManager for guild settings  
+│  
+├── data/                # 🗂 Persistent local data  
+│ └── onwhisper.db       # 🗃 SQLite database file  
+│  
+├── docs/  
+│ ├── README.md          # 📝 Full project overview & setup  
+│ ├── FileStructure.md   # 🗂 File Structure reference  
+│ ├── Database.md        # 💿 Full database schema & DBManager methods documentation  
+│ ├── Commands.md        # 🧑‍💻 Full slash command reference with DB usage  
+│ ├── CodeStyle.md       # 🎨 Universal code style & structure guide  
+│ └── Development.md     # 🛠️ Instructions for setup, contribution, and hosting  
+
 ```
 
 
