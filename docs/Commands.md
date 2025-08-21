@@ -148,8 +148,18 @@ This document outlines all slash commands available in the onWhisper bot. Each c
 
 ---
 
+## ❓ Help System (`help.py`) 
 
+### `/help`
+- Shows an interactive help menu with categories.
 
+### `/help <category>`
+- Lists all commands under a category (info, leveling, moderation, roles, whisper, config, debug). 
+
+### `/help <command>`
+- Shows detailed usage and options for a specific command.
+
+> *(Do not use DBManager - pulls directly from bot command registry.)*
 ---
 
 ## 🧪 Debug & Maintenance (`debug.py`)
