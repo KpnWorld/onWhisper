@@ -1,0 +1,179 @@
+import os
+import logging
+import aiosqlite
+import discord
+from discord import app_commands
+from discord.ext import commands
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+class DebugCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.db = bot.db_manager
+        self.config = bot.config_manager
+
+    async def cog_check(self, ctx: commands.Context) -> bool:
+        return await self.bot.is_owner(ctx.author)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message("🚫 Owner only.", ephemeral=True)
+            return False
+        return True
+
+    @app_commands.command(name="tables", description="List all tables and row counts")
+    async def tables(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        logger.info(f"/tables invoked by {interaction.user}")
+        try:
+            async with aiosqlite.connect(self.db.db_path) as db:
+                cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = await cursor.fetchall()
+            result = []
+            async with aiosqlite.connect(self.db.db_path) as db:
+                for t in tables:
+                    name = t[0]
+                    cursor = await db.execute(f"SELECT COUNT(*) FROM {name}")
+                    count = (await cursor.fetchone())[0]
+                    result.append(f"{name}: {count}")
+            await interaction.response.send_message("\n".join(result), ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /tables")
+            await interaction.response.send_message("❌ Failed to list tables.", ephemeral=True)
+
+    @app_commands.command(name="dbsize", description="Show database file size")
+    async def dbsize(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            size = os.path.getsize(self.db.db_path)
+            await interaction.response.send_message(f"Database size: {size / 1024:.2f} KB", ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /dbsize")
+            await interaction.response.send_message("❌ Failed to get DB size.", ephemeral=True)
+
+    @app_commands.command(name="guildconfig", description="Show guild configuration")
+    async def guildconfig(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            settings = {}
+            for k in self.config._cache.get(interaction.guild_id, {}):
+                v = await self.config.get(interaction.guild_id, k)
+                settings[k] = v
+            lines = [f"{k}: {v}" for k, v in settings.items()]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /guildconfig")
+            await interaction.response.send_message("❌ Failed to fetch config.", ephemeral=True)
+
+    @app_commands.command(name="xpstats", description="XP statistics for this guild")
+    async def xpstats(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            users = await self.db.fetch_guild_users(interaction.guild_id)
+            total = sum(u["xp"] for u in users)
+            avg = total / len(users) if users else 0
+            await interaction.response.send_message(
+                f"Users: {len(users)}\nTotal XP: {total}\nAverage XP: {avg:.2f}",
+                ephemeral=True,
+            )
+        except Exception as e:
+            logger.exception("Error in /xpstats")
+            await interaction.response.send_message("❌ Failed to fetch XP stats.", ephemeral=True)
+
+    @app_commands.command(name="xpglobal", description="Global XP leaderboard")
+    async def xpglobal(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            rows = await self.db.fetch_all_users()
+            sorted_rows = sorted(rows, key=lambda r: r["xp"], reverse=True)[:10]
+            lines = [f"{r['user_id']} ({r['guild_id']}): {r['xp']}" for r in sorted_rows]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /xpglobal")
+            await interaction.response.send_message("❌ Failed to fetch global XP.", ephemeral=True)
+
+    @app_commands.command(name="whispers", description="Whisper stats for this guild")
+    async def whispers(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            rows = await self.db.get_guild_whispers(interaction.guild_id)
+            await interaction.response.send_message(f"Total whispers: {len(rows)}", ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /whispers")
+            await interaction.response.send_message("❌ Failed to fetch whisper stats.", ephemeral=True)
+
+    @app_commands.command(name="whispersglobal", description="Whisper stats globally")
+    async def whispersglobal(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            rows = await self.db.get_all_whispers()
+            await interaction.response.send_message(f"Total whispers: {len(rows)}", ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /whispersglobal")
+            await interaction.response.send_message("❌ Failed to fetch global whisper stats.", ephemeral=True)
+
+    @app_commands.command(name="roles", description="Role data for this guild")
+    async def roles(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            autoroles = await self.db.get_autoroles(interaction.guild_id)
+            reaction_roles = await self.db.get_reaction_roles(interaction.guild_id)
+            color_roles = await self.db.get_color_roles(interaction.guild_id)
+            lines = [
+                f"Autoroles: {len(autoroles)}",
+                f"Reaction Roles: {len(reaction_roles)}",
+                f"Color Roles: {len(color_roles)}",
+            ]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /roles")
+            await interaction.response.send_message("❌ Failed to fetch role data.", ephemeral=True)
+
+    cache_group = app_commands.Group(name="cache", description="Cache management")
+
+    @cache_group.command(name="reload", description="Reload config cache for this guild")
+    async def cache_reload(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            await self.config.load_guild(interaction.guild_id)
+            await interaction.response.send_message("✅ Cache reloaded.", ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /cache reload")
+            await interaction.response.send_message("❌ Failed to reload cache.", ephemeral=True)
+
+    @cache_group.command(name="clear", description="Clear cache for this guild")
+    async def cache_clear(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            await self.config.clear_cache(interaction.guild_id)
+            await interaction.response.send_message("✅ Cache cleared.", ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /cache clear")
+            await interaction.response.send_message("❌ Failed to clear cache.", ephemeral=True)
+
+    @cache_group.command(name="clearall", description="Clear all cache")
+    async def cache_clear_all(self, interaction: discord.Interaction):
+        if not await self.interaction_check(interaction):
+            return
+        try:
+            await self.config.clear_cache()
+            await interaction.response.send_message("✅ All cache cleared.", ephemeral=True)
+        except Exception as e:
+            logger.exception("Error in /cache clearall")
+            await interaction.response.send_message("❌ Failed to clear all cache.", ephemeral=True)
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(DebugCog(bot))
+    bot.tree.add_command(DebugCog.cache_group)
