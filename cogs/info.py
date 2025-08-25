@@ -1,7 +1,7 @@
 # cogs/info.py
 
 import logging
-from typing import Literal
+from typing import Literal, Optional
 
 import discord
 from discord import app_commands
@@ -20,7 +20,9 @@ class InfoCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         type: Literal["server", "bot", "role", "channel", "user"],
-        target: discord.Role | discord.TextChannel | discord.Member | None = None,
+        role: Optional[discord.Role] = None,
+        channel: Optional[discord.TextChannel] = None,
+        user: Optional[discord.Member] = None,
     ):
         try:
             await interaction.response.defer(ephemeral=True)
@@ -31,15 +33,15 @@ class InfoCog(commands.Cog):
             elif type == "bot":
                 embed = await self._bot_info()
             elif type == "role":
-                if not isinstance(target, discord.Role):
-                    raise ValueError("You must select a role.")
-                embed = await self._role_info(target)
+                if not role:
+                    raise ValueError("You must select a role for type 'role'.")
+                embed = await self._role_info(role)
             elif type == "channel":
-                if not isinstance(target, discord.TextChannel):
-                    raise ValueError("You must select a text channel.")
-                embed = await self._channel_info(target)
+                if not channel:
+                    raise ValueError("You must select a text channel for type 'channel'.")
+                embed = await self._channel_info(channel)
             elif type == "user":
-                member = target or interaction.user
+                member = user or interaction.user
                 if not isinstance(member, discord.Member):
                     raise ValueError("Invalid user provided.")
                 embed = await self._user_info(member)

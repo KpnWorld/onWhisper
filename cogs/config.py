@@ -1,4 +1,4 @@
-## cogs/config.py
+# cogs/config.py
 
 import discord
 from discord import app_commands
@@ -39,6 +39,7 @@ class ConfigCog(commands.Cog):
         guild_id = interaction.guild.id
 
         if action == "view-all":
+            await interaction.response.defer(ephemeral=True)  # <-- defer first
             await self.config.load_guild(guild_id)
             data = self.config._cache[guild_id]
             embed = discord.Embed(
@@ -47,7 +48,7 @@ class ConfigCog(commands.Cog):
             )
             for k, v in data.items():
                 embed.add_field(name=k, value=str(v) or "None", inline=False)
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)  # <-- followup after defer
             return
 
         if action == "view":
