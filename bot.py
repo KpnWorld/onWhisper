@@ -87,7 +87,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 COGS = [
     "cogs.debug",
     "cogs.info",
-    # "cogs.leveling",
+    "cogs.leveling",
     # "cogs.moderation",
     # "cogs.roles",
     # "cogs.logging",

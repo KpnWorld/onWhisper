@@ -39,20 +39,24 @@ class DebugCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @owner_only()
-    @app_commands.command(name="debug-config-cache", description="Inspect the in-memory config cache")
-    async def debug_config_cache(self, interaction: discord.Interaction):
-        data = self.config._cache
+    @commands.command(name="show_config_cache")
+    async def show_config_cache(self, ctx: commands.Context):
+        if not self.bot.config_manager._cache:
+            await ctx.send("No guilds currently cached.")
+            return
+
         embed = discord.Embed(
             title="Config Cache",
-            description=f"{len(data)} guilds cached",
-            color=discord.Color.purple()
+            color=discord.Color.blurple()
         )
-        for gid, conf in data.items():
-            short = ", ".join(f"{k}={v}" for k, v in conf.items())
-            if len(short) > 1000:
-                short = short[:1000] + "..."
-            embed.add_field(name=str(gid), value=short or "Empty", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        embed.description = f"{len(self.bot.config_manager._cache)} guild(s) cached"
+
+        for guild_id, config in self.bot.config_manager._cache.items():
+            config_lines = "\n".join(f"**{k}** = `{v}`" for k, v in config.items())
+            embed.add_field(name=f"Guild ID: {guild_id}", value=config_lines, inline=False)
+
+        await ctx.send(embed=embed)
+
 
     @owner_only()
     @app_commands.command(name="debug-delete-global", description="Delete ALL rows from a database table (GLOBAL)")

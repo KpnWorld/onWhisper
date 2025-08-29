@@ -9,15 +9,30 @@ from utils.db_manager import DBManager
 logger = logging.getLogger("ConfigManager")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
+    # 🔧 Core
+    "prefix": "!",
+
+    # 🎮 Leveling
+    "leveling_enabled": True,
     "xp_rate": 10,
     "xp_cooldown": 60,
     "level_up_message": "🎉 {user} reached level {level}!",
     "level_channel": None,
+
+    # 🛡 Moderation
+    "moderation_enabled": True,
     "mod_log_channel": None,
+
+    # 👋 Logging (join/leave)
+    "logging_enabled": True,
     "join_log_channel": None,
     "leave_log_channel": None,
-    "prefix": "!",
+
+    # 🎭 Roles
+    "roles_enabled": True,
     "autorole_enabled": False,
+
+    # 💌 Whisper system
     "whisper_enabled": True,
     "whisper_channel": None,
 }

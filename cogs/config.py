@@ -27,6 +27,7 @@ class ConfigCog(commands.Cog):
             app_commands.Choice(name="view", value="view"),
             app_commands.Choice(name="set", value="set"),
         ],
+        # Automatically include all keys from DEFAULT_CONFIG
         key=[app_commands.Choice(name=k, value=k) for k in DEFAULT_CONFIG.keys()],
     )
     async def config_cmd(
@@ -39,16 +40,20 @@ class ConfigCog(commands.Cog):
         guild_id = interaction.guild.id
 
         if action == "view-all":
-            await interaction.response.defer(ephemeral=True)  # <-- defer first
+            await interaction.response.defer(ephemeral=True)
             await self.config.load_guild(guild_id)
             data = self.config._cache[guild_id]
             embed = discord.Embed(
-                title=f"Configuration for {interaction.guild.name}",
+                title=f"⚙️ Configuration for {interaction.guild.name}",
                 color=discord.Color.blurple()
             )
             for k, v in data.items():
-                embed.add_field(name=k, value=str(v) or "None", inline=False)
-            await interaction.followup.send(embed=embed)  # <-- followup after defer
+                if isinstance(v, bool):
+                    v_display = "✅ Enabled" if v else "❌ Disabled"
+                else:
+                    v_display = str(v) if v is not None else "None"
+                embed.add_field(name=k, value=v_display, inline=False)
+            await interaction.followup.send(embed=embed)
             return
 
         if action == "view":
@@ -56,8 +61,12 @@ class ConfigCog(commands.Cog):
                 await interaction.response.send_message("You must provide a key to view.")
                 return
             val = await self.config.get(guild_id, key)
+            if isinstance(val, bool):
+                val_display = "✅ Enabled" if val else "❌ Disabled"
+            else:
+                val_display = str(val)
             await interaction.response.send_message(
-                f"Config `{key}` = `{val}`"
+                f"Config `{key}` = `{val_display}`"
             )
             return
 
@@ -77,7 +86,7 @@ class ConfigCog(commands.Cog):
             default_val = DEFAULT_CONFIG[key]
             try:
                 if isinstance(default_val, bool):
-                    parsed = value.lower() in ("true", "1", "yes", "on")
+                    parsed = value.lower() in ("true", "1", "yes", "on", "enabled")
                 elif isinstance(default_val, int):
                     parsed = int(value)
                 else:
@@ -89,8 +98,11 @@ class ConfigCog(commands.Cog):
                 return
 
             await self.config.set(guild_id, key, parsed)
+            display_val = "✅ Enabled" if isinstance(parsed, bool) and parsed else (
+                "❌ Disabled" if isinstance(parsed, bool) else str(parsed)
+            )
             await interaction.response.send_message(
-                f"Config key `{key}` updated to `{parsed}`."
+                f"Config key `{key}` updated to {display_val}."
             )
 
 
