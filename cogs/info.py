@@ -2,6 +2,7 @@
 
 import logging
 from typing import Literal, Optional
+from datetime import datetime
 
 import discord
 from discord import app_commands
@@ -62,52 +63,79 @@ class InfoCog(commands.Cog):
             )
 
     async def _server_info(self, guild: discord.Guild) -> discord.Embed:
-        embed = discord.Embed(title=f"Server Info - {guild.name}", color=discord.Color.blue())
-        embed.add_field(name="Server ID", value=guild.id, inline=True)
-        embed.add_field(name="Owner", value=guild.owner.mention if guild.owner else "Unknown", inline=True)
-        embed.add_field(name="Members", value=guild.member_count, inline=True)
-        embed.add_field(name="Created", value=guild.created_at.strftime("%Y-%m-%d"), inline=True)
+        created = guild.created_at.strftime("%Y-%m-%d %H:%M")
+        embed = discord.Embed(
+            title=f"📊 Server Information - {guild.name}",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Server ID", value=f"```{guild.id}```", inline=True)
+        embed.add_field(name="Owner", value=f"```{guild.owner}```", inline=True)
+        embed.add_field(name="Members", value=f"```{guild.member_count}```", inline=True)
+        embed.add_field(name="Created", value=f"```{created}```", inline=True)
         embed.set_thumbnail(url=guild.icon.url if guild.icon else discord.Embed.Empty)
         log.info("Generated server info for %s", guild.id)
         return embed
 
     async def _bot_info(self) -> discord.Embed:
-        embed = discord.Embed(title="Bot Info", color=discord.Color.blurple())
-        embed.add_field(name="Name", value=self.bot.user.name, inline=True)
-        embed.add_field(name="ID", value=self.bot.user.id, inline=True)
-        embed.add_field(name="Version", value=self.version, inline=True)
-        embed.add_field(name="Servers", value=len(self.bot.guilds), inline=True)
+        embed = discord.Embed(title="🤖 Bot Information", color=discord.Color.blurple())
+        embed.add_field(name="Name", value=f"```{self.bot.user.name}```", inline=True)
+        embed.add_field(name="ID", value=f"```{self.bot.user.id}```", inline=True)
+        embed.add_field(name="Version", value=f"```{self.version}```", inline=True)
+        embed.add_field(name="Servers", value=f"```{len(self.bot.guilds)}```", inline=True)
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         log.info("Generated bot info")
         return embed
 
     async def _role_info(self, role: discord.Role) -> discord.Embed:
-        embed = discord.Embed(title=f"Role Info - {role.name}", color=role.color)
-        embed.add_field(name="Role ID", value=role.id, inline=True)
-        embed.add_field(name="Members", value=len(role.members), inline=True)
-        embed.add_field(name="Created", value=role.created_at.strftime("%Y-%m-%d"), inline=True)
-        embed.add_field(name="Color", value=str(role.color), inline=True)
-        perms = ", ".join([p for p, v in role.permissions if v])
-        embed.add_field(name="Permissions", value=perms or "None", inline=False)
+        created = role.created_at.strftime("%Y-%m-%d %H:%M")
+        perms = ", ".join([name for name, value in role.permissions if value])
+        embed = discord.Embed(
+            title=f"🎭 Role Information - {role.name}",
+            color=role.color
+        )
+        embed.add_field(name="Role ID", value=f"```{role.id}```", inline=True)
+        embed.add_field(name="Members", value=f"```{len(role.members)}```", inline=True)
+        embed.add_field(name="Created", value=f"```{created}```", inline=True)
+        embed.add_field(name="Color", value=f"```{role.color}```", inline=True)
+        embed.add_field(name="Permissions", value=f"```{perms or 'None'}```", inline=False)
         log.info("Generated role info for %s", role.id)
         return embed
 
     async def _channel_info(self, channel: discord.TextChannel) -> discord.Embed:
-        embed = discord.Embed(title=f"Channel Info - #{channel.name}", color=discord.Color.green())
-        embed.add_field(name="Channel ID", value=channel.id, inline=True)
-        embed.add_field(name="Category", value=channel.category.name if channel.category else "None", inline=True)
-        embed.add_field(name="Created", value=channel.created_at.strftime("%Y-%m-%d"), inline=True)
-        embed.add_field(name="NSFW", value=str(channel.is_nsfw()), inline=True)
+        created = channel.created_at.strftime("%Y-%m-%d %H:%M")
+        embed = discord.Embed(
+            title=f"📺 Channel Information - #{channel.name}",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Channel ID", value=f"```{channel.id}```", inline=True)
+        embed.add_field(
+            name="Category",
+            value=f"```{channel.category.name if channel.category else 'None'}```",
+            inline=True
+        )
+        embed.add_field(name="Created", value=f"```{created}```", inline=True)
+        embed.add_field(
+            name="Type",
+            value=f"```{channel.type.name.capitalize()}```",
+            inline=True
+        )
         log.info("Generated channel info for %s", channel.id)
         return embed
 
     async def _user_info(self, member: discord.Member) -> discord.Embed:
-        embed = discord.Embed(title=f"User Info - {member}", color=member.color if member.color.value else discord.Color.blue())
-        embed.add_field(name="User ID", value=member.id, inline=True)
-        embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d") if member.joined_at else "Unknown", inline=True)
-        embed.add_field(name="Created Account", value=member.created_at.strftime("%Y-%m-%d"), inline=True)
-        embed.add_field(name="Top Role", value=member.top_role.name, inline=True)
-        embed.add_field(name="Bot", value=str(member.bot), inline=True)
+        joined = member.joined_at.strftime("%Y-%m-%d %H:%M") if member.joined_at else "Unknown"
+        created = member.created_at.strftime("%Y-%m-%d %H:%M")
+        color = member.color if member.color != discord.Color.default() else discord.Color.blue()
+
+        embed = discord.Embed(
+            title=f"👤 User Information - {member}",
+            color=color
+        )
+        embed.add_field(name="User ID", value=f"```{member.id}```", inline=True)
+        embed.add_field(name="Joined Server", value=f"```{joined}```", inline=True)
+        embed.add_field(name="Created Account", value=f"```{created}```", inline=True)
+        embed.add_field(name="Top Role", value=f"```{member.top_role.name}```", inline=True)
+        embed.add_field(name="Bot", value=f"```{member.bot}```", inline=True)
         embed.set_thumbnail(url=member.display_avatar.url)
         log.info("Generated user info for %s", member.id)
         return embed
