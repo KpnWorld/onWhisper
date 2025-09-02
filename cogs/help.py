@@ -1,3 +1,5 @@
+# cogs/help.py
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -105,16 +107,17 @@ class HelpCog(commands.Cog):
                     return
 
                 embed = discord.Embed(
-                    title=f"Command: /{command}",
-                    description=cmd.description or "No description available.",
+                    title=f"📘 Command Help - /{command}",
                     color=discord.Color.blue()
                 )
+
+                embed.add_field(name="Description", value=f"```{cmd.description or 'No description'}```", inline=False)
 
                 for cat in self.command_categories.values():
                     if command in cat["commands"]:
                         embed.add_field(
                             name="Usage",
-                            value=cat["commands"][command],
+                            value=f"```{cat['commands'][command]}```",
                             inline=False
                         )
 
@@ -123,11 +126,11 @@ class HelpCog(commands.Cog):
                     for param in cmd.parameters:
                         desc = param.description or "No description"
                         required = "Required" if param.required else "Optional"
-                        params.append(f"`{param.name}`: {desc} ({required})")
+                        params.append(f"{param.name}: {desc} ({required})")
                     if params:
                         embed.add_field(
                             name="Parameters",
-                            value="\n".join(params),
+                            value=f"```{chr(10).join(params)}```",
                             inline=False
                         )
 
@@ -149,14 +152,14 @@ class HelpCog(commands.Cog):
                 cat_data = self.command_categories[category_title]
                 embed = discord.Embed(
                     title=f"{cat_data['emoji']} {category_title} Commands",
-                    description=cat_data["description"],
+                    description=f"```{cat_data['description']}```",
                     color=discord.Color.blue()
                 )
 
                 for cmd_name, cmd_desc in cat_data["commands"].items():
                     embed.add_field(
                         name=f"/{cmd_name}",
-                        value=cmd_desc,
+                        value=f"```{cmd_desc}```",
                         inline=False
                     )
 
@@ -166,9 +169,9 @@ class HelpCog(commands.Cog):
             embed = discord.Embed(
                 title="📚 Command Categories",
                 description=(
-                    "Welcome to the help menu! Here are all available command categories.\n"
-                    "Use `/help category:<category>` to see commands in each category.\n"
-                    "Use `/help command:<command>` to see detailed command usage."
+                    "Here’s a list of all categories. Use:\n"
+                    "```/help category:<category>``` → to see commands\n"
+                    "```/help command:<command>``` → for detailed command usage"
                 ),
                 color=discord.Color.blue()
             )
@@ -177,16 +180,16 @@ class HelpCog(commands.Cog):
                 embed.add_field(
                     name=f"{cat_data['emoji']} {cat_name}",
                     value=(
-                        f"{cat_data['description']}\n"
-                        f"Commands: {len(cat_data['commands'])}\n"
-                        f"Example: /{next(iter(cat_data['commands']))}"
+                        f"```{cat_data['description']}```\n"
+                        f"Commands: ```{len(cat_data['commands'])}```\n"
+                        f"Example: ```/{next(iter(cat_data['commands']))}```"
                     ),
                     inline=False
                 )
 
             if interaction.guild is not None and self.bot.user:
                 embed.set_footer(
-                    text="Type /help <category> for more info",
+                    text="Use /help category:<category> for more info",
                     icon_url=self.bot.user.display_avatar.url
                 )
 
