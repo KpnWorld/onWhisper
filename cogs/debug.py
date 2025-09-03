@@ -32,11 +32,15 @@ class DebugCog(commands.Cog):
             "color_roles",
             "whispers",
         ]
-        embed = discord.Embed(title="Database Statistics", color=discord.Color.dark_gold())
+
+        lines = []
         for t in tables:
             row = await self.db.fetchone(f"SELECT COUNT(*) as c FROM {t}")
-            embed.add_field(name=t, value=str(row["c"] if row else 0), inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            count = row["c"] if row else 0
+            lines.append(f"{t}: {count}")
+
+        message = "```\n" + "\n".join(lines) + "\n```"
+        await interaction.response.send_message(message, ephemeral=True)
 
     @owner_only()
     @commands.command(name="show_config_cache")
@@ -45,18 +49,15 @@ class DebugCog(commands.Cog):
             await ctx.send("No guilds currently cached.")
             return
 
-        embed = discord.Embed(
-            title="Config Cache",
-            color=discord.Color.blurple()
-        )
-        embed.description = f"{len(self.bot.config_manager._cache)} guild(s) cached"
-
+        lines = [f"Total Cached Guilds: {len(self.bot.config_manager._cache)}", ""]
         for guild_id, config in self.bot.config_manager._cache.items():
-            config_lines = "\n".join(f"**{k}** = `{v}`" for k, v in config.items())
-            embed.add_field(name=f"Guild ID: {guild_id}", value=config_lines, inline=False)
+            lines.append(f"Guild ID: {guild_id}")
+            for k, v in config.items():
+                lines.append(f"  {k}: {v}")
+            lines.append("")
 
-        await ctx.send(embed=embed)
-
+        message = "```\n" + "\n".join(lines) + "\n```"
+        await ctx.send(message)
 
     @owner_only()
     @app_commands.command(name="debug-delete-global", description="Delete ALL rows from a database table (GLOBAL)")
@@ -76,7 +77,9 @@ class DebugCog(commands.Cog):
     )
     async def debug_delete_global(self, interaction: discord.Interaction, table: str):
         await self.db.execute(f"DELETE FROM {table}")
-        await interaction.response.send_message(f"All rows deleted from `{table}` (GLOBAL).", ephemeral=True)
+        await interaction.response.send_message(
+            f"All rows deleted from `{table}` (GLOBAL).", ephemeral=True
+        )
 
     @owner_only()
     @app_commands.command(name="debug-delete-server", description="Delete rows for this guild only from a table")
@@ -102,9 +105,10 @@ class DebugCog(commands.Cog):
             await self.db.execute("DELETE FROM whispers WHERE guild_id = ?", (guild_id,))
         else:
             await self.db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
-        await interaction.response.send_message(f"Rows deleted from `{table}` for guild `{guild_id}`.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Rows deleted from `{table}` for guild `{guild_id}`.", ephemeral=True
+        )
 
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(DebugCog(bot))
-

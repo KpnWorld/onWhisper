@@ -4,10 +4,11 @@ import os
 import signal
 import asyncio
 import logging
+import random
 from dotenv import load_dotenv
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 
 # -------------------- Utils Imports -------------------- #
@@ -45,9 +46,22 @@ bot = commands.Bot(
 db_manager = DBManager()
 config_manager = ConfigManager(db_manager)
 
-# Attach managers so all cogs can access them via self.bot
 bot.db_manager = db_manager
 bot.config_manager = config_manager
+
+# -------------------- Rotating Status -------------------- #
+@tasks.loop(minutes=10)
+async def rotate_status():
+    statuses = [
+        discord.Game(name="onWhisper v1.0.0"),
+        discord.Activity(type=discord.ActivityType.listening, name="/help"),
+        discord.Status.idle
+    ]
+    choice = random.choice(statuses)
+    if isinstance(choice, discord.Status):
+        await bot.change_presence(status=discord.Status.idle)
+    else:
+        await bot.change_presence(activity=choice, status=discord.Status.online)
 
 # -------------------- Events -------------------- #
 @bot.event
@@ -55,20 +69,19 @@ async def on_ready():
     logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
     logger.info("Bot is ready!")
 
-    # Sync app commands
     try:
         synced = await bot.tree.sync()
         logger.info(f"Synced {len(synced)} app commands")
     except Exception:
         logger.exception("Failed to sync app commands")
-        
+
+    if not rotate_status.is_running():
+        rotate_status.start()
+
 # -------------------- Global App Command Error Handler -------------------- #
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    # Log the error
     logger.error(f"App command error: {error}", exc_info=True)
-
-    # Respond to the user if possible
     try:
         if not interaction.response.is_done():
             await interaction.response.send_message(
@@ -92,8 +105,8 @@ COGS = [
     # "cogs.roles",
     # "cogs.logging",
     # "cogs.whisper",
-    "cogs.config",   # Config now loads like the rest
-    "cogs.help"      # If you have HelpCog in a separate file
+    "cogs.config",
+    "cogs.help"
 ]
 
 async def load_cogs():
