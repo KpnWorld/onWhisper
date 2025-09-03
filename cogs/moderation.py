@@ -38,7 +38,7 @@ class ModerationCog(commands.Cog):
             
         return interaction.user.guild_permissions.kick_members or interaction.user.guild_permissions.ban_members
 
-    async def _send_user_dm(self, user: discord.User, guild: discord.Guild, action: str, reason: str, moderator: discord.Member) -> bool:
+    async def _send_user_dm(self, user: discord.abc.User, guild: discord.Guild, action: str, reason: str, moderator: discord.abc.User) -> bool:
         """Attempt to DM user about moderation action. Returns True if successful."""
         try:
             embed = discord.Embed(
@@ -447,7 +447,7 @@ class ModerationCog(commands.Cog):
         if not await self._check_mod_permissions(interaction):
             return await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
             
-        if not interaction.guild.me.guild_permissions.manage_messages:
+        if not interaction.guild or not interaction.guild.me or not interaction.guild.me.guild_permissions.manage_messages:
             return await interaction.response.send_message("❌ I don't have permission to delete messages!", ephemeral=True)
             
         if limit < 1 or limit > 100:
@@ -463,13 +463,14 @@ class ModerationCog(commands.Cog):
             deleted_count = len(deleted)
             
             # Log the action
-            await self.db.log_moderation_action(
-                interaction.guild.id,
-                interaction.user.id,
-                "PURGE",
-                f"Purged {deleted_count} messages in #{interaction.channel.name}",
-                interaction.user.id
-            )
+            if interaction.guild and interaction.channel:
+                await self.db.log_moderation_action(
+                    interaction.guild.id,
+                    interaction.user.id,
+                    "PURGE",
+                    f"Purged {deleted_count} messages in #{interaction.channel.name}",
+                    interaction.user.id
+                )
             
             logger.info(f"Purged {deleted_count} messages in #{interaction.channel.name} by {interaction.user}")
             
