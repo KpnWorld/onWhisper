@@ -101,7 +101,7 @@ COGS = [
     "cogs.debug",
     "cogs.info",
     "cogs.leveling",
-    # "cogs.moderation",
+    "cogs.moderation",
     # "cogs.roles",
     # "cogs.logging",
     # "cogs.whisper",
