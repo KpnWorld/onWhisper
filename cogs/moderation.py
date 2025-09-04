@@ -232,7 +232,7 @@ class ModerationCog(commands.Cog):
             return await ctx.send("❌ I cannot timeout this member (role hierarchy)!", ephemeral=True)
             
         try:
-            until = datetime.utcnow() + timedelta(minutes=duration)
+            until = discord.utils.utcnow() + timedelta(minutes=duration)
             await member.timeout(until, reason=f"By {ctx.author}: {reason}")
             
             # Log to database
@@ -477,7 +477,9 @@ class ModerationCog(commands.Cog):
             return await ctx.send("❌ This command can only be used in text channels!", ephemeral=True)
             
         try:
-            await ctx.defer(ephemeral=True)
+            # Handle deferring differently for slash vs prefix commands
+            if ctx.interaction:
+                await ctx.defer(ephemeral=True)
             
             deleted = await ctx.channel.purge(limit=limit)
             deleted_count = len(deleted)
@@ -494,13 +496,26 @@ class ModerationCog(commands.Cog):
             
             logger.info(f"Purged {deleted_count} messages in #{ctx.channel.name} by {ctx.author}")
             
-            await ctx.followup.send(f"✨ Successfully deleted {deleted_count} message{'s' if deleted_count != 1 else ''}.", ephemeral=True)
+            # Send response based on command type
+            response = f"✨ Successfully deleted {deleted_count} message{'s' if deleted_count != 1 else ''}."
+            if ctx.interaction:
+                await ctx.followup.send(response, ephemeral=True)
+            else:
+                await ctx.send(response, ephemeral=True)
             
         except discord.Forbidden:
-            await ctx.followup.send("❌ I don't have permission to delete messages!", ephemeral=True)
+            error_msg = "❌ I don't have permission to delete messages!"
+            if ctx.interaction:
+                await ctx.followup.send(error_msg, ephemeral=True)
+            else:
+                await ctx.send(error_msg, ephemeral=True)
         except Exception as e:
             logger.error(f"Error in purge command: {e}", exc_info=True)
-            await ctx.followup.send("❌ An unexpected error occurred.", ephemeral=True)
+            error_msg = "❌ An unexpected error occurred."
+            if ctx.interaction:
+                await ctx.followup.send(error_msg, ephemeral=True)
+            else:
+                await ctx.send(error_msg, ephemeral=True)
 
     @commands.hybrid_command(name="lock", description="Lock a channel to prevent @everyone from sending messages")
     @app_commands.describe(channel="Channel to lock (defaults to current channel)")
