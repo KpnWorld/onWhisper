@@ -78,7 +78,7 @@ async def on_ready():
     if not rotate_status.is_running():
         rotate_status.start()
 
-# -------------------- Global App Command Error Handler -------------------- #
+# -------------------- Global Error Handlers -------------------- #
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     logger.error(f"App command error: {error}", exc_info=True)
@@ -95,6 +95,18 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
             )
     except Exception as followup_error:
         logger.error(f"Failed to send error response: {followup_error}", exc_info=True)
+
+@bot.event
+async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"❌ Missing required argument: `{error.param.name}`. Please check the command usage.", ephemeral=True)
+    elif isinstance(error, commands.BadArgument):
+        await ctx.send(f"❌ Invalid argument provided: {error}", ephemeral=True)
+    elif isinstance(error, commands.CommandNotFound):
+        return  # Ignore command not found errors
+    else:
+        logger.error(f"Command error in {ctx.command}: {error}", exc_info=True)
+        await ctx.send("❌ An unexpected error occurred while executing that command.", ephemeral=True)
 
 # -------------------- Cog Loading -------------------- #
 COGS = [
