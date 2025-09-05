@@ -135,6 +135,60 @@ class DBManager:
             "DELETE FROM guild_settings WHERE guild_id = ? AND setting = ?", (guild_id, setting)
         )
 
+    # -------------------- Whisper System -------------------- #
+    async def create_whisper(self, guild_id: int, user_id: int, thread_id: int) -> int:
+        """Create a new whisper and return its sequential number"""
+        async with self._lock:
+            # Get the next whisper number for this guild
+            count_row = await self.conn.execute(
+                "SELECT COUNT(*) as count FROM whispers WHERE guild_id = ?", (guild_id,)
+            )
+            count_result = await count_row.fetchone()
+            whisper_number = (count_result[0] if count_result else 0) + 1
+            
+            # Insert the whisper
+            await self.conn.execute(
+                "INSERT INTO whispers (guild_id, user_id, thread_id, created_at, is_open) VALUES (?, ?, ?, ?, ?)",
+                (guild_id, user_id, thread_id, datetime.utcnow(), 1)
+            )
+            await self.conn.commit()
+            return whisper_number
+
+    async def get_whisper_by_number(self, guild_id: int, whisper_number: int) -> Optional[Dict[str, Any]]:
+        """Get whisper by its sequential number (1-indexed)"""
+        rows = await self.fetchall(
+            "SELECT user_id, thread_id, created_at, is_open FROM whispers WHERE guild_id = ? ORDER BY created_at",
+            (guild_id,)
+        )
+        if rows and 1 <= whisper_number <= len(rows):
+            row = rows[whisper_number - 1]
+            return dict(row)
+        return None
+
+    async def get_active_whispers(self, guild_id: int) -> List[Dict[str, Any]]:
+        """Get all active whispers for a guild"""
+        rows = await self.fetchall(
+            "SELECT user_id, thread_id, created_at FROM whispers WHERE guild_id = ? AND is_open = ? ORDER BY created_at",
+            (guild_id, 1)
+        )
+        return [dict(row) for row in rows]
+
+    async def close_whisper(self, guild_id: int, thread_id: int) -> bool:
+        """Close a whisper thread"""
+        result = await self.execute(
+            "UPDATE whispers SET is_open = ?, closed_at = ? WHERE guild_id = ? AND thread_id = ?",
+            (0, datetime.utcnow(), guild_id, thread_id)
+        )
+        return result.rowcount > 0
+
+    async def delete_whisper(self, guild_id: int, thread_id: int) -> bool:
+        """Delete a whisper from database"""
+        result = await self.execute(
+            "DELETE FROM whispers WHERE guild_id = ? AND thread_id = ?",
+            (guild_id, thread_id)
+        )
+        return result.rowcount > 0
+
     # -------------------- Leveling -------------------- #
     async def get_user_xp(self, guild_id: int, user_id: int) -> int:
         row = await self.fetchone(

@@ -81,21 +81,23 @@ class WhisperCog(commands.Cog):
             return None
 
     async def _create_whisper_thread(self, channel: discord.TextChannel, 
-                                   user: discord.Member, reason: str) -> Optional[discord.Thread]:
+                                   user: discord.Member, reason: str) -> tuple[Optional[discord.Thread], int]:
         """Create a new whisper thread"""
         try:
-            # Get next whisper number for this guild
-            whisper_count = await self.db.fetchone(
-                "SELECT COUNT(*) as count FROM whispers WHERE guild_id = ?",
-                (channel.guild.id,)
-            )
-            whisper_number = (whisper_count['count'] if whisper_count else 0) + 1
+            # Create whisper in database and get whisper number
+            whisper_number = await self.db.create_whisper(channel.guild.id, user.id, 0)  # Temp thread_id
             
             # Create thread with numbered name
             thread = await channel.create_thread(
                 name=f"Whisper-{whisper_number:03d}",
                 type=discord.ChannelType.private_thread,
                 reason=f"Whisper thread #{whisper_number} for {user}"
+            )
+
+            # Update database with actual thread ID
+            await self.db.execute(
+                "UPDATE whispers SET thread_id = ? WHERE guild_id = ? AND user_id = ? AND thread_id = ?",
+                (thread.id, channel.guild.id, user.id, 0)
             )
 
             # Create initial message with metadata
@@ -111,27 +113,18 @@ class WhisperCog(commands.Cog):
 
             await thread.send(embed=embed)
 
-            # Store in database using existing whispers table with whisper number
-            await self.db.execute(
-                "INSERT INTO whispers (guild_id, user_id, thread_id, created_at, is_open) VALUES (?, ?, ?, ?, ?)",
-                (channel.guild.id, user.id, thread.id, datetime.utcnow(), 1)
-            )
-            
-            # Store whisper number in a separate tracking field (we'll use the rowid as whisper number)
-            # The whisper number is essentially the auto-incrementing ID
-            
-            logger.info(f"Created whisper thread {thread.id} for user {user.id} in guild {channel.guild.id}")
+            logger.info(f"Created whisper thread #{whisper_number} ({thread.id}) for user {user.id} in guild {channel.guild.id}")
 
             # Update cache
             if channel.guild.id not in self._active_whispers:
                 self._active_whispers[channel.guild.id] = {}
             self._active_whispers[channel.guild.id][user.id] = thread.id
 
-            return thread
+            return thread, whisper_number
 
         except Exception as e:
             logger.error(f"Error creating whisper thread for user {user.id} in guild {channel.guild.id}: {e}")
-            return None
+            return None, 0
 
     @app_commands.command(name="whisper")
     @app_commands.describe(reason="Reason for opening the whisper thread")
@@ -171,8 +164,8 @@ class WhisperCog(commands.Cog):
                     ephemeral=True
                 )
 
-            # Create thread
-            thread = await self._create_whisper_thread(channel, interaction.user, reason)
+            # Create thread and get whisper number
+            thread, whisper_number = await self._create_whisper_thread(channel, interaction.user, reason)
             if not thread:
                 return await interaction.followup.send(
                     "❌ Failed to create whisper thread. Please try again later.",
