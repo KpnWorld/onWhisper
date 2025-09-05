@@ -1,27 +1,38 @@
+# cogs/whisper.py
+
 import discord
 from discord import app_commands
 from discord.ext import commands
-from typing import Optional, Dict
+from typing import Optional, Dict, Union
 import logging
 from datetime import datetime
 
-class WhisperCog(commands.Cog):
-    """Private thread-based ticket system for anonymous communication"""
+from utils.db_manager import DBManager
+from utils.config import ConfigManager
 
-    def __init__(self, bot):
+logger = logging.getLogger("onWhisper.Whisper")
+
+
+class WhisperCog(commands.Cog):
+    """🤫 Private thread-based whisper system for anonymous communication"""
+    
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.log = logging.getLogger("cogs.whisper")
+        self.db: DBManager = bot.db_manager
+        self.config: ConfigManager = bot.config_manager
         # Cache for active whisper threads
         self._active_whispers: Dict[int, Dict[int, int]] = {}  # guild_id -> {user_id: thread_id}
 
     async def _setup_whisper_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
         """Create or get the whisper management channel"""
         try:
-            settings = await self.bot.db.get_feature_settings(guild.id, "whisper")
+            # Get whisper channel from config
+            whisper_channel_id = await self.config.get(guild.id, "whisper_channel")
+            whisper_enabled = await self.config.get(guild.id, "whisper_enabled", True)
 
             # If channel already exists, return it
-            if channel_id := settings.get('channel_id'):
-                channel = guild.get_channel(channel_id)
+            if whisper_channel_id:
+                channel = guild.get_channel(int(whisper_channel_id))
                 if channel:
                     return channel
 
@@ -37,10 +48,10 @@ class WhisperCog(commands.Cog):
                 )
             }
 
-            # Add staff role permissions if configured
-            if staff_role_id := settings.get('staff_role_id'):
-                if staff_role := guild.get_role(staff_role_id):
-                    overwrites[staff_role] = discord.PermissionOverwrite(
+            # Add admin permissions for staff
+            for member in guild.members:
+                if member.guild_permissions.administrator:
+                    overwrites[member] = discord.PermissionOverwrite(
                         read_messages=True,
                         send_messages=True,
                         manage_threads=True
@@ -53,14 +64,14 @@ class WhisperCog(commands.Cog):
                 reason="Whisper system setup"
             )
 
-            # Update settings with new channel
-            settings['channel_id'] = channel.id
-            await self.bot.db.update_feature_settings(guild.id, "whisper", settings)
+            # Update config with new channel
+            await self.config.set(guild.id, "whisper_channel", str(channel.id))
+            logger.info(f"Created whisper channel {channel.name} ({channel.id}) in guild {guild.name} ({guild.id})")
 
             return channel
 
         except Exception as e:
-            self.log.error(f"Error setting up whisper channel: {e}", exc_info=True)
+            logger.error(f"Error setting up whisper channel in guild {guild.id}: {e}")
             return None
 
     async def _create_whisper_thread(self, channel: discord.TextChannel, 
@@ -86,12 +97,13 @@ class WhisperCog(commands.Cog):
 
             await thread.send(embed=embed)
 
-            # Store in database
-            await self.bot.db.create_whisper(
-                guild_id=channel.guild.id,
-                user_id=user.id,
-                thread_id=thread.id
+            # Store in database using existing whispers table
+            await self.db.execute(
+                "INSERT INTO whispers (guild_id, user_id, thread_id, created_at, is_open) VALUES (?, ?, ?, ?, ?)",
+                (channel.guild.id, user.id, thread.id, datetime.utcnow(), 1)
             )
+            
+            logger.info(f"Created whisper thread {thread.id} for user {user.id} in guild {channel.guild.id}")
 
             # Update cache
             if channel.guild.id not in self._active_whispers:
@@ -101,7 +113,7 @@ class WhisperCog(commands.Cog):
             return thread
 
         except Exception as e:
-            self.log.error(f"Error creating whisper thread: {e}", exc_info=True)
+            logger.error(f"Error creating whisper thread for user {user.id} in guild {channel.guild.id}: {e}")
             return None
 
     @app_commands.command(name="whisper")
@@ -116,10 +128,10 @@ class WhisperCog(commands.Cog):
 
         try:
             # Check if whispers are enabled
-            settings = await self.bot.db.get_feature_settings(interaction.guild.id, "whisper")
-            if not settings or not settings.get('enabled'):
+            whisper_enabled = await self.config.get(interaction.guild.id, "whisper_enabled", True)
+            if not whisper_enabled:
                 return await interaction.response.send_message(
-                    "The whisper system is not enabled in this server.",
+                    "❌ The whisper system is not enabled in this server.",
                     ephemeral=True
                 )
 
@@ -128,7 +140,7 @@ class WhisperCog(commands.Cog):
                interaction.user.id in active_whispers:
                 thread_id = active_whispers[interaction.user.id]
                 return await interaction.response.send_message(
-                    f"You already have an active whisper thread: <#{thread_id}>",
+                    f"ℹ️ You already have an active whisper thread: <#{thread_id}>",
                     ephemeral=True
                 )
 
@@ -138,7 +150,7 @@ class WhisperCog(commands.Cog):
             channel = await self._setup_whisper_channel(interaction.guild)
             if not channel:
                 return await interaction.followup.send(
-                    "Failed to set up whisper channel. Please contact an administrator.",
+                    "❌ Failed to set up whisper channel. Please contact an administrator.",
                     ephemeral=True
                 )
 
@@ -146,7 +158,7 @@ class WhisperCog(commands.Cog):
             thread = await self._create_whisper_thread(channel, interaction.user, reason)
             if not thread:
                 return await interaction.followup.send(
-                    "Failed to create whisper thread. Please try again later.",
+                    "❌ Failed to create whisper thread. Please try again later.",
                     ephemeral=True
                 )
 
@@ -157,9 +169,9 @@ class WhisperCog(commands.Cog):
             )
 
         except Exception as e:
-            self.log.error(f"Error creating whisper: {e}", exc_info=True)
+            logger.error(f"Error creating whisper for user {interaction.user.id} in guild {interaction.guild.id}: {e}")
             await interaction.followup.send(
-                "An error occurred while creating the whisper thread.",
+                "❌ An error occurred while creating the whisper thread.",
                 ephemeral=True
             )
 
@@ -175,25 +187,22 @@ class WhisperCog(commands.Cog):
 
         try:
             # Verify this is a whisper thread
-            whisper = await self.bot.db.get_whisper_by_thread(
-                interaction.guild.id,
-                interaction.channel.id
+            whisper = await self.db.fetchone(
+                "SELECT user_id FROM whispers WHERE guild_id = ? AND thread_id = ? AND is_open = ?",
+                (interaction.guild.id, interaction.channel.id, 1)
             )
             if not whisper:
                 return await interaction.response.send_message(
-                    "This is not a whisper thread!",
+                    "❌ This is not a whisper thread!",
                     ephemeral=True
                 )
 
-            # Check permissions
-            settings = await self.bot.db.get_feature_settings(interaction.guild.id, "whisper")
-            is_staff = False
-            if staff_role_id := settings.get('staff_role_id'):
-                is_staff = any(role.id == staff_role_id for role in interaction.user.roles)
+            # Check permissions (admins and thread creator can close)
+            is_staff = interaction.user.guild_permissions.administrator
 
             if not (is_staff or interaction.user.id == whisper['user_id']):
                 return await interaction.response.send_message(
-                    "You don't have permission to close this thread!",
+                    "❌ You don't have permission to close this thread!",
                     ephemeral=True
                 )
 
@@ -208,10 +217,12 @@ class WhisperCog(commands.Cog):
             await interaction.channel.send(embed=embed)
 
             # Update database
-            await self.bot.db.close_whisper(
-                guild_id=interaction.guild.id,
-                thread_id=interaction.channel.id
+            await self.db.execute(
+                "UPDATE whispers SET is_open = ?, closed_at = ? WHERE guild_id = ? AND thread_id = ?",
+                (0, datetime.utcnow(), interaction.guild.id, interaction.channel.id)
             )
+            
+            logger.info(f"Closed whisper thread {interaction.channel.id} by {interaction.user.id} in guild {interaction.guild.id}")
 
             # Update cache
             if interaction.guild.id in self._active_whispers:
@@ -226,23 +237,23 @@ class WhisperCog(commands.Cog):
             )
 
         except Exception as e:
-            self.log.error(f"Error closing whisper: {e}", exc_info=True)
+            logger.error(f"Error closing whisper thread {interaction.channel.id} in guild {interaction.guild.id}: {e}")
             await interaction.response.send_message(
-                "An error occurred while closing the whisper thread.",
+                "❌ An error occurred while closing the whisper thread.",
                 ephemeral=True
             )
 
     @app_commands.command(name="whisper-setup")
     @app_commands.describe(
-        staff_role="Role that can view and respond to whispers",
-        enabled="Enable or disable the whisper system"
+        enabled="Enable or disable the whisper system",
+        channel="Channel for whisper threads (will create one if not specified)"
     )
     @app_commands.default_permissions(manage_guild=True)
     async def setup_whispers(
         self,
         interaction: discord.Interaction,
-        staff_role: Optional[discord.Role] = None,
-        enabled: Optional[bool] = None
+        enabled: Optional[bool] = None,
+        channel: Optional[discord.TextChannel] = None
     ):
         """Configure the whisper system"""
         if not interaction.guild:
@@ -252,21 +263,17 @@ class WhisperCog(commands.Cog):
             )
 
         try:
-            settings = await self.bot.db.get_feature_settings(interaction.guild.id, "whisper") or {}
-
-            if staff_role:
-                settings['staff_role_id'] = staff_role.id
-
+            # Update configuration
             if enabled is not None:
-                settings['enabled'] = enabled
+                await self.config.set(interaction.guild.id, "whisper_enabled", enabled)
+                
+            if channel:
+                await self.config.set(interaction.guild.id, "whisper_channel", str(channel.id))
 
-            # Update settings
-            await self.bot.db.update_feature_settings(
-                interaction.guild.id,
-                "whisper",
-                settings
-            )
-
+            # Get current settings for display
+            whisper_enabled = await self.config.get(interaction.guild.id, "whisper_enabled", True)
+            whisper_channel_id = await self.config.get(interaction.guild.id, "whisper_channel")
+            
             # Create response embed
             embed = discord.Embed(
                 title="⚙️ Whisper System Settings",
@@ -276,34 +283,35 @@ class WhisperCog(commands.Cog):
 
             embed.add_field(
                 name="Status",
-                value="✅ Enabled" if settings.get('enabled') else "❌ Disabled",
+                value="✅ Enabled" if whisper_enabled else "❌ Disabled",
                 inline=True
             )
 
-            if staff_role_id := settings.get('staff_role_id'):
-                embed.add_field(
-                    name="Staff Role",
-                    value=f"<@&{staff_role_id}>",
-                    inline=True
-                )
-
-            if channel_id := settings.get('channel_id'):
+            if whisper_channel_id:
                 embed.add_field(
                     name="Whisper Channel",
-                    value=f"<#{channel_id}>",
+                    value=f"<#{whisper_channel_id}>",
                     inline=True
                 )
+                
+            embed.add_field(
+                name="Usage",
+                value="Use `/whisper` to create a private thread",
+                inline=False
+            )
 
             await interaction.response.send_message(embed=embed)
 
-            # Setup channel if enabled
-            if enabled:
+            # Setup channel if enabled and no channel specified
+            if enabled and not whisper_channel_id:
                 await self._setup_whisper_channel(interaction.guild)
+                
+            logger.info(f"Updated whisper settings in guild {interaction.guild.id} by {interaction.user.id}")
 
         except Exception as e:
-            self.log.error(f"Error updating whisper settings: {e}", exc_info=True)
+            logger.error(f"Error updating whisper settings in guild {interaction.guild.id}: {e}")
             await interaction.response.send_message(
-                f"An error occurred while updating settings: {str(e)}",
+                f"❌ An error occurred while updating settings: {str(e)}",
                 ephemeral=True
             )
 
@@ -318,25 +326,21 @@ class WhisperCog(commands.Cog):
             )
 
         try:
-            # Verify staff role
-            settings = await self.bot.db.get_feature_settings(interaction.guild.id, "whisper")
-            if not settings or not settings.get('staff_role_id'):
+            # Check permissions
+            if not interaction.user.guild_permissions.administrator:
                 return await interaction.response.send_message(
-                    "Whisper system is not properly configured.",
-                    ephemeral=True
-                )
-
-            if not any(role.id == settings['staff_role_id'] for role in interaction.user.roles):
-                return await interaction.response.send_message(
-                    "You don't have permission to view whisper threads!",
+                    "❌ You don't have permission to view whisper threads!",
                     ephemeral=True
                 )
 
             # Get active whispers
-            whispers = await self.bot.db.get_active_whispers(interaction.guild.id)
+            whispers = await self.db.fetchall(
+                "SELECT user_id, thread_id, created_at FROM whispers WHERE guild_id = ? AND is_open = ?",
+                (interaction.guild.id, 1)
+            )
             if not whispers:
                 return await interaction.response.send_message(
-                    "No active whisper threads.",
+                    "ℹ️ No active whisper threads.",
                     ephemeral=True
                 )
 
@@ -355,6 +359,7 @@ class WhisperCog(commands.Cog):
                     embed.add_field(
                         name=f"Thread: {thread.name}",
                         value=f"User: {user.mention}\n" +
+                              f"Link: {thread.mention}\n" +
                               f"Created: {discord.utils.format_dt(whisper['created_at'], 'R')}",
                         inline=False
                     )
@@ -362,9 +367,9 @@ class WhisperCog(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
         except Exception as e:
-            self.log.error(f"Error listing whispers: {e}", exc_info=True)
+            logger.error(f"Error listing whispers in guild {interaction.guild.id}: {e}")
             await interaction.response.send_message(
-                "An error occurred while fetching whisper threads.",
+                "❌ An error occurred while fetching whisper threads.",
                 ephemeral=True
             )
 
@@ -372,13 +377,17 @@ class WhisperCog(commands.Cog):
         """Load active whispers into cache on startup"""
         for guild in self.bot.guilds:
             try:
-                whispers = await self.bot.db.get_active_whispers(guild.id)
+                whispers = await self.db.fetchall(
+                    "SELECT user_id, thread_id FROM whispers WHERE guild_id = ? AND is_open = ?",
+                    (guild.id, 1)
+                )
                 if whispers:
                     self._active_whispers[guild.id] = {
                         w['user_id']: w['thread_id'] for w in whispers
                     }
+                    logger.info(f"Loaded {len(whispers)} active whispers for guild {guild.id}")
             except Exception as e:
-                self.log.error(f"Error loading whispers for guild {guild.id}: {e}", exc_info=True)
+                logger.error(f"Error loading whispers for guild {guild.id}: {e}")
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(WhisperCog(bot))
