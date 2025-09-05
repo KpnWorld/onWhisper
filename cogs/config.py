@@ -12,7 +12,10 @@ class ConfigCog(commands.Cog):
         self.bot = bot
         self.config: ConfigManager = bot.config_manager  # type: ignore[attr-defined]
 
-    @commands.hybrid_command(name="config", description="View or edit guild configuration")
+    @app_commands.command(
+        name="config",
+        description="View or edit guild configuration",
+    )
     @app_commands.describe(
         action="Action to perform",
         key="Config key to set (ignored for view-all)",
@@ -29,26 +32,23 @@ class ConfigCog(commands.Cog):
     )
     async def config_cmd(
         self,
-        ctx: commands.Context,
+        interaction: discord.Interaction,
         action: str,
         key: Optional[str] = None,
         value: Optional[str] = None,
     ):
-        if not ctx.guild:
-            await ctx.send("❌ This command can only be used in a server!")
+        if not interaction.guild:
+            await interaction.response.send_message("❌ This command can only be used in a server!", ephemeral=True)
             return
             
-        guild_id = ctx.guild.id
+        guild_id = interaction.guild.id
 
         if action == "view-all":
-            # Defer for slash commands only
-            if ctx.interaction:
-                await ctx.defer(ephemeral=True)
-            
+            await interaction.response.defer(ephemeral=True)
             await self.config.load_guild(guild_id)
             data = self.config._cache[guild_id]
             embed = discord.Embed(
-                title=f"⚙️ Configuration for {ctx.guild.name}",
+                title=f"⚙️ Configuration for {interaction.guild.name}",
                 color=discord.Color.blurple()
             )
             for k, v in data.items():
@@ -57,14 +57,12 @@ class ConfigCog(commands.Cog):
                 else:
                     v_display = str(v) if v is not None else "None"
                 embed.add_field(name=k, value=v_display, inline=False)
-            
-            # Send embed
-            await ctx.send(embed=embed)
+            await interaction.followup.send(embed=embed)
             return
 
         if action == "view":
             if not key:
-                await ctx.send("You must provide a key to view.")
+                await interaction.response.send_message("You must provide a key to view.")
                 return
             val = await self.config.get(guild_id, key)
             if isinstance(val, bool):
@@ -72,17 +70,22 @@ class ConfigCog(commands.Cog):
             else:
                 val_display = str(val)
             
-            response = f"Config `{key}` = `{val_display}`"
-            await ctx.send(response)
+            await interaction.response.send_message(
+                f"Config `{key}` = `{val_display}`"
+            )
             return
 
         if action == "set":
             if not key or value is None:
-                await ctx.send("You must provide both a key and a value to set.")
+                await interaction.response.send_message(
+                    "You must provide both a key and a value to set."
+                )
                 return
 
             if key not in DEFAULT_CONFIG:
-                await ctx.send(f"Invalid key. Valid keys: {', '.join(DEFAULT_CONFIG.keys())}")
+                await interaction.response.send_message(
+                    f"Invalid key. Valid keys: {', '.join(DEFAULT_CONFIG.keys())}"
+                )
                 return
 
             default_val = DEFAULT_CONFIG[key]
@@ -94,15 +97,18 @@ class ConfigCog(commands.Cog):
                 else:
                     parsed = value
             except Exception:
-                await ctx.send(f"Failed to convert value for `{key}`.")
+                await interaction.response.send_message(
+                    f"Failed to convert value for `{key}`."
+                )
                 return
 
             await self.config.set(guild_id, key, parsed)
             display_val = "✅ Enabled" if isinstance(parsed, bool) and parsed else (
                 "❌ Disabled" if isinstance(parsed, bool) else str(parsed)
             )
-            response = f"Config key `{key}` updated to {display_val}."
-            await ctx.send(response)
+            await interaction.response.send_message(
+                f"Config key `{key}` updated to {display_val}."
+            )
 
 
 async def setup(bot: commands.Bot):
