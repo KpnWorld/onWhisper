@@ -20,15 +20,19 @@ class HelpCog(commands.Cog):
                 "emoji": "🎮"
             },
             "Moderation": {
-                "description": "Server moderation commands",
+                "description": "Server moderation commands (all support both / and prefix)",
                 "commands": {
-                    "ban": "Ban a member from the server with reason",
-                    "kick": "Kick a member from the server",
-                    "timeout": "Temporarily mute a member",
-                    "warn": "Issue a warning to a member",
-                    "purge": "Bulk delete messages",
-                    "lockdown": "Lock/unlock channel",
-                    "slowmode": "Set channel slowmode delay"
+                    "kick": "kick <member> [reason] - Remove a member from the server",
+                    "ban": "ban <member> [reason] - Ban a member permanently from the server", 
+                    "unban": "unban <user> - Unban a user from the server",
+                    "mute": "mute <member> <duration> [reason] - Timeout a member (duration in minutes)",
+                    "unmute": "unmute <member> - Remove timeout from a member",
+                    "warn": "warn <member> [reason] - Issue a warning to a member",
+                    "warnings": "warnings <member> - Display all warnings for a member",
+                    "modlogs": "modlogs <member> - Display all moderation actions for a member",
+                    "purge": "purge <limit> - Bulk delete messages (limit: 1-100)",
+                    "lock": "lock [channel] - Lock a channel to prevent @everyone from sending messages",
+                    "unlock": "unlock [channel] - Unlock a channel to restore @everyone sending messages"
                 },
                 "emoji": "👮"
             },
@@ -58,10 +62,9 @@ class HelpCog(commands.Cog):
                 "emoji": "📝"
             },
             "Configuration": {
-                "description": "Bot and server settings",
+                "description": "Bot and server settings (slash commands only)",
                 "commands": {
-                    "config": "Configure bot settings for the server",
-                    "viewsettings": "View current server configuration"
+                    "config": "/config <action> [key] [value] - Configure bot settings (slash only)"
                 },
                 "emoji": "⚙️"
             },
