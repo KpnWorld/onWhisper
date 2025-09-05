@@ -45,22 +45,30 @@ class ConfigManager:
         self._lock = asyncio.Lock()
 
     async def load_guild(self, guild_id: int) -> None:
-        async with self._lock:
-            settings = await self.db.get_guild_settings(guild_id)
-            merged = {**DEFAULT_CONFIG, **settings}
-            self._cache[guild_id] = merged
-            for key, default_value in DEFAULT_CONFIG.items():
-                if key not in settings:
-                    await self.db.set_guild_setting(guild_id, key, str(default_value))
-            logger.info(f"Loaded config for guild {guild_id} with {len(self._cache[guild_id])} keys")
+        # This method should only be called when already holding the lock
+        settings = await self.db.get_guild_settings(guild_id)
+        merged = {**DEFAULT_CONFIG, **settings}
+        self._cache[guild_id] = merged
+        for key, default_value in DEFAULT_CONFIG.items():
+            if key not in settings:
+                await self.db.set_guild_setting(guild_id, key, str(default_value))
+        logger.info(f"Loaded config for guild {guild_id} with {len(self._cache[guild_id])} keys")
 
     async def get(self, guild_id: int, key: str, default: Optional[Any] = None) -> Any:
         try:
+            # Check cache first without lock
+            if guild_id in self._cache:
+                value = self._cache[guild_id].get(key, DEFAULT_CONFIG.get(key, default))
+                logger.debug(f"Get config (cached): guild={guild_id}, key={key}, value={value}")
+                return value
+            
+            # Only acquire lock if we need to load
             async with self._lock:
+                # Double-check after acquiring lock
                 if guild_id not in self._cache:
                     await self.load_guild(guild_id)
                 value = self._cache[guild_id].get(key, DEFAULT_CONFIG.get(key, default))
-                logger.debug(f"Get config: guild={guild_id}, key={key}, value={value}")
+                logger.debug(f"Get config (loaded): guild={guild_id}, key={key}, value={value}")
                 return value
         except Exception as e:
             logger.error(f"Error in config.get: guild={guild_id}, key={key}, error={e}")

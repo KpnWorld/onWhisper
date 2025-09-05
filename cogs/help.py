@@ -159,17 +159,18 @@ class HelpCog(commands.Cog):
                 if category_title == "Moderation" and interaction.guild:
                     try:
                         if hasattr(self.bot, 'config_manager'):
-                            # Use a timeout to prevent hanging
-                            import asyncio
-                            prefix = await asyncio.wait_for(
-                                self.bot.config_manager.get(interaction.guild.id, "prefix", "!"),
-                                timeout=3.0
-                            )
+                            # Try to get prefix with a simpler approach
+                            config_manager = self.bot.config_manager
+                            guild_id = interaction.guild.id
+                            
+                            # Check if already cached first
+                            if guild_id in config_manager._cache:
+                                prefix = config_manager._cache[guild_id].get("prefix", "!")
+                            else:
+                                # Fall back to default if not cached yet
+                                prefix = "!"
                     except Exception as e:
-                        # Log the error for debugging with more detail
-                        import traceback
                         print(f"Error getting prefix: {e}")
-                        print(f"Traceback: {traceback.format_exc()}")
                         prefix = "!"
                 
                 description = cat_data['description']
