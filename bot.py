@@ -36,8 +36,20 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
+async def get_prefix(bot, message):
+    """Get the prefix for the guild from config, fallback to '!' if not found"""
+    if not message.guild:
+        return "!"
+    
+    try:
+        # Get the prefix from config manager
+        prefix = await bot.config_manager.get(message.guild.id, "prefix", "!")
+        return prefix
+    except Exception:
+        return "!"
+
 bot = commands.Bot(
-    command_prefix="!",
+    command_prefix=get_prefix,
     intents=intents,
     application_id=int(APPLICATION_ID)
 )
