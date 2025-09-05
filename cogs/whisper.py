@@ -187,10 +187,17 @@ class WhisperCog(commands.Cog):
 
         except Exception as e:
             logger.error(f"Error creating whisper for user {interaction.user.id} in guild {interaction.guild.id}: {e}")
-            await interaction.followup.send(
-                "❌ An error occurred while creating the whisper thread.",
-                ephemeral=True
-            )
+            try:
+                await interaction.followup.send(
+                    "❌ An error occurred while creating the whisper thread.",
+                    ephemeral=True
+                )
+            except:
+                # If followup fails, try response
+                await interaction.response.send_message(
+                    "❌ An error occurred while creating the whisper thread.",
+                    ephemeral=True
+                )
 
 
     @app_commands.command(name="whisper-setup")
