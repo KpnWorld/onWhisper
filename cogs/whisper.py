@@ -209,7 +209,8 @@ class WhisperCog(commands.Cog):
                 )
 
             await interaction.followup.send(
-                f"✅ Whisper thread {whisper_number} created: {thread.mention}\n" +
+                f"✅ Whisper thread **{whisper_number}** created successfully!\n" +
+                f"📍 Please go to {channel.mention} to find your whisper thread.\n" +
                 "Staff will respond to your message soon.",
                 ephemeral=True
             )
