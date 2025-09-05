@@ -139,6 +139,15 @@ class DBManager:
     async def create_whisper(self, guild_id: int, user_id: int, thread_id: int) -> int:
         """Create a new whisper and return its sequential number"""
         async with self._lock:
+            # Check if user already has an active whisper
+            existing = await self.conn.execute(
+                "SELECT thread_id FROM whispers WHERE guild_id = ? AND user_id = ? AND is_open = ?",
+                (guild_id, user_id, 1)
+            )
+            existing_result = await existing.fetchone()
+            if existing_result:
+                raise ValueError(f"User already has active whisper thread: {existing_result[0]}")
+            
             # Get the next whisper number for this guild
             count_row = await self.conn.execute(
                 "SELECT COUNT(*) as count FROM whispers WHERE guild_id = ?", (guild_id,)

@@ -84,8 +84,12 @@ class WhisperCog(commands.Cog):
                                    user: discord.Member, reason: str) -> tuple[Optional[discord.Thread], int]:
         """Create a new whisper thread"""
         try:
-            # Create whisper in database and get whisper number
-            whisper_number = await self.db.create_whisper(channel.guild.id, user.id, 0)  # Temp thread_id
+            # Get next whisper number first
+            whisper_count = await self.db.fetchone(
+                "SELECT COUNT(*) as count FROM whispers WHERE guild_id = ?",
+                (channel.guild.id,)
+            )
+            whisper_number = (whisper_count['count'] if whisper_count else 0) + 1
             
             # Create thread with numbered name
             thread = await channel.create_thread(
@@ -94,11 +98,8 @@ class WhisperCog(commands.Cog):
                 reason=f"Whisper thread #{whisper_number} for {user}"
             )
 
-            # Update database with actual thread ID
-            await self.db.execute(
-                "UPDATE whispers SET thread_id = ? WHERE guild_id = ? AND user_id = ? AND thread_id = ?",
-                (thread.id, channel.guild.id, user.id, 0)
-            )
+            # Now create whisper in database with actual thread ID
+            await self.db.create_whisper(channel.guild.id, user.id, thread.id)
 
             # Create initial message with metadata
             embed = discord.Embed(
@@ -146,9 +147,12 @@ class WhisperCog(commands.Cog):
                 )
 
             # Check if user already has an active whisper
-            if (active_whispers := self._active_whispers.get(interaction.guild.id)) and \
-               interaction.user.id in active_whispers:
-                thread_id = active_whispers[interaction.user.id]
+            existing_whispers = await self.db.fetchall(
+                "SELECT thread_id FROM whispers WHERE guild_id = ? AND user_id = ? AND is_open = ?",
+                (interaction.guild.id, interaction.user.id, 1)
+            )
+            if existing_whispers:
+                thread_id = existing_whispers[0]['thread_id']
                 return await interaction.response.send_message(
                     f"ℹ️ You already have an active whisper thread: <#{thread_id}>",
                     ephemeral=True
