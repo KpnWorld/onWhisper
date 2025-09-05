@@ -162,10 +162,14 @@ class WhisperCog(commands.Cog):
                 )
 
             # Check 24-hour cooldown for closed whispers
-            last_closed = await self.db.fetchone(
-                "SELECT closed_at FROM whispers WHERE guild_id = ? AND user_id = ? AND is_open = ? AND closed_by_staff = ? ORDER BY closed_at DESC LIMIT 1",
-                (interaction.guild.id, interaction.user.id, 0, 1)
-            )
+            try:
+                last_closed = await self.db.fetchone(
+                    "SELECT closed_at FROM whispers WHERE guild_id = ? AND user_id = ? AND is_open = ? AND closed_by_staff = ? ORDER BY closed_at DESC LIMIT 1",
+                    (interaction.guild.id, interaction.user.id, 0, 1)
+                )
+            except:
+                # Fallback if column doesn't exist yet
+                last_closed = None
             
             if last_closed and last_closed['closed_at']:
                 closed_time = datetime.fromisoformat(last_closed['closed_at'].replace('Z', '+00:00'))

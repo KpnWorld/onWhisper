@@ -87,6 +87,14 @@ class DBManager:
                 """
             )
             await self.conn.commit()
+            
+            # Add missing columns if they don't exist
+            try:
+                await self.conn.execute("ALTER TABLE whispers ADD COLUMN closed_by_staff INTEGER DEFAULT 0")
+                await self.conn.commit()
+            except:
+                pass  # Column already exists
+                
         logger.info("Database initialized successfully.")
 
     # -------------------- Generic Query Methods -------------------- #
