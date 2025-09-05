@@ -71,6 +71,7 @@ class DBManager:
                     is_open INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     closed_at TIMESTAMP,
+                    closed_by_staff INTEGER DEFAULT 0,
                     PRIMARY KEY (guild_id, user_id, thread_id)
                 );
 
@@ -182,11 +183,11 @@ class DBManager:
         )
         return [dict(row) for row in rows]
 
-    async def close_whisper(self, guild_id: int, thread_id: int) -> bool:
+    async def close_whisper(self, guild_id: int, thread_id: int, closed_by_staff: bool = False) -> bool:
         """Close a whisper thread"""
         result = await self.execute(
-            "UPDATE whispers SET is_open = ?, closed_at = ? WHERE guild_id = ? AND thread_id = ?",
-            (0, datetime.utcnow(), guild_id, thread_id)
+            "UPDATE whispers SET is_open = ?, closed_at = ?, closed_by_staff = ? WHERE guild_id = ? AND thread_id = ?",
+            (0, datetime.utcnow(), 1 if closed_by_staff else 0, guild_id, thread_id)
         )
         return result.rowcount > 0
 

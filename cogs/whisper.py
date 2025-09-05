@@ -5,7 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional, Dict, Union
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from utils.db_manager import DBManager
 from utils.config import ConfigManager
@@ -160,6 +160,31 @@ class WhisperCog(commands.Cog):
                     f"ℹ️ You already have an active whisper thread: <#{thread_id}>",
                     ephemeral=True
                 )
+
+            # Check 24-hour cooldown for closed whispers
+            last_closed = await self.db.fetchone(
+                "SELECT closed_at FROM whispers WHERE guild_id = ? AND user_id = ? AND is_open = ? AND closed_by_staff = ? ORDER BY closed_at DESC LIMIT 1",
+                (interaction.guild.id, interaction.user.id, 0, 1)
+            )
+            
+            if last_closed and last_closed['closed_at']:
+                closed_time = datetime.fromisoformat(last_closed['closed_at'].replace('Z', '+00:00'))
+                time_since_closed = datetime.utcnow().replace(tzinfo=timezone.utc) - closed_time
+                hours_since_closed = time_since_closed.total_seconds() / 3600
+                
+                if hours_since_closed < 24:
+                    hours_remaining = 24 - hours_since_closed
+                    if hours_remaining >= 1:
+                        return await interaction.response.send_message(
+                            f"⏰ You must wait {hours_remaining:.1f} more hours before creating a new whisper thread (24-hour cooldown after staff closure).",
+                            ephemeral=True
+                        )
+                    else:
+                        minutes_remaining = hours_remaining * 60
+                        return await interaction.response.send_message(
+                            f"⏰ You must wait {minutes_remaining:.0f} more minutes before creating a new whisper thread (24-hour cooldown after staff closure).",
+                            ephemeral=True
+                        )
 
             await interaction.response.defer(ephemeral=True)
 
@@ -539,10 +564,12 @@ class WhisperCog(commands.Cog):
                 # Archive and lock the thread
                 await target_thread.edit(archived=True, locked=True)
 
-            # Update database
-            await self.db.execute(
-                "UPDATE whispers SET is_open = ?, closed_at = ? WHERE guild_id = ? AND thread_id = ?",
-                (0, datetime.utcnow(), interaction.guild.id, target_thread_id)
+            # Update database (check if closed by staff)
+            is_staff = interaction.user.guild_permissions.administrator
+            await self.db.close_whisper(
+                interaction.guild.id, 
+                target_thread_id, 
+                closed_by_staff=is_staff
             )
 
             # Update cache
