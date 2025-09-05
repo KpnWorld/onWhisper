@@ -158,19 +158,26 @@ class HelpCog(commands.Cog):
                 prefix = "!"
                 if category_title == "Moderation" and interaction.guild:
                     try:
-                        prefix = await self.bot.config_manager.get(interaction.guild.id, "prefix", "!")
+                        if hasattr(self.bot, 'config_manager'):
+                            prefix = await self.bot.config_manager.get(interaction.guild.id, "prefix", "!")
                     except Exception:
                         pass
                 
                 description = cat_data['description']
-                if category_title == "Moderation":
-                    description += f"\n**Current server prefix**: `{prefix}`"
                 
                 embed = discord.Embed(
                     title=f"{cat_data['emoji']} {category_title} Commands",
                     description=f"```{description}```",
                     color=discord.Color.blue()
                 )
+                
+                # Add prefix info for moderation as a separate field
+                if category_title == "Moderation":
+                    embed.add_field(
+                        name="Current Server Prefix",
+                        value=f"`{prefix}`",
+                        inline=False
+                    )
 
                 for cmd_name, cmd_desc in cat_data["commands"].items():
                     field_name = f"/{cmd_name}"
