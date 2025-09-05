@@ -128,7 +128,7 @@ COGS = [
     "cogs.moderation",
     # "cogs.roles",
     # "cogs.logging",
-    # "cogs.whisper",
+    "cogs.whisper",
     "cogs.config",
     "cogs.help"
 ]
