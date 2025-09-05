@@ -91,11 +91,14 @@ class WhisperCog(commands.Cog):
             )
             whisper_number = (whisper_count['count'] if whisper_count else 0) + 1
             
-            # Create thread with numbered name
+            # Get server prefix (first two letters)
+            server_prefix = channel.guild.name[:2].upper()
+            
+            # Create thread with server prefix + numbered name
             thread = await channel.create_thread(
-                name=f"Whisper-{whisper_number:03d}",
+                name=f"{server_prefix}{whisper_number:03d}",
                 type=discord.ChannelType.private_thread,
-                reason=f"Whisper thread #{whisper_number} for {user}"
+                reason=f"Whisper thread {server_prefix}{whisper_number:03d} for {user}"
             )
 
             # Now create whisper in database with actual thread ID
@@ -108,24 +111,24 @@ class WhisperCog(commands.Cog):
                 color=discord.Color.blue(),
                 timestamp=datetime.utcnow()
             )
-            embed.add_field(name="Whisper Number", value=f"#{whisper_number:03d}", inline=True)
+            embed.add_field(name="Whisper ID", value=f"{server_prefix}{whisper_number:03d}", inline=True)
             embed.add_field(name="User", value=f"{user.mention} ({user.id})", inline=True)
             embed.add_field(name="Created", value=discord.utils.format_dt(datetime.utcnow(), 'R'), inline=True)
 
             await thread.send(embed=embed)
             
-            logger.info(f"Created whisper thread #{whisper_number} ({thread.id}) for user {user.id} in guild {channel.guild.id}")
+            logger.info(f"Created whisper thread {server_prefix}{whisper_number:03d} ({thread.id}) for user {user.id} in guild {channel.guild.id}")
 
             # Update cache
             if channel.guild.id not in self._active_whispers:
                 self._active_whispers[channel.guild.id] = {}
             self._active_whispers[channel.guild.id][user.id] = thread.id
 
-            return thread, whisper_number
+            return thread, f"{server_prefix}{whisper_number:03d}"
 
         except Exception as e:
             logger.error(f"Error creating whisper thread for user {user.id} in guild {channel.guild.id}: {e}")
-            return None, 0
+            return None, "ERROR"
 
     @app_commands.command(name="whisper")
     @app_commands.describe(reason="Reason for opening the whisper thread")
@@ -170,14 +173,14 @@ class WhisperCog(commands.Cog):
 
             # Create thread and get whisper number
             thread, whisper_number = await self._create_whisper_thread(channel, interaction.user, reason)
-            if not thread or whisper_number == 0:
+            if not thread or whisper_number == "ERROR":
                 return await interaction.followup.send(
                     "❌ Failed to create whisper thread. Please try again later.",
                     ephemeral=True
                 )
 
             await interaction.followup.send(
-                f"✅ Whisper thread #{whisper_number:03d} created: {thread.mention}\n" +
+                f"✅ Whisper thread {whisper_number} created: {thread.mention}\n" +
                 "Staff will respond to your message soon.",
                 ephemeral=True
             )
