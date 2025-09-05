@@ -339,10 +339,13 @@ class WhisperCog(commands.Cog):
             )
 
     @app_commands.command(name="whisper-delete")
-    @app_commands.describe(whisper_number="Whisper number to permanently delete")
+    @app_commands.describe(
+        whisper_number="Whisper number to permanently delete (leave empty to delete all closed whispers)",
+        all_closed="Set to True to delete all closed whispers at once"
+    )
     @app_commands.default_permissions(manage_guild=True)
-    async def delete_whisper(self, interaction: discord.Interaction, whisper_number: int):
-        """Permanently delete a whisper thread and its database record"""
+    async def delete_whisper(self, interaction: discord.Interaction, whisper_number: Optional[int] = None, all_closed: bool = False):
+        """Permanently delete a whisper thread and its database record, or delete all closed whispers"""
         if not interaction.guild:
             return await interaction.response.send_message(
                 "This command can only be used in a server!",
@@ -357,13 +360,66 @@ class WhisperCog(commands.Cog):
                     ephemeral=True
                 )
 
+            server_prefix = interaction.guild.name[:2].upper()
+
+            # Handle bulk deletion of closed whispers
+            if all_closed or whisper_number is None:
+                # Get all closed whispers
+                closed_whispers = await self.db.fetchall(
+                    "SELECT user_id, thread_id FROM whispers WHERE guild_id = ? AND is_open = ?",
+                    (interaction.guild.id, 0)
+                )
+                
+                if not closed_whispers:
+                    return await interaction.response.send_message(
+                        "ℹ️ No closed whispers found to delete.",
+                        ephemeral=True
+                    )
+
+                deleted_count = 0
+                for whisper in closed_whispers:
+                    thread = interaction.guild.get_thread(whisper['thread_id'])
+                    
+                    # Delete the thread if it exists
+                    if thread:
+                        try:
+                            await thread.delete(reason=f"Bulk closed whisper cleanup by {interaction.user}")
+                            deleted_count += 1
+                        except:
+                            pass  # Thread might already be deleted
+                    
+                    # Remove from database
+                    await self.db.execute(
+                        "DELETE FROM whispers WHERE guild_id = ? AND thread_id = ?",
+                        (interaction.guild.id, whisper['thread_id'])
+                    )
+
+                # Clear cache for closed whispers
+                if interaction.guild.id in self._active_whispers:
+                    for whisper in closed_whispers:
+                        self._active_whispers[interaction.guild.id].pop(whisper['user_id'], None)
+
+                await interaction.response.send_message(
+                    f"✅ Successfully deleted {len(closed_whispers)} closed whisper threads from database ({deleted_count} threads also removed from Discord).",
+                    ephemeral=True
+                )
+                
+                logger.info(f"Bulk deleted {len(closed_whispers)} closed whispers in guild {interaction.guild.id} by {interaction.user.id}")
+                return
+
+            # Handle single whisper deletion
+            if whisper_number is None:
+                return await interaction.response.send_message(
+                    "❌ Please specify a whisper number to delete, or use `all_closed=True` to delete all closed whispers.",
+                    ephemeral=True
+                )
+
             # Get all whispers and find the specific one by position
             whispers = await self.db.fetchall(
                 "SELECT user_id, thread_id FROM whispers WHERE guild_id = ? ORDER BY created_at",
                 (interaction.guild.id,)
             )
             
-            server_prefix = interaction.guild.name[:2].upper()
             if not whispers or whisper_number < 1 or whisper_number > len(whispers):
                 return await interaction.response.send_message(
                     f"❌ Whisper {server_prefix}{whisper_number:03d} not found!",
