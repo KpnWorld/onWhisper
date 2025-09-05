@@ -297,9 +297,10 @@ class WhisperCog(commands.Cog):
                 (interaction.guild.id,)
             )
             
+            server_prefix = interaction.guild.name[:2].upper()
             if not whispers or whisper_number < 1 or whisper_number > len(whispers):
                 return await interaction.response.send_message(
-                    f"❌ Whisper #{whisper_number:03d} not found!",
+                    f"❌ Whisper {server_prefix}{whisper_number:03d} not found!",
                     ephemeral=True
                 )
 
@@ -308,7 +309,7 @@ class WhisperCog(commands.Cog):
             thread = interaction.guild.get_thread(whisper['thread_id'])
 
             embed = discord.Embed(
-                title=f"🔍 Whisper #{whisper_number:03d} Details",
+                title=f"🔍 Whisper {server_prefix}{whisper_number:03d} Details",
                 color=discord.Color.blue(),
                 timestamp=datetime.utcnow()
             )
@@ -330,7 +331,8 @@ class WhisperCog(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
         except Exception as e:
-            logger.error(f"Error viewing whisper #{whisper_number} in guild {interaction.guild.id}: {e}")
+            server_prefix = interaction.guild.name[:2].upper()
+            logger.error(f"Error viewing whisper {server_prefix}{whisper_number:03d} in guild {interaction.guild.id}: {e}")
             await interaction.response.send_message(
                 "❌ An error occurred while viewing the whisper thread.",
                 ephemeral=True
@@ -361,9 +363,10 @@ class WhisperCog(commands.Cog):
                 (interaction.guild.id,)
             )
             
+            server_prefix = interaction.guild.name[:2].upper()
             if not whispers or whisper_number < 1 or whisper_number > len(whispers):
                 return await interaction.response.send_message(
-                    f"❌ Whisper #{whisper_number:03d} not found!",
+                    f"❌ Whisper {server_prefix}{whisper_number:03d} not found!",
                     ephemeral=True
                 )
 
@@ -372,7 +375,7 @@ class WhisperCog(commands.Cog):
 
             # Delete the thread if it exists
             if thread:
-                await thread.delete(reason=f"Whisper #{whisper_number:03d} deleted by {interaction.user}")
+                await thread.delete(reason=f"Whisper {server_prefix}{whisper_number:03d} deleted by {interaction.user}")
 
             # Remove from database
             await self.db.execute(
@@ -385,11 +388,11 @@ class WhisperCog(commands.Cog):
                 self._active_whispers[interaction.guild.id].pop(whisper['user_id'], None)
 
             await interaction.response.send_message(
-                f"✅ Whisper #{whisper_number:03d} has been permanently deleted.",
+                f"✅ Whisper {server_prefix}{whisper_number:03d} has been permanently deleted.",
                 ephemeral=True
             )
             
-            logger.info(f"Deleted whisper #{whisper_number} (thread {whisper['thread_id']}) in guild {interaction.guild.id} by {interaction.user.id}")
+            logger.info(f"Deleted whisper {server_prefix}{whisper_number:03d} (thread {whisper['thread_id']}) in guild {interaction.guild.id} by {interaction.user.id}")
 
         except Exception as e:
             logger.error(f"Error deleting whisper #{whisper_number} in guild {interaction.guild.id}: {e}")
@@ -425,9 +428,10 @@ class WhisperCog(commands.Cog):
                     (interaction.guild.id, 1)
                 )
                 
+                server_prefix = interaction.guild.name[:2].upper()
                 if not whispers or whisper_number < 1 or whisper_number > len(whispers):
                     return await interaction.response.send_message(
-                        f"❌ Active whisper #{whisper_number:03d} not found!",
+                        f"❌ Active whisper {server_prefix}{whisper_number:03d} not found!",
                         ephemeral=True
                     )
                     
@@ -539,13 +543,14 @@ class WhisperCog(commands.Cog):
                 timestamp=datetime.utcnow()
             )
 
+            server_prefix = interaction.guild.name[:2].upper()
             for i, whisper in enumerate(whispers, 1):
                 user = interaction.guild.get_member(whisper['user_id'])
                 thread = interaction.guild.get_thread(whisper['thread_id'])
 
                 if user and thread:
                     embed.add_field(
-                        name=f"Whisper #{i:03d}: {thread.name}",
+                        name=f"Whisper {server_prefix}{i:03d}: {thread.name}",
                         value=f"User: {user.mention}\n" +
                               f"Link: {thread.mention}\n" +
                               f"Created: {discord.utils.format_dt(whisper['created_at'], 'R')}",
