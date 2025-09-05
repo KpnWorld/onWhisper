@@ -32,7 +32,13 @@ class WhisperCog(commands.Cog):
 
             # If channel already exists, return it
             if whisper_channel_id:
-                channel = guild.get_channel(int(whisper_channel_id))
+                # Extract channel ID from mention format or use as-is
+                if isinstance(whisper_channel_id, str) and whisper_channel_id.startswith('<#'):
+                    channel_id = int(whisper_channel_id[2:-1])  # Remove <# and >
+                else:
+                    channel_id = int(whisper_channel_id)
+                    
+                channel = guild.get_channel(channel_id)
                 if channel:
                     return channel
 
@@ -65,7 +71,7 @@ class WhisperCog(commands.Cog):
             )
 
             # Update config with new channel
-            await self.config.set(guild.id, "whisper_channel", str(channel.id))
+            await self.config.set(guild.id, "whisper_channel", channel.id)
             logger.info(f"Created whisper channel {channel.name} ({channel.id}) in guild {guild.name} ({guild.id})")
 
             return channel
@@ -78,11 +84,18 @@ class WhisperCog(commands.Cog):
                                    user: discord.Member, reason: str) -> Optional[discord.Thread]:
         """Create a new whisper thread"""
         try:
-            # Create thread with anonymous name
+            # Get next whisper number for this guild
+            whisper_count = await self.db.fetchone(
+                "SELECT COUNT(*) as count FROM whispers WHERE guild_id = ?",
+                (channel.guild.id,)
+            )
+            whisper_number = (whisper_count['count'] if whisper_count else 0) + 1
+            
+            # Create thread with numbered name
             thread = await channel.create_thread(
-                name=f"Whisper-{user.id}",
+                name=f"Whisper-{whisper_number:03d}",
                 type=discord.ChannelType.private_thread,
-                reason=f"Whisper thread for {user}"
+                reason=f"Whisper thread #{whisper_number} for {user}"
             )
 
             # Create initial message with metadata
@@ -92,16 +105,20 @@ class WhisperCog(commands.Cog):
                 color=discord.Color.blue(),
                 timestamp=datetime.utcnow()
             )
-            embed.add_field(name="User", value=f"{user.mention} ({user.id})")
-            embed.add_field(name="Created", value=discord.utils.format_dt(datetime.utcnow(), 'R'))
+            embed.add_field(name="Whisper Number", value=f"#{whisper_number:03d}", inline=True)
+            embed.add_field(name="User", value=f"{user.mention} ({user.id})", inline=True)
+            embed.add_field(name="Created", value=discord.utils.format_dt(datetime.utcnow(), 'R'), inline=True)
 
             await thread.send(embed=embed)
 
-            # Store in database using existing whispers table
+            # Store in database using existing whispers table with whisper number
             await self.db.execute(
                 "INSERT INTO whispers (guild_id, user_id, thread_id, created_at, is_open) VALUES (?, ?, ?, ?, ?)",
                 (channel.guild.id, user.id, thread.id, datetime.utcnow(), 1)
             )
+            
+            # Store whisper number in a separate tracking field (we'll use the rowid as whisper number)
+            # The whisper number is essentially the auto-incrementing ID
             
             logger.info(f"Created whisper thread {thread.id} for user {user.id} in guild {channel.guild.id}")
 
@@ -163,7 +180,7 @@ class WhisperCog(commands.Cog):
                 )
 
             await interaction.followup.send(
-                f"✅ Whisper thread created: {thread.mention}\n" +
+                f"✅ Whisper thread #{whisper_number:03d} created: {thread.mention}\n" +
                 "Staff will respond to your message soon.",
                 ephemeral=True
             )
@@ -175,73 +192,6 @@ class WhisperCog(commands.Cog):
                 ephemeral=True
             )
 
-    @app_commands.command(name="close")
-    @app_commands.describe(reason="Reason for closing the whisper thread")
-    async def close_whisper(self, interaction: discord.Interaction, reason: Optional[str] = None):
-        """Close an active whisper thread"""
-        if not interaction.guild or not isinstance(interaction.channel, discord.Thread):
-            return await interaction.response.send_message(
-                "This command can only be used in a whisper thread!",
-                ephemeral=True
-            )
-
-        try:
-            # Verify this is a whisper thread
-            whisper = await self.db.fetchone(
-                "SELECT user_id FROM whispers WHERE guild_id = ? AND thread_id = ? AND is_open = ?",
-                (interaction.guild.id, interaction.channel.id, 1)
-            )
-            if not whisper:
-                return await interaction.response.send_message(
-                    "❌ This is not a whisper thread!",
-                    ephemeral=True
-                )
-
-            # Check permissions (admins and thread creator can close)
-            is_staff = interaction.user.guild_permissions.administrator
-
-            if not (is_staff or interaction.user.id == whisper['user_id']):
-                return await interaction.response.send_message(
-                    "❌ You don't have permission to close this thread!",
-                    ephemeral=True
-                )
-
-            # Send closing message
-            embed = discord.Embed(
-                title="Whisper Thread Closed",
-                description=reason or "No reason provided",
-                color=discord.Color.red(),
-                timestamp=datetime.utcnow()
-            )
-            embed.add_field(name="Closed by", value=interaction.user.mention)
-            await interaction.channel.send(embed=embed)
-
-            # Update database
-            await self.db.execute(
-                "UPDATE whispers SET is_open = ?, closed_at = ? WHERE guild_id = ? AND thread_id = ?",
-                (0, datetime.utcnow(), interaction.guild.id, interaction.channel.id)
-            )
-            
-            logger.info(f"Closed whisper thread {interaction.channel.id} by {interaction.user.id} in guild {interaction.guild.id}")
-
-            # Update cache
-            if interaction.guild.id in self._active_whispers:
-                self._active_whispers[interaction.guild.id].pop(whisper['user_id'], None)
-
-            # Archive and lock the thread
-            await interaction.channel.edit(archived=True, locked=True)
-
-            await interaction.response.send_message(
-                "✅ Whisper thread closed.",
-                ephemeral=True
-            )
-
-        except Exception as e:
-            logger.error(f"Error closing whisper thread {interaction.channel.id} in guild {interaction.guild.id}: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred while closing the whisper thread.",
-                ephemeral=True
-            )
 
     @app_commands.command(name="whisper-setup")
     @app_commands.describe(
@@ -268,7 +218,7 @@ class WhisperCog(commands.Cog):
                 await self.config.set(interaction.guild.id, "whisper_enabled", enabled)
                 
             if channel:
-                await self.config.set(interaction.guild.id, "whisper_channel", str(channel.id))
+                await self.config.set(interaction.guild.id, "whisper_channel", channel.id)
 
             # Get current settings for display
             whisper_enabled = await self.config.get(interaction.guild.id, "whisper_enabled", True)
@@ -315,6 +265,237 @@ class WhisperCog(commands.Cog):
                 ephemeral=True
             )
 
+    @app_commands.command(name="whisper-view")
+    @app_commands.describe(whisper_number="Whisper number to view details for")
+    @app_commands.default_permissions(manage_guild=True)
+    async def view_whisper(self, interaction: discord.Interaction, whisper_number: int):
+        """View details of a specific whisper thread by number"""
+        if not interaction.guild:
+            return await interaction.response.send_message(
+                "This command can only be used in a server!",
+                ephemeral=True
+            )
+
+        try:
+            # Check permissions
+            if not interaction.user.guild_permissions.administrator:
+                return await interaction.response.send_message(
+                    "❌ You don't have permission to view whisper threads!",
+                    ephemeral=True
+                )
+
+            # Get all whispers and find the specific one by position
+            whispers = await self.db.fetchall(
+                "SELECT user_id, thread_id, created_at FROM whispers WHERE guild_id = ? ORDER BY created_at",
+                (interaction.guild.id,)
+            )
+            
+            if not whispers or whisper_number < 1 or whisper_number > len(whispers):
+                return await interaction.response.send_message(
+                    f"❌ Whisper #{whisper_number:03d} not found!",
+                    ephemeral=True
+                )
+
+            whisper = whispers[whisper_number - 1]
+            user = interaction.guild.get_member(whisper['user_id'])
+            thread = interaction.guild.get_thread(whisper['thread_id'])
+
+            embed = discord.Embed(
+                title=f"🔍 Whisper #{whisper_number:03d} Details",
+                color=discord.Color.blue(),
+                timestamp=datetime.utcnow()
+            )
+
+            if user:
+                embed.add_field(name="User", value=f"{user.mention} ({user.display_name})", inline=True)
+            else:
+                embed.add_field(name="User", value=f"User ID: {whisper['user_id']}", inline=True)
+
+            if thread:
+                embed.add_field(name="Thread", value=thread.mention, inline=True)
+                embed.add_field(name="Status", value="🟢 Active" if not thread.archived else "🔴 Archived", inline=True)
+            else:
+                embed.add_field(name="Thread", value="Thread not found", inline=True)
+                embed.add_field(name="Status", value="🔴 Deleted", inline=True)
+
+            embed.add_field(name="Created", value=discord.utils.format_dt(whisper['created_at'], 'F'), inline=False)
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"Error viewing whisper #{whisper_number} in guild {interaction.guild.id}: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while viewing the whisper thread.",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="whisper-delete")
+    @app_commands.describe(whisper_number="Whisper number to permanently delete")
+    @app_commands.default_permissions(manage_guild=True)
+    async def delete_whisper(self, interaction: discord.Interaction, whisper_number: int):
+        """Permanently delete a whisper thread and its database record"""
+        if not interaction.guild:
+            return await interaction.response.send_message(
+                "This command can only be used in a server!",
+                ephemeral=True
+            )
+
+        try:
+            # Check permissions
+            if not interaction.user.guild_permissions.administrator:
+                return await interaction.response.send_message(
+                    "❌ You don't have permission to delete whisper threads!",
+                    ephemeral=True
+                )
+
+            # Get all whispers and find the specific one by position
+            whispers = await self.db.fetchall(
+                "SELECT user_id, thread_id FROM whispers WHERE guild_id = ? ORDER BY created_at",
+                (interaction.guild.id,)
+            )
+            
+            if not whispers or whisper_number < 1 or whisper_number > len(whispers):
+                return await interaction.response.send_message(
+                    f"❌ Whisper #{whisper_number:03d} not found!",
+                    ephemeral=True
+                )
+
+            whisper = whispers[whisper_number - 1]
+            thread = interaction.guild.get_thread(whisper['thread_id'])
+
+            # Delete the thread if it exists
+            if thread:
+                await thread.delete(reason=f"Whisper #{whisper_number:03d} deleted by {interaction.user}")
+
+            # Remove from database
+            await self.db.execute(
+                "DELETE FROM whispers WHERE guild_id = ? AND thread_id = ?",
+                (interaction.guild.id, whisper['thread_id'])
+            )
+
+            # Update cache
+            if interaction.guild.id in self._active_whispers:
+                self._active_whispers[interaction.guild.id].pop(whisper['user_id'], None)
+
+            await interaction.response.send_message(
+                f"✅ Whisper #{whisper_number:03d} has been permanently deleted.",
+                ephemeral=True
+            )
+            
+            logger.info(f"Deleted whisper #{whisper_number} (thread {whisper['thread_id']}) in guild {interaction.guild.id} by {interaction.user.id}")
+
+        except Exception as e:
+            logger.error(f"Error deleting whisper #{whisper_number} in guild {interaction.guild.id}: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while deleting the whisper thread.",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="whisper-close")
+    @app_commands.describe(whisper_number="Whisper number to close (optional if used in thread)", reason="Reason for closing")
+    async def close_whisper_by_number(self, interaction: discord.Interaction, whisper_number: Optional[int] = None, reason: Optional[str] = None):
+        """Close a whisper thread by number or close the current thread"""
+        if not interaction.guild:
+            return await interaction.response.send_message(
+                "This command can only be used in a server!",
+                ephemeral=True
+            )
+
+        try:
+            target_thread_id = None
+            
+            # If whisper_number is provided, find that specific whisper
+            if whisper_number is not None:
+                # Check permissions for closing by number
+                if not interaction.user.guild_permissions.administrator:
+                    return await interaction.response.send_message(
+                        "❌ You don't have permission to close whisper threads by number!",
+                        ephemeral=True
+                    )
+                    
+                whispers = await self.db.fetchall(
+                    "SELECT user_id, thread_id FROM whispers WHERE guild_id = ? AND is_open = ? ORDER BY created_at",
+                    (interaction.guild.id, 1)
+                )
+                
+                if not whispers or whisper_number < 1 or whisper_number > len(whispers):
+                    return await interaction.response.send_message(
+                        f"❌ Active whisper #{whisper_number:03d} not found!",
+                        ephemeral=True
+                    )
+                    
+                whisper = whispers[whisper_number - 1]
+                target_thread_id = whisper['thread_id']
+                target_thread = interaction.guild.get_thread(target_thread_id)
+                
+            else:
+                # Close current thread if we're in one
+                if not isinstance(interaction.channel, discord.Thread):
+                    return await interaction.response.send_message(
+                        "❌ This command must be used in a whisper thread or with a whisper number!",
+                        ephemeral=True
+                    )
+                target_thread_id = interaction.channel.id
+                target_thread = interaction.channel
+
+            # Verify this is a whisper thread
+            whisper = await self.db.fetchone(
+                "SELECT user_id FROM whispers WHERE guild_id = ? AND thread_id = ? AND is_open = ?",
+                (interaction.guild.id, target_thread_id, 1)
+            )
+            
+            if not whisper:
+                return await interaction.response.send_message(
+                    "❌ This is not an active whisper thread!",
+                    ephemeral=True
+                )
+
+            # Check permissions (admins and thread creator can close)
+            is_staff = interaction.user.guild_permissions.administrator
+            if not (is_staff or interaction.user.id == whisper['user_id']):
+                return await interaction.response.send_message(
+                    "❌ You don't have permission to close this thread!",
+                    ephemeral=True
+                )
+
+            # Send closing message to the thread
+            if target_thread:
+                embed = discord.Embed(
+                    title="Whisper Thread Closed",
+                    description=reason or "No reason provided",
+                    color=discord.Color.red(),
+                    timestamp=datetime.utcnow()
+                )
+                embed.add_field(name="Closed by", value=interaction.user.mention)
+                await target_thread.send(embed=embed)
+                
+                # Archive and lock the thread
+                await target_thread.edit(archived=True, locked=True)
+
+            # Update database
+            await self.db.execute(
+                "UPDATE whispers SET is_open = ?, closed_at = ? WHERE guild_id = ? AND thread_id = ?",
+                (0, datetime.utcnow(), interaction.guild.id, target_thread_id)
+            )
+
+            # Update cache
+            if interaction.guild.id in self._active_whispers:
+                self._active_whispers[interaction.guild.id].pop(whisper['user_id'], None)
+
+            await interaction.response.send_message(
+                f"✅ Whisper thread closed successfully.",
+                ephemeral=True
+            )
+            
+            logger.info(f"Closed whisper thread {target_thread_id} by {interaction.user.id} in guild {interaction.guild.id}")
+
+        except Exception as e:
+            logger.error(f"Error closing whisper thread in guild {interaction.guild.id}: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while closing the whisper thread.",
+                ephemeral=True
+            )
+
     @app_commands.command(name="list-whispers")
     @app_commands.default_permissions(manage_guild=True)
     async def list_whispers(self, interaction: discord.Interaction):
@@ -351,13 +532,13 @@ class WhisperCog(commands.Cog):
                 timestamp=datetime.utcnow()
             )
 
-            for whisper in whispers:
+            for i, whisper in enumerate(whispers, 1):
                 user = interaction.guild.get_member(whisper['user_id'])
                 thread = interaction.guild.get_thread(whisper['thread_id'])
 
                 if user and thread:
                     embed.add_field(
-                        name=f"Thread: {thread.name}",
+                        name=f"Whisper #{i:03d}: {thread.name}",
                         value=f"User: {user.mention}\n" +
                               f"Link: {thread.mention}\n" +
                               f"Created: {discord.utils.format_dt(whisper['created_at'], 'R')}",
