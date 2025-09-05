@@ -112,7 +112,7 @@ class WhisperCog(commands.Cog):
             embed.add_field(name="Created", value=discord.utils.format_dt(datetime.utcnow(), 'R'), inline=True)
 
             await thread.send(embed=embed)
-
+            
             logger.info(f"Created whisper thread #{whisper_number} ({thread.id}) for user {user.id} in guild {channel.guild.id}")
 
             # Update cache
@@ -166,7 +166,7 @@ class WhisperCog(commands.Cog):
 
             # Create thread and get whisper number
             thread, whisper_number = await self._create_whisper_thread(channel, interaction.user, reason)
-            if not thread:
+            if not thread or whisper_number == 0:
                 return await interaction.followup.send(
                     "❌ Failed to create whisper thread. Please try again later.",
                     ephemeral=True
