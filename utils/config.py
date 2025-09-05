@@ -55,12 +55,16 @@ class ConfigManager:
             logger.info(f"Loaded config for guild {guild_id} with {len(self._cache[guild_id])} keys")
 
     async def get(self, guild_id: int, key: str, default: Optional[Any] = None) -> Any:
-        async with self._lock:
-            if guild_id not in self._cache:
-                await self.load_guild(guild_id)
-            value = self._cache[guild_id].get(key, DEFAULT_CONFIG.get(key, default))
-            logger.debug(f"Get config: guild={guild_id}, key={key}, value={value}")
-            return value
+        try:
+            async with self._lock:
+                if guild_id not in self._cache:
+                    await self.load_guild(guild_id)
+                value = self._cache[guild_id].get(key, DEFAULT_CONFIG.get(key, default))
+                logger.debug(f"Get config: guild={guild_id}, key={key}, value={value}")
+                return value
+        except Exception as e:
+            logger.error(f"Error in config.get: guild={guild_id}, key={key}, error={e}")
+            return DEFAULT_CONFIG.get(key, default)
 
     async def set(self, guild_id: int, key: str, value: Any) -> None:
         async with self._lock:

@@ -166,8 +166,10 @@ class HelpCog(commands.Cog):
                                 timeout=3.0
                             )
                     except Exception as e:
-                        # Log the error for debugging
+                        # Log the error for debugging with more detail
+                        import traceback
                         print(f"Error getting prefix: {e}")
+                        print(f"Traceback: {traceback.format_exc()}")
                         prefix = "!"
                 
                 description = cat_data['description']
