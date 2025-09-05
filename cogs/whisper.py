@@ -571,11 +571,44 @@ class WhisperCog(commands.Cog):
 
             # Update database (check if closed by staff)
             is_staff = interaction.user.guild_permissions.administrator
-            await self.db.close_whisper(
-                interaction.guild.id, 
-                target_thread_id, 
-                closed_by_staff=is_staff
+            await self.db.execute(
+                "UPDATE whispers SET is_open = ?, closed_at = ?, closed_by_staff = ? WHERE guild_id = ? AND thread_id = ?",
+                (0, datetime.utcnow(), 1 if is_staff else 0, interaction.guild.id, target_thread_id)
             )
+
+            # Send DM to user if closed by staff
+            if is_staff and whisper:
+                user = interaction.guild.get_member(whisper['user_id'])
+                if user:
+                    try:
+                        embed = discord.Embed(
+                            title="🔒 Whisper Thread Closed",
+                            description=f"Your whisper thread in **{interaction.guild.name}** has been closed by staff.",
+                            color=discord.Color.red(),
+                            timestamp=datetime.utcnow()
+                        )
+                        embed.add_field(
+                            name="Reason",
+                            value=reason or "No reason provided",
+                            inline=False
+                        )
+                        embed.add_field(
+                            name="⏰ Next Whisper Available",
+                            value="You can create a new whisper thread in **24 hours**.",
+                            inline=False
+                        )
+                        embed.add_field(
+                            name="Questions?",
+                            value="If you have questions about this closure, please contact server staff.",
+                            inline=False
+                        )
+                        
+                        await user.send(embed=embed)
+                        logger.info(f"Sent closure DM to user {user.id} for whisper in guild {interaction.guild.id}")
+                    except discord.Forbidden:
+                        logger.warning(f"Could not DM user {user.id} about whisper closure - DMs disabled")
+                    except Exception as e:
+                        logger.error(f"Error sending DM to user {user.id}: {e}")
 
             # Update cache
             if interaction.guild.id in self._active_whispers:
