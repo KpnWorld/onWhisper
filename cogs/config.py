@@ -45,19 +45,27 @@ class ConfigCog(commands.Cog):
 
         if action == "view-all":
             await interaction.response.defer(ephemeral=True)
-            await self.config.load_guild(guild_id)
-            data = self.config._cache[guild_id]
-            embed = discord.Embed(
-                title=f"⚙️ Configuration for {interaction.guild.name}",
-                color=discord.Color.blurple()
-            )
-            for k, v in data.items():
-                if isinstance(v, bool):
-                    v_display = "✅ Enabled" if v else "❌ Disabled"
-                else:
-                    v_display = str(v) if v is not None else "None"
-                embed.add_field(name=k, value=v_display, inline=False)
-            await interaction.followup.send(embed=embed)
+            try:
+                import asyncio
+                # Add timeout to prevent hanging
+                await asyncio.wait_for(self.config.load_guild(guild_id), timeout=5.0)
+                data = self.config._cache[guild_id]
+                embed = discord.Embed(
+                    title=f"⚙️ Configuration for {interaction.guild.name}",
+                    color=discord.Color.blurple()
+                )
+                for k, v in data.items():
+                    if isinstance(v, bool):
+                        v_display = "✅ Enabled" if v else "❌ Disabled"
+                    else:
+                        v_display = str(v) if v is not None else "None"
+                    embed.add_field(name=k, value=v_display, inline=False)
+                await interaction.followup.send(embed=embed)
+            except asyncio.TimeoutError:
+                await interaction.followup.send("❌ Config loading timed out. Please try again.", ephemeral=True)
+            except Exception as e:
+                print(f"Error in config view-all: {e}")
+                await interaction.followup.send("❌ An error occurred while loading configuration.", ephemeral=True)
             return
 
         if action == "view":
