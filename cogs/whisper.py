@@ -549,11 +549,13 @@ class WhisperCog(commands.Cog):
                 thread = interaction.guild.get_thread(whisper['thread_id'])
 
                 if user and thread:
+                    # Parse the datetime string from database
+                    created_dt = datetime.fromisoformat(whisper['created_at'].replace('Z', '+00:00'))
                     embed.add_field(
                         name=f"Whisper {server_prefix}{i:03d}: {thread.name}",
                         value=f"User: {user.mention}\n" +
                               f"Link: {thread.mention}\n" +
-                              f"Created: {discord.utils.format_dt(whisper['created_at'], 'R')}",
+                              f"Created: {discord.utils.format_dt(created_dt, 'R')}",
                         inline=False
                     )
 
