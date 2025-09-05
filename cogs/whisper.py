@@ -97,7 +97,7 @@ class WhisperCog(commands.Cog):
             # Create thread with server prefix + numbered name
             thread = await channel.create_thread(
                 name=f"{server_prefix}{whisper_number:03d}",
-                type=discord.ChannelType.public_thread,
+                type=discord.ChannelType.private_thread,
                 reason=f"Whisper thread {server_prefix}{whisper_number:03d} for {user}"
             )
 
