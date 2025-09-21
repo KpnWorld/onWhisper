@@ -501,21 +501,21 @@ class ModerationCog(commands.Cog):
             if ctx.interaction:
                 await ctx.followup.send(response, ephemeral=True)
             else:
-                await ctx.send(response, ephemeral=True)
+                await ctx.send(response)
             
         except discord.Forbidden:
             error_msg = "❌ I don't have permission to delete messages!"
             if ctx.interaction:
                 await ctx.followup.send(error_msg, ephemeral=True)
             else:
-                await ctx.send(error_msg, ephemeral=True)
+                await ctx.send(error_msg)
         except Exception as e:
-            logger.error(f"Error in purge command: {e}", exc_info=True)
+            logger.error(f"Error in purge command: {e}")
             error_msg = "❌ An unexpected error occurred."
             if ctx.interaction:
                 await ctx.followup.send(error_msg, ephemeral=True)
             else:
-                await ctx.send(error_msg, ephemeral=True)
+                await ctx.send(error_msg)
 
     @commands.hybrid_command(name="lock", description="Lock a channel to prevent @everyone from sending messages")
     @app_commands.describe(channel="Channel to lock (defaults to current channel)")
