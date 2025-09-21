@@ -248,8 +248,7 @@ class WhisperCog(commands.Cog):
             return None, "ERROR"
 
     @app_commands.command(name="whisper")
-    @app_commands.describe(reason="Reason for opening the whisper thread")
-    async def create_whisper(self, interaction: discord.Interaction, reason: Optional[str] = None):
+    async def create_whisper(self, interaction: discord.Interaction):
         """Open a private whisper thread for anonymous communication with staff"""
         if not interaction.guild:
             return await interaction.response.send_message(
@@ -258,93 +257,16 @@ class WhisperCog(commands.Cog):
             )
 
         try:
-            # Check if whispers are enabled
-            whisper_enabled = await self.config.get(interaction.guild.id, "whisper_enabled", True)
-            if not whisper_enabled:
-                return await interaction.response.send_message(
-                    "❌ The whisper system is not enabled in this server.",
-                    ephemeral=True
-                )
-
-            # Check if user already has an active whisper
-            existing_whispers = await self.db.fetchall(
-                "SELECT thread_id FROM whispers WHERE guild_id = ? AND user_id = ? AND is_open = ?",
-                (interaction.guild.id, interaction.user.id, 1)
-            )
-            if existing_whispers:
-                thread_id = existing_whispers[0]['thread_id']
-                return await interaction.response.send_message(
-                    f"ℹ️ You already have an active whisper thread: <#{thread_id}>",
-                    ephemeral=True
-                )
-
-            # Check 24-hour cooldown for closed whispers
-            try:
-                last_closed = await self.db.fetchone(
-                    "SELECT closed_at FROM whispers WHERE guild_id = ? AND user_id = ? AND is_open = ? AND closed_by_staff = ? ORDER BY closed_at DESC LIMIT 1",
-                    (interaction.guild.id, interaction.user.id, 0, 1)
-                )
-            except:
-                # Fallback if column doesn't exist yet
-                last_closed = None
-            
-            if last_closed and last_closed['closed_at']:
-                closed_time = datetime.fromisoformat(last_closed['closed_at'].replace('Z', '+00:00'))
-                time_since_closed = datetime.utcnow().replace(tzinfo=timezone.utc) - closed_time
-                hours_since_closed = time_since_closed.total_seconds() / 3600
-                
-                if hours_since_closed < 24:
-                    hours_remaining = 24 - hours_since_closed
-                    if hours_remaining >= 1:
-                        return await interaction.response.send_message(
-                            f"⏰ You must wait {hours_remaining:.1f} more hours before creating a new whisper thread (24-hour cooldown after staff closure).",
-                            ephemeral=True
-                        )
-                    else:
-                        minutes_remaining = hours_remaining * 60
-                        return await interaction.response.send_message(
-                            f"⏰ You must wait {minutes_remaining:.0f} more minutes before creating a new whisper thread (24-hour cooldown after staff closure).",
-                            ephemeral=True
-                        )
-
-            await interaction.response.defer(ephemeral=True)
-
-            # Get or create whisper channel
-            channel = await self._setup_whisper_channel(interaction.guild)
-            if not channel:
-                return await interaction.followup.send(
-                    "❌ Failed to set up whisper channel. Please contact an administrator.",
-                    ephemeral=True
-                )
-
-            # Create thread and get whisper number
-            thread, whisper_number = await self._create_whisper_thread(channel, interaction.user, reason)
-            if not thread or whisper_number == "ERROR":
-                return await interaction.followup.send(
-                    "❌ Failed to create whisper thread. Please try again later.",
-                    ephemeral=True
-                )
-
-            await interaction.followup.send(
-                f"✅ Whisper thread **{whisper_number}** created successfully!\n" +
-                f"📍 Please go to {channel.mention} to find your whisper thread.\n" +
-                "Staff will respond to your message soon.",
-                ephemeral=True
-            )
+            # Show the modal form for whisper creation
+            modal = WhisperModal(self)
+            await interaction.response.send_modal(modal)
 
         except Exception as e:
-            logger.error(f"Error creating whisper for user {interaction.user.id} in guild {interaction.guild.id}: {e}")
-            try:
-                await interaction.followup.send(
-                    "❌ An error occurred while creating the whisper thread.",
-                    ephemeral=True
-                )
-            except:
-                # If followup fails, try response
-                await interaction.response.send_message(
-                    "❌ An error occurred while creating the whisper thread.",
-                    ephemeral=True
-                )
+            logger.error(f"Error showing whisper modal for user {interaction.user.id} in guild {interaction.guild.id}: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while opening the whisper form. Please try again later.",
+                ephemeral=True
+            )
 
 
     @app_commands.command(name="whisper-setup")
