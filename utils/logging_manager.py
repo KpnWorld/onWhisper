@@ -72,9 +72,19 @@ class LoggingManager:
         channel_id = await self.config.get(guild.id, log_cat.channel_key)
         
         if channel_id:
-            channel = guild.get_channel(channel_id)
-            if channel and isinstance(channel, discord.TextChannel):
-                return channel
+            # Defensive type conversion for channel ID
+            try:
+                if isinstance(channel_id, str) and channel_id.isdigit():
+                    channel_id = int(channel_id)
+                elif not isinstance(channel_id, int):
+                    return None
+                    
+                channel = guild.get_channel(channel_id)
+                if channel and isinstance(channel, discord.TextChannel):
+                    return channel
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid channel ID format for category '{category}': {channel_id}")
+                return None
         
         # Fallback to mod log channel for moderation events
         if category == "moderation":

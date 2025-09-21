@@ -92,6 +92,8 @@ class ConfigManager:
             # Check cache first without lock
             if guild_id in self._cache:
                 value = self._cache[guild_id].get(key, DEFAULT_CONFIG.get(key, default))
+                # Convert value to proper type based on default config
+                value = self._convert_value_type(key, value)
                 logger.debug(f"Get config (cached): guild={guild_id}, key={key}, value={value}")
                 return value
             
@@ -101,11 +103,42 @@ class ConfigManager:
                 if guild_id not in self._cache:
                     await self.load_guild(guild_id)
                 value = self._cache[guild_id].get(key, DEFAULT_CONFIG.get(key, default))
+                # Convert value to proper type based on default config
+                value = self._convert_value_type(key, value)
                 logger.debug(f"Get config (loaded): guild={guild_id}, key={key}, value={value}")
                 return value
         except Exception as e:
             logger.error(f"Error in config.get: guild={guild_id}, key={key}, error={e}")
             return DEFAULT_CONFIG.get(key, default)
+    
+    def _convert_value_type(self, key: str, value: Any) -> Any:
+        """Convert database value to proper type based on DEFAULT_CONFIG"""
+        if key not in DEFAULT_CONFIG or value is None:
+            return value
+        
+        default_value = DEFAULT_CONFIG[key]
+        default_type = type(default_value)
+        
+        # If value is already the correct type, return as-is
+        if isinstance(value, default_type):
+            return value
+        
+        try:
+            # Convert string values to appropriate types
+            if isinstance(value, str):
+                if default_type == bool:
+                    return value.lower() in ("true", "1", "yes", "on", "enabled")
+                elif default_type == int:
+                    # Handle channel IDs and other integers
+                    return int(value) if value.isdigit() else None
+                elif default_type == type(None) and value.isdigit():
+                    # Handle channel IDs stored as strings
+                    return int(value)
+            
+            return value
+        except (ValueError, AttributeError):
+            logger.warning(f"Failed to convert config value for key {key}: {value}")
+            return value
 
     async def set(self, guild_id: int, key: str, value: Any) -> None:
         async with self._lock:
