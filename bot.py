@@ -14,6 +14,7 @@ from discord import app_commands
 # -------------------- Utils Imports -------------------- #
 from utils.db_manager import DBManager
 from utils.config import ConfigManager
+from utils.logging_manager import LoggingManager
 
 # -------------------- Environment -------------------- #
 load_dotenv()
@@ -61,6 +62,13 @@ config_manager = ConfigManager(db_manager)
 bot.db_manager = db_manager
 bot.config_manager = config_manager
 
+# Initialize logging manager after bot is created
+async def setup_logging_manager():
+    """Initialize the logging manager after bot is ready"""
+    logging_manager = LoggingManager(bot, config_manager)
+    bot.logging_manager = logging_manager
+    return logging_manager
+
 # -------------------- Rotating Status -------------------- #
 @tasks.loop(minutes=10)
 async def rotate_status():
@@ -81,6 +89,9 @@ async def on_ready():
     logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
     logger.info("Bot is ready!")
 
+    # Initialize logging manager
+    await setup_logging_manager()
+
     try:
         synced = await bot.tree.sync()
         logger.info(f"Synced {len(synced)} app commands")
@@ -89,6 +100,42 @@ async def on_ready():
 
     if not rotate_status.is_running():
         rotate_status.start()
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    """Log member joins using the unified logging system"""
+    try:
+        if hasattr(bot, 'logging_manager'):
+            await bot.logging_manager.log_member_join(member)
+    except Exception as e:
+        logger.error(f"Error logging member join for {member.id}: {e}")
+
+@bot.event
+async def on_member_remove(member: discord.Member):
+    """Log member leaves using the unified logging system"""
+    try:
+        if hasattr(bot, 'logging_manager'):
+            await bot.logging_manager.log_member_leave(member)
+    except Exception as e:
+        logger.error(f"Error logging member leave for {member.id}: {e}")
+
+@bot.event
+async def on_message_delete(message: discord.Message):
+    """Log message deletions using the unified logging system"""
+    try:
+        if hasattr(bot, 'logging_manager') and message.guild:
+            await bot.logging_manager.log_message_delete(message)
+    except Exception as e:
+        logger.error(f"Error logging message delete: {e}")
+
+@bot.event
+async def on_message_edit(before: discord.Message, after: discord.Message):
+    """Log message edits using the unified logging system"""
+    try:
+        if hasattr(bot, 'logging_manager') and after.guild:
+            await bot.logging_manager.log_message_edit(before, after)
+    except Exception as e:
+        logger.error(f"Error logging message edit: {e}")
 
 # -------------------- Global Error Handlers -------------------- #
 @bot.tree.error

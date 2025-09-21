@@ -280,6 +280,12 @@ class WhisperCog(commands.Cog):
             # Send admin notification
             await self._send_admin_notification(channel.guild, user, thread, f"{server_prefix}{whisper_number:03d}", reason)
 
+            # Log whisper creation using unified logging system
+            if hasattr(self.bot, 'logging_manager'):
+                await self.bot.logging_manager.log_whisper_created(
+                    channel.guild, user, thread, f"{server_prefix}{whisper_number:03d}", reason
+                )
+
             return thread, f"{server_prefix}{whisper_number:03d}"
 
         except Exception as e:

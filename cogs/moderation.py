@@ -94,6 +94,12 @@ class ModerationCog(commands.Cog):
                     reason,
                     ctx.author.id
                 )
+                
+                # Log to unified logging system
+                if hasattr(self.bot, 'logging_manager'):
+                    await self.bot.logging_manager.log_moderation_action(
+                        ctx.guild, "Kick", ctx.author, member, reason
+                    )
             
             logger.info(f"Kicked {member} from {ctx.guild} by {ctx.author}: {reason}")
             
@@ -144,6 +150,12 @@ class ModerationCog(commands.Cog):
                     reason,
                     ctx.author.id
                 )
+                
+                # Log to unified logging system
+                if hasattr(self.bot, 'logging_manager'):
+                    await self.bot.logging_manager.log_moderation_action(
+                        ctx.guild, "Ban", ctx.author, member, reason
+                    )
             
             logger.info(f"Banned {member} from {ctx.guild} by {ctx.author}: {reason}")
             
@@ -244,6 +256,13 @@ class ModerationCog(commands.Cog):
                     f"{reason} (Duration: {duration} minutes)",
                     ctx.author.id
                 )
+                
+                # Log to unified logging system
+                if hasattr(self.bot, 'logging_manager'):
+                    await self.bot.logging_manager.log_moderation_action(
+                        ctx.guild, "Mute", ctx.author, member, 
+                        f"{reason} (Duration: {duration} minutes)"
+                    )
             
             logger.info(f"Timed out {member} for {duration} minutes by {ctx.author}: {reason}")
             
@@ -331,6 +350,12 @@ class ModerationCog(commands.Cog):
                     reason,
                     ctx.author.id
                 )
+                
+                # Log to unified logging system
+                if hasattr(self.bot, 'logging_manager'):
+                    await self.bot.logging_manager.log_moderation_action(
+                        ctx.guild, "Warning", ctx.author, member, reason
+                    )
             
             logger.info(f"Warned {member} by {ctx.author}: {reason}")
             
@@ -493,6 +518,13 @@ class ModerationCog(commands.Cog):
                     f"Purged {deleted_count} messages in #{ctx.channel.name}",
                     ctx.author.id
                 )
+                
+                # Log to unified logging system
+                if hasattr(self.bot, 'logging_manager'):
+                    await self.bot.logging_manager.log_moderation_action(
+                        ctx.guild, "Purge", ctx.author, ctx.author, 
+                        f"Purged {deleted_count} messages in #{ctx.channel.name}"
+                    )
             
             logger.info(f"Purged {deleted_count} messages in #{ctx.channel.name} by {ctx.author}")
             
