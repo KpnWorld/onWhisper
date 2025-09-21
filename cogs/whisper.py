@@ -100,7 +100,7 @@ class WhisperModal(discord.ui.Modal, title='Create Whisper Thread'):
 
             await interaction.followup.send(
                 f"✅ Whisper thread **{whisper_number}** created successfully!\n" +
-                f"📍 Please go to {channel.mention} to find your whisper thread.\n" +
+                f"📍 Access your whisper thread here: {thread.mention}\n" +
                 "Staff will respond to your message soon.",
                 ephemeral=True
             )
@@ -161,9 +161,13 @@ class WhisperCog(commands.Cog):
 
             # Create new channel with proper permissions
             overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=True,  # Users can see the channel and threads
+                    send_messages=False,  # Users cannot send messages in main channel
+                    create_private_threads=False  # Users cannot create threads
+                ),
                 guild.me: discord.PermissionOverwrite(
-                    read_messages=True,
+                    view_channel=True,
                     send_messages=True,
                     manage_channels=True,
                     manage_threads=True,
@@ -171,18 +175,9 @@ class WhisperCog(commands.Cog):
                 )
             }
 
-            # Add admin permissions for staff
-            for member in guild.members:
-                if member.guild_permissions.administrator:
-                    overwrites[member] = discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=True,
-                        manage_threads=True
-                    )
-
             channel = await guild.create_text_channel(
                 name="🤫-whispers",
-                topic="Private communication channel - Staff only",
+                topic="Private communication channel - Whisper threads visible to all, managed by staff",
                 overwrites=overwrites,
                 reason="Whisper system setup"
             )
@@ -217,6 +212,9 @@ class WhisperCog(commands.Cog):
                 type=discord.ChannelType.private_thread,
                 reason=f"Whisper thread {server_prefix}{whisper_number:03d} for {user}"
             )
+            
+            # Add the user to the thread so they can access it
+            await thread.add_user(user)
 
             # Now create whisper in database with actual thread ID
             await self.db.create_whisper(channel.guild.id, user.id, thread.id)
