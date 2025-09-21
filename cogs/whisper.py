@@ -13,6 +13,41 @@ from utils.config import ConfigManager
 logger = logging.getLogger("onWhisper.Whisper")
 
 
+class WhisperButtonView(discord.ui.View):
+    """Persistent view with button for creating whisper threads"""
+    
+    def __init__(self):
+        super().__init__(timeout=None)  # Persistent view
+        
+    @discord.ui.button(
+        label='Create Whisper Thread',
+        style=discord.ButtonStyle.primary,
+        emoji='🤫',
+        custom_id='whisper_create_button'
+    )
+    async def create_whisper_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Handle whisper creation button click"""
+        try:
+            # Get the whisper cog
+            whisper_cog = interaction.client.get_cog('WhisperCog')
+            if not whisper_cog:
+                return await interaction.response.send_message(
+                    "❌ Whisper system not available.",
+                    ephemeral=True
+                )
+            
+            # Show the modal form for whisper creation
+            modal = WhisperModal(whisper_cog)
+            await interaction.response.send_modal(modal)
+            
+        except Exception as e:
+            logger.error(f"Error in whisper button for user {interaction.user.id}: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while opening the whisper form. Please try again later.",
+                ephemeral=True
+            )
+
+
 class WhisperModal(discord.ui.Modal, title='Create Whisper Thread'):
     """Modal form for creating whisper threads with reason input"""
     
@@ -139,6 +174,9 @@ class WhisperCog(commands.Cog):
         self.config: ConfigManager = bot.config_manager
         # Cache for active whisper threads
         self._active_whispers: Dict[int, Dict[int, int]] = {}  # guild_id -> {user_id: thread_id}
+        
+        # Add persistent view for button interactions
+        self.bot.add_view(WhisperButtonView())
 
     async def _setup_whisper_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
         """Create or get the whisper management channel"""
@@ -263,6 +301,77 @@ class WhisperCog(commands.Cog):
             logger.error(f"Error showing whisper modal for user {interaction.user.id} in guild {interaction.guild.id}: {e}")
             await interaction.response.send_message(
                 "❌ An error occurred while opening the whisper form. Please try again later.",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="whisper-instructions")
+    @app_commands.describe(
+        channel="Channel to send the instructions (defaults to current channel)"
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    async def send_whisper_instructions(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+        """Send whisper instructions with a button for creating whispers"""
+        if not interaction.guild:
+            return await interaction.response.send_message(
+                "This command can only be used in a server!",
+                ephemeral=True
+            )
+
+        try:
+            # Check permissions
+            if not interaction.user.guild_permissions.administrator:
+                return await interaction.response.send_message(
+                    "❌ You don't have permission to send whisper instructions!",
+                    ephemeral=True
+                )
+
+            target_channel = channel or interaction.channel
+
+            # Create instruction embed
+            embed = discord.Embed(
+                title="🤫 Anonymous Whisper System",
+                description="Need to communicate privately with staff? Create a secure whisper thread!",
+                color=discord.Color.blue(),
+                timestamp=datetime.utcnow()
+            )
+            
+            embed.add_field(
+                name="📝 How to Create a Whisper",
+                value="Click the button below to open a form where you can describe your situation. A private thread will be created for secure communication with staff.",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="🔒 Privacy & Security",
+                value="• Your whisper thread is private and only visible to you and staff\n• All communication remains confidential\n• Staff will respond as soon as possible",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="⏰ Important Notes",
+                value="• You can only have one active whisper at a time\n• There's a 24-hour cooldown after staff close a whisper\n• Use whispers for legitimate concerns that require privacy",
+                inline=False
+            )
+            
+            embed.set_footer(text="Click the button below to get started")
+
+            # Create the persistent view with button
+            view = WhisperButtonView()
+
+            # Send the message
+            await target_channel.send(embed=embed, view=view)
+
+            await interaction.response.send_message(
+                f"✅ Whisper instructions sent to {target_channel.mention}!",
+                ephemeral=True
+            )
+
+            logger.info(f"Sent whisper instructions to channel {target_channel.id} in guild {interaction.guild.id} by {interaction.user.id}")
+
+        except Exception as e:
+            logger.error(f"Error sending whisper instructions in guild {interaction.guild.id}: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while sending the whisper instructions.",
                 ephemeral=True
             )
 
