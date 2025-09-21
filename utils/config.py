@@ -35,6 +35,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # 💌 Whisper system
     "whisper_enabled": True,
     "whisper_channel": None,
+    "whisper_notification_enabled": True,
+    "whisper_notification_channel": None,
+    "whisper_notification_role": None,
 }
 
 
