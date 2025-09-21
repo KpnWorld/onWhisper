@@ -6,6 +6,14 @@ onWhisper is a comprehensive Discord bot built with discord.py and SQLite, provi
 
 ## Recent Changes
 
+**Update 149c - Unified Server-Side Logging System** - September 21, 2025
+- Implemented comprehensive unified logging system with 8 distinct event categories
+- Added LoggingManager class for centralized event tracking across all bot functions
+- Created user-friendly /log-setup command for easy configuration of logging categories and channels
+- Integrated logging throughout moderation, whisper, and bot events with visual feedback
+- Fixed critical type-handling bug in configuration system for proper channel ID resolution
+- Added 17 new configuration options for granular logging control per guild
+
 **Whisper Update 149b - General Cogs Update 3 (Whisper via Modal Form)** - September 21, 2025
 - Upgraded whisper system to use Discord modal forms for improved user experience
 - Replaced basic command input with professional modal form interface
