@@ -4,6 +4,15 @@
 
 onWhisper is a comprehensive Discord bot built with discord.py and SQLite, providing a modular feature set for server management and community engagement. The bot implements a leveling system with XP tracking, role management (autoroles, reaction roles), moderation tools, logging capabilities, and a unique "whisper" system for anonymous communication through private threads. The architecture follows a cog-based pattern for modularity and includes robust configuration management per guild.
 
+## Recent Changes
+
+**Whisper Update 149b - General Cogs Update 3 (Whisper via Modal Form)** - September 21, 2025
+- Upgraded whisper system to use Discord modal forms for improved user experience
+- Replaced basic command input with professional modal form interface
+- Maintained all existing functionality including cooldowns, naming conventions, and permission checks
+- Enhanced UI consistency with required reason field and automatic user ID capture
+- Preserved complete whisper workflow: User create → Admin Review → Close or Delete → Remove thread from DB and Discord
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
@@ -37,7 +46,7 @@ Preferred communication style: Simple, everyday language.
 - **Leveling System**: XP gain on messages with cooldowns, level calculation, and reward roles
 - **Role Management**: Automatic role assignment, reaction-based roles, and color roles
 - **Moderation Tools**: Warning system, timeouts, kicks, bans, and channel management
-- **Whisper System**: Private thread creation for anonymous communication with staff oversight
+- **Whisper System**: Private thread creation for anonymous communication with staff oversight, enhanced with Discord modal forms for improved user experience
 - **Logging System**: Event tracking for joins, leaves, message edits, and moderation actions
 
 ## External Dependencies
