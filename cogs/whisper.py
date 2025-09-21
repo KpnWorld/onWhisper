@@ -231,7 +231,7 @@ class WhisperCog(commands.Cog):
             return None
 
     async def _create_whisper_thread(self, channel: discord.TextChannel, 
-                                   user: discord.Member, reason: str) -> tuple[Optional[discord.Thread], int]:
+                                   user: discord.Member, reason: str) -> tuple[Optional[discord.Thread], str]:
         """Create a new whisper thread"""
         try:
             # Get next whisper number first
@@ -277,11 +277,72 @@ class WhisperCog(commands.Cog):
                 self._active_whispers[channel.guild.id] = {}
             self._active_whispers[channel.guild.id][user.id] = thread.id
 
+            # Send admin notification
+            await self._send_admin_notification(channel.guild, user, thread, f"{server_prefix}{whisper_number:03d}", reason)
+
             return thread, f"{server_prefix}{whisper_number:03d}"
 
         except Exception as e:
             logger.error(f"Error creating whisper thread for user {user.id} in guild {channel.guild.id}: {e}")
             return None, "ERROR"
+
+    async def _send_admin_notification(self, guild: discord.Guild, user: discord.Member, 
+                                     thread: discord.Thread, whisper_id: str, reason: str) -> None:
+        """Send admin notification when a whisper is created"""
+        try:
+            # Check if notifications are enabled
+            notification_enabled = await self.config.get(guild.id, "whisper_notification_enabled", True)
+            if not notification_enabled:
+                return
+            
+            # Get notification channel
+            notification_channel_id = await self.config.get(guild.id, "whisper_notification_channel")
+            notification_channel = None
+            
+            if notification_channel_id:
+                notification_channel = guild.get_channel(notification_channel_id)
+            
+            # Fallback to mod log channel if no specific notification channel
+            if not notification_channel:
+                mod_log_channel_id = await self.config.get(guild.id, "mod_log_channel")
+                if mod_log_channel_id:
+                    notification_channel = guild.get_channel(mod_log_channel_id)
+            
+            # If no notification channel found, skip notification
+            if not notification_channel:
+                logger.debug(f"No notification channel configured for whisper notifications in guild {guild.id}")
+                return
+            
+            # Create notification embed
+            embed = discord.Embed(
+                title="🔔 New Whisper Thread Created",
+                description=f"A new whisper thread has been created by {user.mention}",
+                color=discord.Color.orange(),
+                timestamp=datetime.utcnow()
+            )
+            
+            embed.add_field(name="Whisper ID", value=whisper_id, inline=True)
+            embed.add_field(name="User", value=f"{user.mention}\n({user.display_name})", inline=True)
+            embed.add_field(name="Thread", value=thread.mention, inline=True)
+            embed.add_field(name="Reason", value=reason or "No reason provided", inline=False)
+            embed.add_field(name="Actions", value="Click the thread link above to review and respond.", inline=False)
+            
+            embed.set_footer(text=f"User ID: {user.id} | Thread ID: {thread.id}")
+            
+            # Check for notification role
+            notification_role_id = await self.config.get(guild.id, "whisper_notification_role")
+            content = None
+            if notification_role_id:
+                notification_role = guild.get_role(notification_role_id)
+                if notification_role:
+                    content = f"{notification_role.mention}"
+            
+            # Send the notification
+            await notification_channel.send(content=content, embed=embed)
+            logger.info(f"Sent admin notification for whisper {whisper_id} in guild {guild.id}")
+            
+        except Exception as e:
+            logger.error(f"Error sending admin notification for whisper in guild {guild.id}: {e}")
 
     @app_commands.command(name="whisper")
     async def create_whisper(self, interaction: discord.Interaction):
@@ -379,14 +440,20 @@ class WhisperCog(commands.Cog):
     @app_commands.command(name="whisper-setup")
     @app_commands.describe(
         enabled="Enable or disable the whisper system",
-        channel="Channel for whisper threads (will create one if not specified)"
+        channel="Channel for whisper threads (will create one if not specified)",
+        notification_enabled="Enable or disable admin notifications for new whispers",
+        notification_channel="Channel to send admin notifications (defaults to mod log channel)",
+        notification_role="Role to ping when new whispers are created"
     )
     @app_commands.default_permissions(manage_guild=True)
     async def setup_whispers(
         self,
         interaction: discord.Interaction,
         enabled: Optional[bool] = None,
-        channel: Optional[discord.TextChannel] = None
+        channel: Optional[discord.TextChannel] = None,
+        notification_enabled: Optional[bool] = None,
+        notification_channel: Optional[discord.TextChannel] = None,
+        notification_role: Optional[discord.Role] = None
     ):
         """Configure the whisper system"""
         if not interaction.guild:
@@ -402,10 +469,22 @@ class WhisperCog(commands.Cog):
                 
             if channel:
                 await self.config.set(interaction.guild.id, "whisper_channel", channel.id)
+                
+            if notification_enabled is not None:
+                await self.config.set(interaction.guild.id, "whisper_notification_enabled", notification_enabled)
+                
+            if notification_channel:
+                await self.config.set(interaction.guild.id, "whisper_notification_channel", notification_channel.id)
+                
+            if notification_role:
+                await self.config.set(interaction.guild.id, "whisper_notification_role", notification_role.id)
 
             # Get current settings for display
             whisper_enabled = await self.config.get(interaction.guild.id, "whisper_enabled", True)
             whisper_channel_id = await self.config.get(interaction.guild.id, "whisper_channel")
+            notification_enabled_setting = await self.config.get(interaction.guild.id, "whisper_notification_enabled", True)
+            notification_channel_id = await self.config.get(interaction.guild.id, "whisper_notification_channel")
+            notification_role_id = await self.config.get(interaction.guild.id, "whisper_notification_role")
             
             # Create response embed
             embed = discord.Embed(
@@ -415,20 +494,58 @@ class WhisperCog(commands.Cog):
             )
 
             embed.add_field(
-                name="Status",
+                name="🎮 System Status",
                 value="✅ Enabled" if whisper_enabled else "❌ Disabled",
                 inline=True
             )
 
             if whisper_channel_id:
                 embed.add_field(
-                    name="Whisper Channel",
+                    name="📝 Whisper Channel",
                     value=f"<#{whisper_channel_id}>",
+                    inline=True
+                )
+            else:
+                embed.add_field(
+                    name="📝 Whisper Channel",
+                    value="Not configured",
                     inline=True
                 )
                 
             embed.add_field(
-                name="Usage",
+                name="🔔 Notifications",
+                value="✅ Enabled" if notification_enabled_setting else "❌ Disabled",
+                inline=True
+            )
+            
+            if notification_channel_id:
+                embed.add_field(
+                    name="📢 Notification Channel",
+                    value=f"<#{notification_channel_id}>",
+                    inline=True
+                )
+            else:
+                embed.add_field(
+                    name="📢 Notification Channel",
+                    value="Mod log channel (fallback)",
+                    inline=True
+                )
+                
+            if notification_role_id:
+                embed.add_field(
+                    name="👥 Notification Role",
+                    value=f"<@&{notification_role_id}>",
+                    inline=True
+                )
+            else:
+                embed.add_field(
+                    name="👥 Notification Role",
+                    value="None",
+                    inline=True
+                )
+                
+            embed.add_field(
+                name="ℹ️ Usage",
                 value="Use `/whisper` to create a private thread",
                 inline=False
             )
