@@ -1,0 +1,134 @@
+2025-09-21 20:34:35,728 | WARNING | discord.client | PyNaCl is not installed, voice will NOT be supported
+2025-09-21 20:34:35,731 | INFO | onWhisper.DBManager | Database initialized successfully.
+2025-09-21 20:34:35,733 | INFO | onWhisperBot | Loaded cog: cogs.debug
+2025-09-21 20:34:35,734 | INFO | onWhisperBot | Loaded cog: cogs.info
+2025-09-21 20:34:35,735 | INFO | onWhisperBot | Loaded cog: cogs.leveling
+2025-09-21 20:34:35,740 | INFO | onWhisperBot | Loaded cog: cogs.moderation
+2025-09-21 20:34:35,743 | INFO | onWhisperBot | Loaded cog: cogs.whisper
+2025-09-21 20:34:35,744 | INFO | onWhisperBot | Loaded cog: cogs.config
+2025-09-21 20:34:35,745 | INFO | onWhisperBot | Loaded cog: cogs.help
+2025-09-21 20:34:36,405 | INFO | discord.gateway | Shard ID None has connected to Gateway (Session ID: 8dcc14a9a12d1db548abbb88d78f6004).
+2025-09-21 20:34:42,461 | INFO | onWhisperBot | Logged in as onWhisper#9328 (ID: 1316917918239293543)
+2025-09-21 20:34:42,461 | INFO | onWhisperBot | Bot is ready!
+2025-09-21 20:34:42,712 | INFO | onWhisperBot | Synced 27 app commands
+2025-09-21 20:34:35,728 | WARNING | discord.client | PyNaCl is not installed, voice will NOT be supported
+2025-09-21 20:34:35,731 | INFO | onWhisper.DBManager | Database initialized successfully.
+2025-09-21 20:34:35,733 | INFO | onWhisperBot | Loaded cog: cogs.debug
+2025-09-21 20:34:35,734 | INFO | onWhisperBot | Loaded cog: cogs.info
+2025-09-21 20:34:35,735 | INFO | onWhisperBot | Loaded cog: cogs.leveling
+2025-09-21 20:34:35,740 | INFO | onWhisperBot | Loaded cog: cogs.moderation
+2025-09-21 20:34:35,743 | INFO | onWhisperBot | Loaded cog: cogs.whisper
+2025-09-21 20:34:35,744 | INFO | onWhisperBot | Loaded cog: cogs.config
+2025-09-21 20:34:35,745 | INFO | onWhisperBot | Loaded cog: cogs.help
+2025-09-21 20:34:35,745 | INFO | discord.client | logging in using static token
+2025-09-21 20:34:36,405 | INFO | discord.gateway | Shard ID None has connected to Gateway (Session ID: 8dcc14a9a12d1db548abbb88d78f6004).
+2025-09-21 20:34:42,461 | INFO | onWhisperBot | Logged in as onWhisper#9328 (ID: 1316917918239293543)
+2025-09-21 20:34:42,461 | INFO | onWhisperBot | Bot is ready!
+2025-09-21 20:34:42,712 | INFO | onWhisperBot | Synced 27 app commands
+2025-09-21 20:38:28,785 | INFO | ConfigManager | Loaded config for guild 1337173510883115058 with 35 keys
+2025-09-21 20:38:28,785 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=unified_logging_enabled, value=True
+2025-09-21 20:38:28,800 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_member_events, value=True
+2025-09-21 20:38:28,817 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_message_events, value=True
+2025-09-21 20:38:28,850 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_moderation_events, value=True
+2025-09-21 20:38:28,871 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_voice_events, value=True
+2025-09-21 20:38:28,894 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_channel_events, value=True
+2025-09-21 20:38:28,912 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_role_events, value=True
+2025-09-21 20:38:28,933 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_bot_events, value=True
+2025-09-21 20:38:28,960 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_whisper_events, value=True
+2025-09-21 20:39:22,013 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=unified_logging_enabled, value=True
+2025-09-21 20:39:22,030 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_member_events, value=True
+2025-09-21 20:39:22,063 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_message_events, value=True
+2025-09-21 20:39:22,076 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_moderation_events, value=True
+2025-09-21 20:39:22,089 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_voice_events, value=True
+2025-09-21 20:39:22,101 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_channel_events, value=True
+2025-09-21 20:39:22,113 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_role_events, value=True
+2025-09-21 20:39:22,127 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_bot_events, value=True
+2025-09-21 20:39:22,148 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=log_whisper_events, value=True
+2025-09-21 20:40:15,070 | INFO | onWhisper.Whisper | Sent closure DM to user 1290038835920502917 for whisper in guild 1337173510883115058
+2025-09-21 20:40:15,190 | ERROR | onWhisper.Whisper | Error closing whisper thread in guild 1337173510883115058: 403 Forbidden (error code: 50083): Thread is archived
+2025-09-21 20:40:15,275 | ERROR | onWhisperBot | App command error: Command 'whisper-close' raised an exception: NotFound: 404 Not Found (error code: 10062): Unknown interaction
+Traceback (most recent call last):
+  File "/home/runner/workspace/cogs/whisper.py", line 886, in close_whisper_by_number
+    await interaction.response.send_message(
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/interactions.py", line 1004, in send_message
+    response = await adapter.create_interaction_response(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/webhook/async_.py", line 222, in request
+    raise Forbidden(response, data)
+discord.errors.Forbidden: 403 Forbidden (error code: 50083): Thread is archived
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/app_commands/commands.py", line 857, in _do_call
+    return await self._callback(self.binding, interaction, **params)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/cogs/whisper.py", line 895, in close_whisper_by_number
+    await interaction.response.send_message(
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/interactions.py", line 1004, in send_message
+    response = await adapter.create_interaction_response(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/webhook/async_.py", line 224, in request
+    raise NotFound(response, data)
+discord.errors.NotFound: 404 Not Found (error code: 10062): Unknown interaction
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/app_commands/tree.py", line 1310, in _call
+    await command._invoke_with_namespace(interaction, namespace)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/app_commands/commands.py", line 883, in _invoke_with_namespace
+    return await self._do_call(interaction, transformed_values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/app_commands/commands.py", line 876, in _do_call
+    raise CommandInvokeError(self, e) from e
+discord.app_commands.errors.CommandInvokeError: Command 'whisper-close' raised an exception: NotFound: 404 Not Found (error code: 10062): Unknown interaction
+2025-09-21 20:40:15,366 | ERROR | onWhisperBot | Failed to send error response: 404 Not Found (error code: 10062): Unknown interaction
+Traceback (most recent call last):
+  File "/home/runner/workspace/cogs/whisper.py", line 886, in close_whisper_by_number
+    await interaction.response.send_message(
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/interactions.py", line 1004, in send_message
+    response = await adapter.create_interaction_response(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/webhook/async_.py", line 222, in request
+    raise Forbidden(response, data)
+discord.errors.Forbidden: 403 Forbidden (error code: 50083): Thread is archived
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/app_commands/commands.py", line 857, in _do_call
+    return await self._callback(self.binding, interaction, **params)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/cogs/whisper.py", line 895, in close_whisper_by_number
+    await interaction.response.send_message(
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/interactions.py", line 1004, in send_message
+    response = await adapter.create_interaction_response(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/webhook/async_.py", line 224, in request
+    raise NotFound(response, data)
+discord.errors.NotFound: 404 Not Found (error code: 10062): Unknown interaction
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/app_commands/tree.py", line 1310, in _call
+    await command._invoke_with_namespace(interaction, namespace)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/app_commands/commands.py", line 883, in _invoke_with_namespace
+    return await self._do_call(interaction, transformed_values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/app_commands/commands.py", line 876, in _do_call
+    raise CommandInvokeError(self, e) from e
+discord.app_commands.errors.CommandInvokeError: Command 'whisper-close' raised an exception: NotFound: 404 Not Found (error code: 10062): Unknown interaction
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/runner/workspace/bot.py", line 146, in on_app_command_error
+    await interaction.response.send_message(
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/interactions.py", line 1004, in send_message
+    response = await adapter.create_interaction_response(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/discord/webhook/async_.py", line 224, in request
+    raise NotFound(response, data)
+discord.errors.NotFound: 404 Not Found (error code: 10062): Unknown interaction

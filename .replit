@@ -1,6 +1,6 @@
 run = "python bot.py"
 language = "python3"
-modules = ["python-3.11"]
+modules = ["python-3.11", "postgresql-16"]
 
 [nix]  # type: ignore
 channel = "stable-25_05"
