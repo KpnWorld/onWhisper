@@ -124,9 +124,9 @@ class ConfigCog(commands.Cog):
     @app_commands.command(name="log-setup")
     @app_commands.describe(
         action="Action to perform on logging system",
-        category="Logging category to configure",
-        enabled="Enable or disable logging for this category",
-        channel="Channel to send logs to for this category"
+        channel="Channel to send logs to",
+        event="Event type to configure for this channel",
+        enabled="Enable or disable this event type"
     )
     @app_commands.choices(
         action=[
@@ -135,7 +135,7 @@ class ConfigCog(commands.Cog):
             app_commands.Choice(name="enable-all", value="enable-all"),
             app_commands.Choice(name="disable-all", value="disable-all")
         ],
-        category=[
+        event=[
             app_commands.Choice(name="🚪 Member Events", value="member"),
             app_commands.Choice(name="💬 Message Events", value="message"),
             app_commands.Choice(name="🛡️ Moderation Events", value="moderation"),
@@ -151,11 +151,11 @@ class ConfigCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         action: str,
-        category: Optional[str] = None,
-        enabled: Optional[bool] = None,
-        channel: Optional[discord.TextChannel] = None
+        channel: Optional[discord.TextChannel] = None,
+        event: Optional[str] = None,
+        enabled: Optional[bool] = None
     ):
-        """Configure the unified logging system with easy-to-use interface"""
+        """Configure the logging system: select channel first, then choose which events go there"""
         if not interaction.guild:
             return await interaction.response.send_message(
                 "❌ This command can only be used in a server!",
@@ -171,32 +171,32 @@ class ConfigCog(commands.Cog):
                 master_enabled = await self.config.get(interaction.guild.id, "unified_logging_enabled", True)
                 
                 embed = discord.Embed(
-                    title="📊 Unified Logging System Configuration",
+                    title="📊 Logging Events Configuration",
                     description=f"**Master Status**: {'✅ Enabled' if master_enabled else '❌ Disabled'}",
                     color=discord.Color.blue(),
                     timestamp=datetime.utcnow()
                 )
                 
-                for cat_key, log_cat in LOG_CATEGORIES.items():
-                    # Get category settings
-                    cat_enabled = await self.config.get(interaction.guild.id, log_cat.enabled_key, True)
-                    cat_channel_id = await self.config.get(interaction.guild.id, log_cat.channel_key)
+                for event_key, log_cat in LOG_CATEGORIES.items():
+                    # Get event settings
+                    event_enabled = await self.config.get(interaction.guild.id, log_cat.enabled_key, True)
+                    event_channel_id = await self.config.get(interaction.guild.id, log_cat.channel_key)
                     
                     # Format channel display
-                    if cat_channel_id:
-                        channel_display = f"<#{cat_channel_id}>"
+                    if event_channel_id:
+                        channel_display = f"<#{event_channel_id}>"
                     else:
                         channel_display = "Not configured"
                     
-                    # Add field for this category
-                    status = "✅ Enabled" if cat_enabled else "❌ Disabled"
+                    # Add field for this event
+                    status = "✅ Enabled" if event_enabled else "❌ Disabled"
                     embed.add_field(
                         name=f"{log_cat.emoji} {log_cat.name}",
                         value=f"**Status**: {status}\n**Channel**: {channel_display}",
                         inline=True
                     )
                 
-                embed.set_footer(text="Use /log-setup configure to modify settings")
+                embed.set_footer(text="Use /log-setup configure <channel> <event> to modify settings")
                 await interaction.followup.send(embed=embed)
                 return
             
@@ -207,8 +207,8 @@ class ConfigCog(commands.Cog):
                     await self.config.set(interaction.guild.id, log_cat.enabled_key, True)
                 
                 await interaction.response.send_message(
-                    "✅ **All logging categories enabled!**\n"
-                    "Use `/log-setup configure` to set specific channels for each category.",
+                    "✅ **All logging events enabled!**\n"
+                    "Use `/log-setup configure <channel> <event>` to set specific channels for each event.",
                     ephemeral=True
                 )
                 return
@@ -224,44 +224,40 @@ class ConfigCog(commands.Cog):
                 )
                 return
             
-            # Configure specific category
+            # Configure specific event for a channel
             elif action == "configure":
-                if not category:
+                if not channel or not event:
                     return await interaction.response.send_message(
-                        "❌ You must specify a category to configure!",
+                        "❌ You must specify both a channel and an event type to configure!\n"
+                        "Usage: `/log-setup configure <channel> <event>`",
                         ephemeral=True
                     )
                 
-                if category not in LOG_CATEGORIES:
+                if event not in LOG_CATEGORIES:
                     return await interaction.response.send_message(
-                        "❌ Invalid category specified!",
+                        "❌ Invalid event type specified!",
                         ephemeral=True
                     )
                 
-                log_cat = LOG_CATEGORIES[category]
+                log_cat = LOG_CATEGORIES[event]
                 changes_made = []
                 
-                # Update enabled status if provided
+                # Always set the channel when configuring
+                await self.config.set(interaction.guild.id, log_cat.channel_key, channel.id)
+                changes_made.append(f"**Channel**: {channel.mention}")
+                
+                # Update enabled status if provided, otherwise enable by default
                 if enabled is not None:
                     await self.config.set(interaction.guild.id, log_cat.enabled_key, enabled)
                     status = "enabled" if enabled else "disabled"
                     changes_made.append(f"**Status**: {status}")
-                
-                # Update channel if provided
-                if channel:
-                    await self.config.set(interaction.guild.id, log_cat.channel_key, channel.id)
-                    changes_made.append(f"**Channel**: {channel.mention}")
-                
-                if not changes_made:
-                    return await interaction.response.send_message(
-                        "❌ No changes specified! Use the `enabled` or `channel` parameters.",
-                        ephemeral=True
-                    )
+                else:
+                    # Enable by default when setting up an event
+                    await self.config.set(interaction.guild.id, log_cat.enabled_key, True)
+                    changes_made.append(f"**Status**: enabled")
                 
                 # Show current configuration
                 current_enabled = await self.config.get(interaction.guild.id, log_cat.enabled_key, True)
-                current_channel_id = await self.config.get(interaction.guild.id, log_cat.channel_key)
-                current_channel_display = f"<#{current_channel_id}>" if current_channel_id else "Not configured"
                 
                 embed = discord.Embed(
                     title=f"{log_cat.emoji} {log_cat.name} Configuration Updated",
@@ -273,7 +269,7 @@ class ConfigCog(commands.Cog):
                 embed.add_field(
                     name="Current Configuration",
                     value=f"**Status**: {'✅ Enabled' if current_enabled else '❌ Disabled'}\n"
-                          f"**Channel**: {current_channel_display}",
+                          f"**Channel**: {channel.mention}",
                     inline=False
                 )
                 
