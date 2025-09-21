@@ -23,10 +23,40 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "moderation_enabled": True,
     "mod_log_channel": None,
 
-    # 👋 Logging (join/leave)
-    "logging_enabled": True,
-    "join_log_channel": None,
-    "leave_log_channel": None,
+    # 📊 Unified Logging System
+    "unified_logging_enabled": True,
+    
+    # 🚪 Member Events
+    "log_member_events": True,
+    "log_member_channel": None,
+    
+    # 💬 Message Events  
+    "log_message_events": True,
+    "log_message_channel": None,
+    
+    # 🛡️ Moderation Events
+    "log_moderation_events": True,
+    "log_moderation_channel": None,
+    
+    # 🔊 Voice Events
+    "log_voice_events": True,
+    "log_voice_channel": None,
+    
+    # 📂 Channel Events
+    "log_channel_events": True,
+    "log_channel_channel": None,
+    
+    # 🎭 Role Events
+    "log_role_events": True,
+    "log_role_channel": None,
+    
+    # 🤖 Bot Events
+    "log_bot_events": True,
+    "log_bot_channel": None,
+    
+    # 🤫 Whisper Events
+    "log_whisper_events": True,
+    "log_whisper_channel": None,
 
     # 🎭 Roles
     "roles_enabled": True,
