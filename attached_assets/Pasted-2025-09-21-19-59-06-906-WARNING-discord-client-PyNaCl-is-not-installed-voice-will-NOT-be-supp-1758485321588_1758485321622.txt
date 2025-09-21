@@ -1,0 +1,25 @@
+2025-09-21 19:59:06,906 | WARNING | discord.client | PyNaCl is not installed, voice will NOT be supported
+2025-09-21 19:59:06,908 | INFO | onWhisper.DBManager | Database initialized successfully.
+2025-09-21 19:59:06,909 | INFO | onWhisperBot | Loaded cog: cogs.debug
+2025-09-21 19:59:06,910 | INFO | onWhisperBot | Loaded cog: cogs.info
+2025-09-21 19:59:06,910 | INFO | onWhisperBot | Loaded cog: cogs.leveling
+2025-09-21 19:59:06,915 | INFO | onWhisperBot | Loaded cog: cogs.moderation
+2025-09-21 19:59:06,923 | INFO | onWhisperBot | Loaded cog: cogs.whisper
+2025-09-21 19:59:06,923 | INFO | onWhisperBot | Loaded cog: cogs.config
+2025-09-21 19:59:06,924 | INFO | onWhisperBot | Loaded cog: cogs.help
+2025-09-21 19:59:06,924 | INFO | discord.client | logging in using static token
+2025-09-21 19:59:07,662 | INFO | discord.gateway | Shard ID None has connected to Gateway (Session ID: 82132025-09-21 19:59:13,735 | INFO | onWhisperBot | Logged in as onWhisper#9328 (ID: 1316917918239293543)
+2025-09-21 19:59:13,735 | INFO | onWhisperBot | Bot is ready!
+2025-09-21 19:59:13,994 | INFO | onWhisperBot | Synced 26 app commands
+2025-09-21 20:02:11,067 | INFO | ConfigManager | Loaded config for guild 1337173510883115058 with 15 keys
+2025-09-21 20:02:11,067 | INFO | ConfigManager | Set config: guild=1337173510883115058, key=whisper_channel, value=1339736894631706735
+2025-09-21 20:02:11,814 | INFO | onWhisper.Whisper | Updated whisper settings in guild 1337173510883115058 by 895767962722660372
+2025-09-21 20:02:33,374 | INFO | onWhisper.Moderation | Purged 3 messages in #🎟-𝚃𝚒𝚌𝚔𝚎𝚝𝚜 by og.kpnworld
+2025-09-21 20:02:33,374 | ERROR | onWhisper.Moderation | Error in purge command: 'Context' object has no attribute 'followup'
+Traceback (most recent call last):
+  File "/home/runner/workspace/cogs/moderation.py", line 502, in purge
+    await ctx.followup.send(response, ephemeral=True)
+          ^^^^^^^^^^^^
+AttributeError: 'Context' object has no attribute 'followup'
+2025-09-21 20:02:33,375 | ERROR | onWhisperBot | Command error in purge: Hybrid command raised an error: Command 'purge' raised an exception: AttributeError: 'Context' object has no attribute 'followup'
+NoneType: None

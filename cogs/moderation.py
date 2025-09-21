@@ -498,21 +498,21 @@ class ModerationCog(commands.Cog):
             
             # Send response based on command type
             response = f"✨ Successfully deleted {deleted_count} message{'s' if deleted_count != 1 else ''}."
-            if ctx.interaction:
+            if hasattr(ctx, 'followup') and ctx.followup:
                 await ctx.followup.send(response, ephemeral=True)
             else:
                 await ctx.send(response)
             
         except discord.Forbidden:
             error_msg = "❌ I don't have permission to delete messages!"
-            if ctx.interaction:
+            if hasattr(ctx, 'followup') and ctx.followup:
                 await ctx.followup.send(error_msg, ephemeral=True)
             else:
                 await ctx.send(error_msg)
         except Exception as e:
             logger.error(f"Error in purge command: {e}")
             error_msg = "❌ An unexpected error occurred."
-            if ctx.interaction:
+            if hasattr(ctx, 'followup') and ctx.followup:
                 await ctx.followup.send(error_msg, ephemeral=True)
             else:
                 await ctx.send(error_msg)
