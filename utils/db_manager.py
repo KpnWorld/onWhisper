@@ -3,6 +3,7 @@
 import aiosqlite
 import asyncio
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
 logger = logging.getLogger("onWhisper.DBManager")
@@ -303,19 +304,6 @@ class DBManager:
             "SELECT role_id FROM color_roles WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
         )
         return row["role_id"] if row else None
-
-    # -------------------- Whispers -------------------- #
-    async def create_whisper(self, guild_id: int, user_id: int, thread_id: int):
-        await self.execute(
-            "INSERT INTO whispers (guild_id, user_id, thread_id, is_open) VALUES (?, ?, ?, 1)",
-            (guild_id, user_id, thread_id),
-        )
-
-    async def close_whisper(self, guild_id: int, user_id: int, thread_id: int):
-        await self.execute(
-            "UPDATE whispers SET is_open = 0, closed_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND user_id = ? AND thread_id = ?",
-            (guild_id, user_id, thread_id),
-        )
 
     async def get_open_whispers(self, guild_id: int) -> List[Dict[str, Any]]:
         rows = await self.fetchall(
