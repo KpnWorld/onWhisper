@@ -129,6 +129,209 @@ class LevelingCog(commands.Cog):
         )
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.command(name="setlevel", description="Manually set a member's level (Admin only)")
+    @app_commands.describe(
+        member="The member to set level for",
+        level="The level to set (minimum 0)"
+    )
+    async def setlevel(self, interaction: discord.Interaction, member: discord.Member, level: int):
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        
+        # Check if user has administrator permissions
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You need administrator permissions to use this command.", ephemeral=True)
+            return
+        
+        if level < 0:
+            await interaction.response.send_message("Level must be 0 or higher.", ephemeral=True)
+            return
+        
+        await self.db.set_user_level(interaction.guild.id, member.id, level)
+        
+        embed = discord.Embed(
+            title="Level Set",
+            description=f"Set {member.mention}'s level to **{level}**",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="add-level-role", description="Add a role reward for reaching a specific level (Admin only)")
+    @app_commands.describe(
+        level="The level required to earn this role",
+        role="The role to give when reaching this level"
+    )
+    async def add_level_role(self, interaction: discord.Interaction, level: int, role: discord.Role):
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        
+        # Check if user has administrator permissions
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You need administrator permissions to use this command.", ephemeral=True)
+            return
+        
+        if level < 1:
+            await interaction.response.send_message("Level must be 1 or higher.", ephemeral=True)
+            return
+        
+        await self.db.add_level_reward(interaction.guild.id, level, role.id)
+        
+        embed = discord.Embed(
+            title="Level Role Added",
+            description=f"Added {role.mention} as reward for reaching level **{level}**",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="remove-level-role", description="Remove role reward for a specific level (Admin only)")
+    @app_commands.describe(level="The level to remove role reward from")
+    async def remove_level_role(self, interaction: discord.Interaction, level: int):
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        
+        # Check if user has administrator permissions
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You need administrator permissions to use this command.", ephemeral=True)
+            return
+        
+        await self.db.remove_level_reward(interaction.guild.id, level)
+        
+        embed = discord.Embed(
+            title="Level Role Removed",
+            description=f"Removed role reward for level **{level}**",
+            color=discord.Color.orange()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="list-level-roles", description="Show all configured level role rewards")
+    async def list_level_roles(self, interaction: discord.Interaction):
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        
+        rewards = await self.db.get_level_rewards(interaction.guild.id)
+        
+        if not rewards:
+            await interaction.response.send_message("No level role rewards configured.", ephemeral=True)
+            return
+        
+        description = ""
+        for reward in rewards:
+            role = interaction.guild.get_role(reward["role_id"])
+            role_mention = role.mention if role else f"<@&{reward['role_id']}> (deleted)"
+            description += f"**Level {reward['level']}**: {role_mention}\n"
+        
+        embed = discord.Embed(
+            title="Level Role Rewards",
+            description=description,
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="level-settings", description="Configure leveling system settings (Admin only)")
+    @app_commands.describe(
+        setting="The setting to configure",
+        value="The value to set (for destination: same, dm, or channel)"
+    )
+    @app_commands.choices(setting=[
+        app_commands.Choice(name="Level-up destination", value="level_up_destination"),
+        app_commands.Choice(name="Level-up message", value="level_up_message"),
+        app_commands.Choice(name="Level announcement channel", value="level_channel"),
+        app_commands.Choice(name="XP rate per message", value="xp_rate"),
+        app_commands.Choice(name="XP cooldown (seconds)", value="xp_cooldown")
+    ])
+    async def level_settings(self, interaction: discord.Interaction, setting: str, value: str):
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        
+        # Check if user has administrator permissions
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You need administrator permissions to use this command.", ephemeral=True)
+            return
+        
+        # Validate level_up_destination values
+        if setting == "level_up_destination":
+            if value.lower() not in ["same", "dm", "channel"]:
+                await interaction.response.send_message(
+                    "Level-up destination must be one of: `same`, `dm`, or `channel`\n\n"
+                    "• **same**: Send level-up messages in the same channel where the user gained XP\n"
+                    "• **dm**: Send level-up messages directly to the user via DM\n"
+                    "• **channel**: Send level-up messages to the configured level announcement channel", 
+                    ephemeral=True
+                )
+                return
+            value = value.lower()
+        
+        # Validate XP rate and cooldown
+        elif setting in ["xp_rate", "xp_cooldown"]:
+            try:
+                int_value = int(value)
+                if int_value < 1:
+                    await interaction.response.send_message(f"{setting.replace('_', ' ').title()} must be 1 or higher.", ephemeral=True)
+                    return
+            except ValueError:
+                await interaction.response.send_message(f"{setting.replace('_', ' ').title()} must be a number.", ephemeral=True)
+                return
+        
+        # Handle channel setting
+        elif setting == "level_channel":
+            if value.lower() in ["none", "null", "disable", "off"]:
+                value = "None"
+            else:
+                # Try to parse as channel mention or ID
+                try:
+                    if value.startswith("<#") and value.endswith(">"):
+                        channel_id = int(value[2:-1])
+                    else:
+                        channel_id = int(value)
+                    
+                    channel = interaction.guild.get_channel(channel_id)
+                    if not channel:
+                        await interaction.response.send_message("Channel not found. Please provide a valid channel ID or mention.", ephemeral=True)
+                        return
+                    
+                    if not hasattr(channel, 'send'):
+                        await interaction.response.send_message("Please select a text channel.", ephemeral=True)
+                        return
+                    
+                    value = str(channel_id)
+                except ValueError:
+                    await interaction.response.send_message("Invalid channel. Please provide a channel mention or ID.", ephemeral=True)
+                    return
+        
+        # Set the configuration
+        await self.config.set(interaction.guild.id, setting, value)
+        
+        # Create response based on setting
+        if setting == "level_up_destination":
+            destination_descriptions = {
+                "same": "Level-up messages will be sent in the same channel where users gain XP",
+                "dm": "Level-up messages will be sent directly to users via DM",
+                "channel": "Level-up messages will be sent to the configured level announcement channel"
+            }
+            description = destination_descriptions[value]
+        elif setting == "level_channel":
+            if value == "None":
+                description = "Level announcement channel disabled"
+            else:
+                channel = interaction.guild.get_channel(int(value))
+                description = f"Level announcements will be sent to {channel.mention if channel else 'the configured channel'}"
+        elif setting == "level_up_message":
+            description = f"Level-up message set to: {value}"
+        else:
+            description = f"{setting.replace('_', ' ').title()} set to **{value}**"
+        
+        embed = discord.Embed(
+            title="Leveling Settings Updated",
+            description=description,
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(LevelingCog(bot))
