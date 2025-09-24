@@ -17,6 +17,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "xp_rate": 10,
     "xp_cooldown": 60,
     "level_up_message": "🎉 {user} reached level {level}!",
+    "level_up_destination": "same",  # Options: "same", "dm", "channel"
     "level_channel": None,
 
     # 🛡 Moderation

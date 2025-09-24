@@ -36,6 +36,8 @@ class LevelingCog(commands.Cog):
             "SELECT xp, level FROM leveling_users WHERE guild_id = ? AND user_id = ?",
             (message.guild.id, message.author.id)
         )
+        if not row:
+            return
         xp = row["xp"]
         level = row["level"]
 
@@ -48,20 +50,46 @@ class LevelingCog(commands.Cog):
             level_up_message = await self.config.get(message.guild.id, "level_up_message")
             level_up_message = level_up_message.format(user=message.author.mention, level=new_level)
 
-            level_channel_id = await self.config.get(message.guild.id, "level_channel")
-            if level_channel_id and level_channel_id != "None":
-                channel = message.guild.get_channel(int(level_channel_id)) or message.channel
-            else:
-                channel = message.channel
-
-            await channel.send(level_up_message)
+            # Get level-up destination preference
+            destination = await self.config.get(message.guild.id, "level_up_destination", "same")
+            
+            try:
+                if destination == "dm":
+                    # Send level-up message via DM
+                    await message.author.send(level_up_message)
+                elif destination == "channel":
+                    # Send to configured level channel
+                    level_channel_id = await self.config.get(message.guild.id, "level_channel")
+                    if level_channel_id and level_channel_id != "None":
+                        channel = message.guild.get_channel(int(level_channel_id))
+                        if channel and hasattr(channel, 'send'):
+                            await channel.send(level_up_message)
+                        else:
+                            # Fallback to same channel if level channel not found
+                            await message.channel.send(level_up_message)
+                    else:
+                        # Fallback to same channel if no level channel configured
+                        await message.channel.send(level_up_message)
+                else:  # destination == "same" (default)
+                    # Send to the same channel where the message was sent
+                    await message.channel.send(level_up_message)
+            except discord.Forbidden:
+                # If DM fails or channel permissions issue, fallback to same channel
+                try:
+                    await message.channel.send(level_up_message)
+                except discord.Forbidden:
+                    logger.warning(f"Failed to send level-up message for {message.author} in guild {message.guild.id}")
 
     @app_commands.command(name="level", description="Show your current level and XP progress")
     async def level_cmd(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
-        user = user or interaction.user
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        
+        target_user = user or interaction.user
         row = await self.db.fetchone(
             "SELECT xp, level FROM leveling_users WHERE guild_id = ? AND user_id = ?",
-            (interaction.guild.id, user.id)
+            (interaction.guild.id, target_user.id)
         )
         xp = row["xp"] if row else 0
         level = row["level"] if row else 0
@@ -69,8 +97,9 @@ class LevelingCog(commands.Cog):
         progress = min(int((xp / next_level_xp) * 20), 20)
         bar = "█" * progress + "░" * (20 - progress)
 
+        display_name = target_user.display_name if hasattr(target_user, 'display_name') else str(target_user)
         embed = discord.Embed(
-            title=f"{user.display_name}'s Level",
+            title=f"{display_name}'s Level",
             description=f"Level: {level}\nXP: {xp}/{next_level_xp}\n`{bar}`",
             color=discord.Color.blurple()
         )
@@ -78,6 +107,10 @@ class LevelingCog(commands.Cog):
 
     @app_commands.command(name="leaderboard", description="Show the top users in the guild")
     async def leaderboard(self, interaction: discord.Interaction):
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        
         rows = await self.db.get_leaderboard(interaction.guild.id, limit=10)
         if not rows:
             await interaction.response.send_message("No leaderboard data available.")
@@ -88,8 +121,9 @@ class LevelingCog(commands.Cog):
             user = interaction.guild.get_member(r["user_id"])
             description += f"**{i}. {user.display_name if user else 'Unknown'}** — Level {r['level']} ({r['xp']} XP)\n"
 
+        guild_name = interaction.guild.name if interaction.guild else "Unknown Guild"
         embed = discord.Embed(
-            title=f"{interaction.guild.name} Leaderboard",
+            title=f"{guild_name} Leaderboard",
             description=description,
             color=discord.Color.gold()
         )
