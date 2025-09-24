@@ -22,20 +22,23 @@
 
 ### 📌 About onWhisper
 
-onWhisper is a feature-rich Discord bot built with **discord.py** and **SQLite**, offering:
+onWhisper is a comprehensive Discord bot built with **discord.py** and **SQLite**, offering:
 
-- Leveling system with XP gain, cooldowns, and configurable rates  
-- Role rewards for reaching levels  
-- Whispers (private, staff-viewable anonymous messages)  
-- Autoroles, reaction roles, and color roles  
-- Logging and moderation tools  
-- Fully slash command-based interface  
+- **Leveling system** with XP tracking, role rewards, and leaderboards
+- **Role management** including autoroles, reaction roles, and color roles
+- **Comprehensive moderation tools** with kick, ban, mute, warn, and purge operations
+- **Whisper system** for anonymous communication via private threads with modal forms
+- **Unified logging system** with 8 event categories and channel-first configuration
+- **Admin notifications** for whisper creation and management
+- **27 synced slash commands** with hybrid command support
+- **Type-safe configuration** with 71 configurable options per guild  
 
 ---
 
 ### 🔹 Development Goals
-- Maintain a clean, modular codebase  
-- Keep database structure consistent and scalable  
-- Ensure commands follow a standard format  
-- Host on Replit with SQLite persistence  
-- Document everything for future contributors
+- **Modular cog-based architecture** with 8 specialized modules
+- **Unified logging system** covering all major bot events
+- **Type-safe configuration management** with automatic value conversion
+- **Channel-first logging workflow** for intuitive admin setup
+- **Comprehensive database coverage** with 40+ methods across 7 tables
+- **Complete documentation** for maintainable development

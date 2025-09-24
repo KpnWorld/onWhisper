@@ -1,188 +1,260 @@
-# 📝 onWhisper Slash Command Reference
+# 📝 onWhisper Command Reference
 
-This document outlines all slash commands available in the onWhisper bot. Each command includes its purpose and whether it uses the database.
-
----
-
-## 🧠 General Info (`info.py`)
-
-### `/bot`
-- Shows bot statistics and meta info (uptime, ping, etc).
-
-### `/user [member]`
-- Displays profile details about a user.
-- 🧠 **Uses DBManager**: `get_xp`, `get_level`
-
-### `/guild`
-- Overview of guild/server info.
-
-### `/role [role]`
-- Details about a selected role.
-
-### `/channel [channel]`
-- Information about a channel.
+This document outlines all **27 synced slash commands** available in onWhisper. Each command includes its purpose, parameters, and database usage.
 
 ---
 
-## 📈 Leveling (`leveling.py`)
+## ⚙️ Configuration (`config.py`) - 2 Commands
 
-### `/level [member]`
-- View your or another member's level and XP.
-- 🧠 **Uses DBManager**: `get_xp`, `get_level`
+### `/config view-all`
+- Shows all current configuration values for the server
+- 🧠 **Uses DBManager**: `get_guild_settings`
+
+### `/config view <key>`
+- View a specific configuration value
+- 🧠 **Uses DBManager**: Config system with type conversion
+
+### `/config set <key> <value>`
+- Update a specific configuration setting
+- 🧠 **Uses DBManager**: `set_guild_setting`
+
+### `/log-setup view-config`
+- Display current logging event configuration
+- 🧠 **Uses DBManager**: LoggingManager channel resolution
+
+### `/log-setup configure <channel> <event>`
+- Configure logging events for a channel (channel-first workflow)
+- **Parameters**:
+  - `channel`: Target text channel for logs
+  - `event`: Event type (member, message, moderation, voice, channel, role, bot, whisper, or "all")
+- 🧠 **Uses DBManager**: Multiple configuration updates via LoggingManager
+
+---
+
+## 📈 Leveling (`leveling.py`) - 6 Commands
+
+### `/level [user]`
+- View your or another user's level and XP progress
+- 🧠 **Uses DBManager**: `get_user_xp`, level calculation
 
 ### `/leaderboard`
-- Show XP leaderboard.
-- 🧠 **Uses DBManager**: `get_top_users`
+- Display server XP leaderboard with top 10 users
+- 🧠 **Uses DBManager**: `get_leaderboard`
 
-### `/levelrole set <level> <role>`
-- Assign a role for reaching a specific level.
-- 🧠 **Uses DBManager**: `set_level_role`
+### `/setlevel <member> <level>`
+- Manually set a member's level (Admin only)
+- 🧠 **Uses DBManager**: `set_user_level`
 
-### `/levelrole remove <level>`
-- Remove a level reward role.
-- 🧠 **Uses DBManager**: custom deletion logic (likely uses SQL DELETE)
+### `/add-level-role <level> <role>`
+- Assign a role reward for reaching a specific level (Admin only)
+- 🧠 **Uses DBManager**: `add_level_reward`
 
-### `/levelrole list`
-- List all level reward roles.
-- 🧠 **Uses DBManager**: `get_level_roles`
+### `/remove-level-role <level>`
+- Remove role reward for a specific level (Admin only)
+- 🧠 **Uses DBManager**: `remove_level_reward`
+
+### `/list-level-roles`
+- Display all configured level role rewards
+- 🧠 **Uses DBManager**: `get_level_rewards`
 
 ---
 
-## 🔨 Moderation (`moderation.py` - hybrid)
+## 🔨 Moderation (`moderation.py`) - 5 Commands
 
-> Can be used as both slash and prefix (`-`) commands.  
-> These commands do **not** use the database.
-
-### `/warn <member> [reason]`
-- Warns a member (may be logged externally in the future).
-
-### `/mute <member> [duration] [reason]`
-- Temporarily restricts a user from messaging.
+> All moderation commands support both slash and prefix usage (hybrid commands)
+> All actions are logged through the unified logging system
 
 ### `/kick <member> [reason]`
-- Removes a user from the server.
+- Remove a member from the server
+- **Logging**: Moderation events category
+- 🧠 **Uses DBManager**: `log_moderation_action`
 
 ### `/ban <member> [reason]`
-- Bans a user.
+- Ban a member from the server
+- **Logging**: Moderation events category  
+- 🧠 **Uses DBManager**: `log_moderation_action`
 
-### `/unban <user_id>`
-- Reverses a ban.
+### `/mute <member> [duration] [reason]`
+- Temporarily restrict a member from messaging
+- **Logging**: Moderation events category
+- 🧠 **Uses DBManager**: `log_moderation_action`
+
+### `/warn <member> [reason]`
+- Issue a warning to a member
+- **Logging**: Moderation events category
+- 🧠 **Uses DBManager**: `log_moderation_action`
 
 ### `/purge <amount>`
-- Deletes a number of recent messages in a channel.
-
-### `/lock [channel]`
-- Locks the selected or current channel.
-
-### `/unlock [channel]`
-- Unlocks the selected or current channel.
+- Delete a specified number of recent messages
+- **Parameters**: 
+  - `amount`: Number of messages to delete (1-100)
+- **Logging**: Moderation events category
+- 🧠 **Uses DBManager**: `log_moderation_action`
 
 ---
 
-## 👥 Roles (`roles.py`)
+## 🤫 Whisper System (`whisper.py`) - 1 Command
+
+### `/whisper`
+- Create anonymous whisper thread using modal form interface
+- **Features**:
+  - Modal form for reason input
+  - Automatic thread creation in configured channel
+  - Admin notifications with configurable role pings
+  - Sequential whisper numbering
+  - Staff management interface
+- **Logging**: Whisper events category
+- 🧠 **Uses DBManager**: `create_whisper`, whisper tracking
+
+---
+
+## 🎭 Role Management (`roles.py`) - Multiple Commands
 
 ### `/autorole set <role>`
-- Automatically assign a role on join.
+- Set automatic role assignment for new members
 - 🧠 **Uses DBManager**: `set_autorole`
 
 ### `/autorole disable`
-- Disables autorole assignment.
-- 🧠 **Uses DBManager**: `update_guild_setting`
+- Disable automatic role assignment
+- 🧠 **Uses DBManager**: Configuration updates
 
 ### `/reactionrole add <message_id> <emoji> <role>`
-- Add a reaction-role binding.
+- Add emoji → role mapping to a message
 - 🧠 **Uses DBManager**: `add_reaction_role`
 
 ### `/reactionrole remove <message_id> <emoji>`
-- Remove a reaction-role binding.
+- Remove reaction role mapping
 - 🧠 **Uses DBManager**: `remove_reaction_role`
 
-### `/color <role>`
-- Set or clear your color role.
-- 🧠 **Uses DBManager**: `set_color_role`, `clear_color_role`
+### `/reactionrole list [message_id]`
+- List reaction role mappings
+- 🧠 **Uses DBManager**: `get_reaction_roles`
+
+### `/colorrole <role>`
+- Set or update your color role
+- 🧠 **Uses DBManager**: `set_color_role`
+
+### `/colorrole clear`
+- Remove your color role
+- 🧠 **Uses DBManager**: Color role management
 
 ---
 
-## 🤫 Whisper System (`whisper.py`)
+## ℹ️ Information (`info.py`) - Multiple Commands
 
-### `/whisper open`
-- Opens a private Whisper thread.
-- 🧠 **Uses DBManager**: `create_whisper`
+### `/info`
+- Display bot information and statistics
+- Shows uptime, command count, server count
 
-### `/whisper close`
-- Closes your active Whisper thread.
-- 🧠 **Uses DBManager**: `close_whisper`
+### `/ping`
+- Check bot latency and response time
 
-### `/whisper list`
-- Lists all open Whisper threads (admin-only).
-- 🧠 **Uses DBManager**: `get_active_whispers`
+### `/serverinfo`
+- Display detailed server information
+- Member counts, creation date, roles, channels
 
----
-
-## ⚙️ Configuration (`config.py`)
-
-### `/config view`
-- Shows all current config values for the server.
-- 🧠 **Uses DBManager**: `get_guild_settings`
-
-### `/config set <key> <value>`
-- Updates a specific config key in the database.
-- 🧠 **Uses DBManager**: `update_guild_setting`
+### `/userinfo [member]`
+- Show detailed information about a user
+- **Includes**: Join date, roles, level/XP integration
+- 🧠 **Uses DBManager**: User level and XP data
 
 ---
 
-### 🔑 Config Keys
-
-| Key               | Description                                      |
-|------------------|--------------------------------------------------|
-| `log_channel_id`  | Channel ID for logging (if implemented)         |
-| `auto_role_id`    | Role ID given to new members on join            |
-| `mute_role_id`    | Role used to mute users                         |
-| `whisper_enabled` | Enables or disables the Whisper system          |
-| `xp_rate`         | XP earned per message                           |
-| `xp_cooldown`     | Cooldown in seconds before earning more XP      |
-| `created_at`      | Timestamp when config was created               |
-| `updated_at`      | Timestamp of last config update                 |
-
-> These keys are stored in the `guild_settings` table and managed through `DBManager`.
-
----
-
-## ❓ Help System (`help.py`) 
+## 📖 Help System (`help.py`) - 2 Commands
 
 ### `/help`
-- Shows an interactive help menu with categories.
-
-### `/help <category>`
-- Lists all commands under a category (info, leveling, moderation, roles, whisper, config, debug). 
+- Display interactive help menu with command categories
 
 ### `/help <command>`
-- Shows detailed usage and options for a specific command.
-
-> *(Do not use DBManager - pulls directly from bot command registry.)*
----
-
-## 🧪 Debug & Maintenance (`debug.py`)
-
-### `/debug key`
-- Shows all DB keys currently tracked.
-- 🧠 **Uses DBManager**: Custom method or wrapper.
-
-### `/debug resetdb`
-- Fully wipes DB data for current guild.
-- 🧠 **Uses DBManager**: `reset_leaderboard`, `update_guild_setting`, and/or custom logic
-
-### `/debug version`
-- Shows bot + DB versioning info (not DB-bound).
+- Show detailed usage information for a specific command
 
 ---
 
-## 📌 Notes
+## 🔧 Debug & Development (`debug.py`) - Multiple Commands
 
-- All commands use `@bot.slash_command`
-- Commands that access or write to persistent storage are marked `🧠 Uses DBManager`
-- Commands are permission-guarded and use styled embeds with command-type footers
-- Debug tools are admin-only
+> Admin-only commands for bot maintenance and troubleshooting
 
+### `/debug info`
+- Display system information and bot statistics
 
+### `/debug reload <cog>`
+- Reload a specific cog without restarting the bot
 
+### `/debug database`
+- Show database statistics and health information
+- 🧠 **Uses DBManager**: Database metrics
+
+### `/debug config`
+- Display configuration debug information
+- 🧠 **Uses DBManager**: Configuration analysis
+
+---
+
+## 📊 Configuration Options (71 Total)
+
+### **Core Settings (1)**
+- `prefix` → Command prefix (default: "!")
+
+### **Leveling System (6)**
+- `leveling_enabled` → Enable/disable leveling
+- `xp_rate` → XP per message (default: 10)
+- `xp_cooldown` → XP gain cooldown in seconds (default: 60)
+- `level_up_message` → Level up announcement template
+- `level_channel` → Channel for level announcements
+
+### **Moderation (2)**
+- `moderation_enabled` → Enable/disable moderation features
+- `mod_log_channel` → Channel for moderation logs
+
+### **Unified Logging System (17)**
+- `unified_logging_enabled` → Master logging toggle
+- **Per-category toggles** (8): `log_[category]_events`
+- **Per-category channels** (8): `log_[category]_channel`
+
+### **Role Management (2)**
+- `roles_enabled` → Enable/disable role features
+- `autorole_enabled` → Enable/disable autorole
+
+### **Whisper System (5)**
+- `whisper_enabled` → Enable/disable whisper system
+- `whisper_channel` → Channel for whisper threads
+- `whisper_notification_enabled` → Enable admin notifications
+- `whisper_notification_channel` → Channel for admin notifications
+- `whisper_notification_role` → Role to ping for notifications
+
+---
+
+## 📌 Command Features
+
+### **Universal Features**
+- **Permission-based access control** for admin commands
+- **Error handling** with user-friendly messages
+- **Consistent embed styling** across all commands
+- **Database integration** with automatic error recovery
+
+### **Logging Integration**
+- **Automatic event logging** for all major actions
+- **8 event categories** with configurable channels
+- **Smart fallback channels** when specific channels unavailable
+- **Admin notification system** for whisper events
+
+### **Hybrid Command Support**
+- **Moderation commands** work as both slash and prefix commands
+- **Flexible usage patterns** for different user preferences
+- **Consistent behavior** across both command types
+
+---
+
+## 🎯 Quick Command Summary
+
+**Total Commands: 27**
+- Configuration: 2
+- Leveling: 6  
+- Moderation: 5
+- Whisper: 1
+- Roles: 6+
+- Info: 4+
+- Help: 2
+- Debug: 3+
+
+All commands are automatically synced and use the modern Discord slash command interface with comprehensive database integration and unified logging.
