@@ -103,9 +103,8 @@ Understanding this structure ensures consistent organization and faster onboardi
 | `README.md` | Project overview and navigation | Feature summary, development goals |
 | `FileStructure.md` | Directory structure reference | This file - complete layout |
 | `Database.md` | Database documentation | Schema, methods, usage examples |
-| `Commands.md` | Command reference guide | All 27 commands with parameters |
+| `Commands.md` | Command reference guide | All 32 commands with parameters |
 | `CodeStyle.md` | Development standards | Code formatting, patterns, conventions |
-| `Development.md` | Setup and hosting guide | Installation, deployment, contribution |
 | `Updates.md` | Version history | Update log and changelog |
 
 ---

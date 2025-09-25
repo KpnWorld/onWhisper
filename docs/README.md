@@ -16,7 +16,6 @@
 2. [Database Structure](./Database.md)  
 3. [Command System](./Commands.md)  
 4. [Code Style & Structure Guide](./CodeStyle.md)  
-5. [Development & Hosting](./Development.md)  
 
 ---
 
