@@ -30,8 +30,9 @@ onWhisper is a comprehensive Discord bot built with **discord.py** and **SQLite*
 - **Whisper system** for anonymous communication via private threads with modal forms
 - **Unified logging system** with 8 event categories and channel-first configuration
 - **Admin notifications** for whisper creation and management
-- **27 synced slash commands** with hybrid command support
-- **Type-safe configuration** with 71 configurable options per guild  
+- **32 synced slash commands** with hybrid command support
+- **Flexible level-up messaging** with same channel, DM, or dedicated channel options
+- **Type-safe configuration** with 72 configurable options per guild  
 
 ---
 

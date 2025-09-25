@@ -61,12 +61,12 @@ Understanding this structure ensures consistent organization and faster onboardi
 | debug.py      | Development utilities and debugging tools                   | Multiple |
 | help.py       | Dynamic help system with categorized documentation         | 2        |
 | info.py       | Bot information, server stats, and utility commands        | Multiple |
-| leveling.py   | XP tracking, leveling system, role rewards, leaderboards   | 6        |
+| leveling.py   | XP tracking, leveling system, role rewards, leaderboards   | 11       |
 | moderation.py | Comprehensive moderation tools with unified logging        | 5        |
 | roles.py      | Autoroles, reaction roles, and color role management       | Multiple |
 | whisper.py    | Anonymous whisper system with modal forms & notifications  | 1        |
 
-**Total: 27 synced application commands**
+**Total: 32 synced application commands**
 
 ---
 

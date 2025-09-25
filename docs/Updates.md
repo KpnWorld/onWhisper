@@ -51,12 +51,31 @@
 
 ---
 
-## Current Status (Update 149c)
+## Update 149d - Flexible Level-Up Messaging System (September 24, 2025)
 
-- **27 synced application commands** across all categories
+### Major Features
+- **Implemented flexible level-up message destinations** with three options: same channel, DM, or dedicated channel
+- **Added comprehensive level-settings command** for easy configuration of all leveling system options
+- **Enhanced leveling management** with 5 new admin commands for level and role management
+- **Smart fallback system** ensures level-up messages are never lost (DM fallback to channel)
+- **Added new configuration option** `level_up_destination` with validation and type safety
+
+### Technical Improvements
+- **3 Level-Up Modes**: Same channel (default), Direct message, Configured channel
+- **5 New Commands**: `/level-settings`, `/setlevel`, `/add-level-role`, `/remove-level-role`, `/list-level-roles`
+- **Robust Error Handling**: Automatic fallbacks for failed DMs and invalid channels
+- **Admin Permission Controls**: All management commands require administrator permissions
+- **Type-Safe Validation**: Input validation for all configuration changes
+
+---
+
+## Current Status (Update 149d)
+
+- **32 synced application commands** across all categories (up from 27)
 - **8 active cogs** with specialized functionality
 - **7 database tables** with 40+ methods
-- **71 configuration options** per guild
+- **72 configuration options** per guild (up from 71)
+- **Flexible level-up messaging** with three destination modes
 - **Unified logging system** with comprehensive event coverage
 - **Type-safe configuration management** with automatic value conversion
 - **Channel-first logging workflow** for intuitive administration

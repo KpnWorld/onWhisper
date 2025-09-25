@@ -1,6 +1,6 @@
 # 📝 onWhisper Command Reference
 
-This document outlines all **27 synced slash commands** available in onWhisper. Each command includes its purpose, parameters, and database usage.
+This document outlines all **32 synced slash commands** available in onWhisper. Each command includes its purpose, parameters, and database usage.
 
 ---
 
@@ -31,7 +31,7 @@ This document outlines all **27 synced slash commands** available in onWhisper. 
 
 ---
 
-## 📈 Leveling (`leveling.py`) - 6 Commands
+## 📈 Leveling (`leveling.py`) - 11 Commands
 
 ### `/level [user]`
 - View your or another user's level and XP progress
@@ -56,6 +56,17 @@ This document outlines all **27 synced slash commands** available in onWhisper. 
 ### `/list-level-roles`
 - Display all configured level role rewards
 - 🧠 **Uses DBManager**: `get_level_rewards`
+
+### `/level-settings <setting> <value>`
+- Configure leveling system settings (Admin only)
+- **Parameters**:
+  - `setting`: Choose from level-up destination, message, channel, XP rate, or XP cooldown
+  - `value`: The value to set (destination: same/dm/channel, others: appropriate values)
+- **Level-up destination options**:
+  - `same`: Send level-up messages in the same channel where XP was gained
+  - `dm`: Send level-up messages directly to users via DM
+  - `channel`: Send level-up messages to the configured level announcement channel
+- 🧠 **Uses DBManager**: `set_guild_setting` via ConfigManager
 
 ---
 
@@ -190,16 +201,17 @@ This document outlines all **27 synced slash commands** available in onWhisper. 
 
 ---
 
-## 📊 Configuration Options (71 Total)
+## 📊 Configuration Options (72 Total)
 
 ### **Core Settings (1)**
 - `prefix` → Command prefix (default: "!")
 
-### **Leveling System (6)**
+### **Leveling System (7)**
 - `leveling_enabled` → Enable/disable leveling
 - `xp_rate` → XP per message (default: 10)
 - `xp_cooldown` → XP gain cooldown in seconds (default: 60)
 - `level_up_message` → Level up announcement template
+- `level_up_destination` → Where to send level-up messages (same/dm/channel)
 - `level_channel` → Channel for level announcements
 
 ### **Moderation (2)**
@@ -247,9 +259,9 @@ This document outlines all **27 synced slash commands** available in onWhisper. 
 
 ## 🎯 Quick Command Summary
 
-**Total Commands: 27**
+**Total Commands: 32**
 - Configuration: 2
-- Leveling: 6  
+- Leveling: 11
 - Moderation: 5
 - Whisper: 1
 - Roles: 6+
