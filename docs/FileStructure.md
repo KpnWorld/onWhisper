@@ -22,12 +22,23 @@ onWhisper/
 │ └── whisper.py         # 🤫 Whisper System (thread-based tickets)
 │
 ├── utils/               # 🧠 Core logic managers
-│ ├── db_manager.py      # 🗄️ DB layer (aiosqlite)
+│ ├── db_manager.py      # 🗄️ Database layer using SQLAlchemy ORM (async-ready)
+│ ├── models.py          # 🧩 ORM models for all tables (used by db_manager)
 │ └── config.py          # ⚙️ ConfigManager for guild settings
 │
 ├── data/                # 🗂 Persistent local data
-│ └── onwhisper.db       # 🗃 SQLite database file
+│ └── onwhisper.db       # 🗃 SQLAlchemy database file
 │
+├── webapp/              # 🌐 Web Control Center for monitoring & managing bot
+│ ├── static/            # 📁 Main backend files for html templates (`CSS`&`JS`)
+│ │    ├── css/
+│ │    │   └── style.css
+│ │    └── js/
+│ │        └── script.js
+│ ├── templates/         # 📁 HTML templates for dashboard
+│ │         
+│ ├── app.py             # 🗝️ MAIN Flask app config
+│ └── routes.py          # 📟 API endpoints for bot stats, XP, whispers, guild settings
 ├── docs/
 │ ├── README.md          # 📝 Full slash command reference with DB usage
 │ ├── FileStructure.md   # 🗂 File Structure reference
@@ -62,11 +73,10 @@ onWhisper/
 > Located in: `utils/`  
 > Contains helper modules used across cogs.
 
-| File | Purpose |
-|------|---------|
-| `db_manager.py` | **AIOSQLite** database manager with async CRUD methods |
-| `config.py` | Global constants, embed colors, and helper functions |
-
+| File             | Purpose |
+|------------------|---------|
+| db_manager.py    | SQLAlchemy DB manager with async ORM CRUD methods |
+| config.py        | Global constants, embed colors, and helper functions |
 ---
 
 ## 💾 Data (Persistent Storage)
@@ -75,7 +85,21 @@ onWhisper/
 
 | File | Purpose |
 |------|---------|
-| `onwhisper.db` | SQLite database file |
+| onwhisper.db   | Default SQLite database file (can be replaced by PostgreSQL, MySQL, etc.) |
+
+---
+
+## 🌐 Web App (Control Center)
+
+Located in: `webapp/`  
+Provides a web-based interface to monitor and manage the bot.
+
+| File/Folder     | Purpose |
+|-----------------|---------|
+| app.py          | Main webapp config |
+| routes.py       | API endpoints for bot stats, XP, whispers, and guild settings (Fetched from `Utils/`|
+| static/         | Main backend files for html templates (`CSS`&`JS`)|
+| templates/      | HTML templates for dashboard |
 
 ---
 
@@ -98,8 +122,9 @@ onWhisper/
 
 - **Separation of Concerns:** Each cog handles a single category of functionality.  
 - **Modular Design:** Utilities are reusable across multiple cogs.  
-- **Scalable Layout:** New features get their own cog and database methods.  
-- **Clear Documentation:** All major files and folders are listed in `docs/`.
-
+- **Scalable Layout:** New features get their own cog, webapp module, and database methods.  
+- **Cross-Hosting Ready:** The project is structured to support any Python environment.  
+- **Clear Documentation:** All major files and folders are listed in `docs/` for contributor reference.
+- **Config Migrations:** Database migrations are handled via SQLAlchemy’s Alembic integration for schema evolution.
 ---
 
